@@ -294,8 +294,8 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 GAME_SERVER_PORT=8847 \
 
 ### 阶段提交
 
-- 提交信息：`feat(phase-1): deliver browser two-player realtime slice`
-- 提交哈希：提交后由 `git log --oneline` 查看。
+- 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
+  `feat(phase-1): deliver browser two-player realtime slice`。
 
 ### 下一步计划
 

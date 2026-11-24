@@ -341,5 +341,6 @@ Node 侧 Playwright IPC 不计入预算。
 
 ## 12. Git 提交
 
-- 阶段 1 提交：`feat(phase-1): deliver browser two-player realtime slice`
-- 提交哈希：提交后由 `git log --oneline` 查看。
+- 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
+  `feat(phase-1): deliver browser two-player realtime slice`。
+- 本文档的补记提交可通过 `git log --oneline` 查看。

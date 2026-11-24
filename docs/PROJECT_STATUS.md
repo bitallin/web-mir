@@ -169,8 +169,8 @@
 ## 10. 最近一次 Git 提交
 
 - 阶段 0 主提交：`69df6c387eff5ae143f84f79e6c7a4cf96e57721`
-- 阶段 1 提交：见 `git log --oneline`（提交信息
-  `feat(phase-1): deliver browser two-player realtime slice`）。
+- 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
+- 主题：`feat(phase-1): deliver browser two-player realtime slice`
 
 ## 11. 当前环境事实
 
