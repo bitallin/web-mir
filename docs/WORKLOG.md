@@ -449,3 +449,32 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=88
 1. 等待 Tech Lead 审阅阶段 2 报告与证据。
 2. 批准后执行阶段 3：Tiled 地图、map-runtime、MapTemplate/Instance、主城 ↔ 野外
    传送、AOI、节流 checkpoint、同图聊天与 30 人 tick 指标。
+
+---
+
+## 2026-11-24 · 阶段 2 验收与交接
+
+### 目标
+
+记录阶段 2 的用户验收结果、环境清理与下一次会话的启动约定。
+
+### 验收结果
+
+- 用户在 `http://<LAN-IP>:8584/` 完成注册、创建角色并进入世界，确认测试通过。
+- 期间发现并定位 8588 遗留演示栈问题：game-web 88 已热更新到阶段 2，但
+  game-server 89 仍是阶段 1 进程，日志为 `ServerError 525: Invalid join options`。
+  该演示栈已停止，阶段 2 统一使用 84–87。
+- 用户决定保留 PostgreSQL 容器，下一次会话沿用现有数据。
+
+### 环境清理
+
+- 停止 84–87 阶段 2 开发栈、88–89 阶段 1 演示栈、8844–8847 后台 E2E 栈。
+- 端口 84–89、8844–8847 均无监听；无残留 vite/tsx/esbuild/pnpm 进程。
+- 未修改源码；文档更新后提交。
+
+### 下一步计划
+
+下一次会话直接开始阶段 3：先执行 `pnpm db:migrate`（如有新迁移）并按需
+`pnpm db:seed`，启动 84–87 开发栈，把 `http://<LAN-IP>:8584/` 交给用户测试；
+然后按阶段 2 报告第 10 节完成 Tiled 地图、map-runtime、地图实例/传送、AOI、
+节流 checkpoint 与同图聊天。
