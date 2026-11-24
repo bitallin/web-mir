@@ -211,7 +211,7 @@ Node 侧 Playwright IPC 不计入预算。
 
 ![bob view](phase-01/two-players-bob.png)
 
-刷新重连后：
+刷新重连后（并在重连后再次移动）：
 
 ![after refresh](phase-01/after-refresh.png)
 
@@ -334,6 +334,13 @@ Node 侧 Playwright IPC 不计入预算。
 16. E2E：注册 → 登录 → 创建角色 → 进图 → 两个 Context 可见。
 17. 更新 ADR-015 为 Superseded（或记录退出条件完成）。
 
+### 自查修复
+
+阶段报告初稿完成后的自查发现并修复了一个重连缺陷：刷新后新客户端从
+`clientSequence=0` 开始，而 Room 保留刷新前序号，首条移动会被 `STALE_SEQUENCE`
+拒绝。修复为 `onReconnect` 重置会话序号与幂等窗口；集成测试和 E2E 刷新场景均
+增加“重连后再次移动”断言。修复提交：`954155f`。
+
 ## 11. 审阅门禁
 
 阶段 1 已完成并在此停止。未收到 Tech Lead 明确批准前，不开始阶段 2，不扩大阶段 1
@@ -343,4 +350,6 @@ Node 侧 Playwright IPC 不计入预算。
 
 - 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
   `feat(phase-1): deliver browser two-player realtime slice`。
+- 阶段 1 修复提交：`954155f`
+  `fix(phase-1): reset the command sequence when a client reconnects`。
 - 本文档的补记提交可通过 `git log --oneline` 查看。

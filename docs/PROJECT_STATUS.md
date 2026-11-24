@@ -157,20 +157,22 @@
 阶段 1 关键证据：
 
 - 双浏览器移动可见延迟（浏览器内计时，5 次单独运行 + 完整套件）：136ms、145ms、
-  152ms、179ms、180ms、204ms，全部 < 250ms。
+  152ms、174ms、179ms、180ms、204ms，全部 < 250ms。
 - `world_map` 集成测试连续 3 次 8/8 通过：双客户端互相可见、服务端移动、伪造
   payload/错误协议/墙体/封闭房间拒绝、幂等、限频、重连、宽限期移除、指标。
 - 实时指标（2 名玩家，52 个 tick 样本）：tick p50 0.02ms、p95 0.03ms、
   p99 0.07ms、max 0.07ms；接受命令 2，拒绝 0。
 - E2E 证据：`docs/phase-reports/phase-01/two-players-{alice,bob}.png`、
-  `after-refresh.png`、`websocket.log`。
+  `after-refresh.png`、`websocket.log`；刷新重连后再次移动仍被服务端接受。
 - 生产服务器测试：开发身份 join 返回 525，`diagnostics` Room 未注册（520）。
 
 ## 10. 最近一次 Git 提交
 
 - 阶段 0 主提交：`69df6c387eff5ae143f84f79e6c7a4cf96e57721`
 - 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
-- 主题：`feat(phase-1): deliver browser two-player realtime slice`
+  主题：`feat(phase-1): deliver browser two-player realtime slice`
+- 阶段 1 修复提交：`954155f`（刷新重连后序号重置）
+  主题：`fix(phase-1): reset the command sequence when a client reconnects`
 
 ## 11. 当前环境事实
 

@@ -281,6 +281,11 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 GAME_SERVER_PORT=8847 \
    改为 `contracts/world-state` 子路径后回到约 188KB。
 10. **旧开发栈占用 84–87**：无法在本会话重启用户进程；新栈运行在 8844–8847
     完成验证，默认端口配置未改。
+11. **刷新后首条指令被判过期（自查发现）**：页面刷新会新建客户端并从
+    `clientSequence=0` 开始，但 Room 保留了刷新前的序号，首条 `move.to` 被
+    `STALE_SEQUENCE` 拒绝。修复为在 `onReconnect` 重置该会话的序号与幂等窗口；
+    集成测试改为“移动 → 断线 → 重连 → 序号 0 再次移动”，E2E 刷新测试增加刷新后
+    移动断言。修复提交 `954155f`。
 
 ### 尚未解决的问题
 
@@ -296,6 +301,7 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 GAME_SERVER_PORT=8847 \
 
 - 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
   `feat(phase-1): deliver browser two-player realtime slice`。
+- 阶段 1 修复提交：`954155f` `fix(phase-1): reset the command sequence when a client reconnects`。
 
 ### 下一步计划
 
