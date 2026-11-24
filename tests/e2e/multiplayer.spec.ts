@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -23,6 +24,17 @@ const websocketLog: string[] = [];
 
 function uniqueName(prefix: string): string {
   return `${prefix}${String(Math.floor(Math.random() * 9_000) + 1_000)}`;
+}
+
+function lanAddress(): string | null {
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family === 'IPv4' && !entry.internal) {
+        return entry.address;
+      }
+    }
+  }
+  return null;
 }
 
 async function openWorld(
@@ -311,4 +323,40 @@ test('restarting the Phaser scene does not duplicate input listeners', async ({ 
   await expect(
     bob.page.locator(`[data-testid="player-row"][data-name="${aliceName}"]`),
   ).toHaveAttribute('data-tile-x', String(target.x), { timeout: 5_000 });
+});
+
+test('works on a plain-HTTP LAN origin without secure-context crypto', async ({ browser }) => {
+  const address = lanAddress();
+  if (address === null) {
+    test.skip(true, 'No non-internal IPv4 address available');
+    return;
+  }
+
+  // Regression: crypto.randomUUID is undefined outside secure contexts. The
+  // client must still generate its identity and command ids over plain HTTP.
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const port = process.env.GAME_WEB_PORT ?? '5173';
+  const params = new URLSearchParams({
+    name: uniqueName('Lan'),
+    key: `e2e-lan-${crypto.randomUUID()}`,
+    fresh: '1',
+  });
+
+  try {
+    await page.goto(`http://${address}:${port}/?${params.toString()}`);
+    expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
+    await expect(page.getByTestId('connection-status')).toHaveAttribute(
+      'data-status',
+      'connected',
+      { timeout: 20_000 },
+    );
+    await expect(page.locator('[data-testid="player-row"][data-self="true"]')).toHaveCount(1);
+
+    const point = await screenPointForTile(page, 18, 10);
+    await page.mouse.click(point.x, point.y);
+    await expect(page.getByTestId('command-count')).toHaveText('指令 1', { timeout: 5_000 });
+  } finally {
+    await context.close();
+  }
 });

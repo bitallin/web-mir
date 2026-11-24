@@ -1,5 +1,7 @@
 import { worldJoinOptionsSchema } from '@web-legend/contracts';
 
+import { createUuid } from './uuid';
+
 const PLAYER_KEY_STORAGE = 'web-legend.dev.player-key';
 const DISPLAY_NAME_STORAGE = 'web-legend.dev.display-name';
 const RECONNECT_TOKEN_STORAGE = 'web-legend.reconnect-token';
@@ -80,7 +82,7 @@ export function loadDevIdentity(search = window.location.search): DevIdentity {
   const queryKey = allowOverrides ? validKey(params.get('key')?.trim()) : null;
 
   const storedKey = validKey(readStorage(PLAYER_KEY_STORAGE));
-  const playerKey = queryKey ?? storedKey ?? crypto.randomUUID();
+  const playerKey = queryKey ?? storedKey ?? createUuid();
   writeStorage(PLAYER_KEY_STORAGE, playerKey);
 
   const storedName = validName(readStorage(DISPLAY_NAME_STORAGE));

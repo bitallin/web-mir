@@ -21,9 +21,12 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${gameWebPort}`,
     trace: 'on-first-retry',
-    ...(chromiumExecutable === undefined
-      ? {}
-      : { launchOptions: { executablePath: chromiumExecutable } }),
+    launchOptions: {
+      // This host exports HTTP(S)_PROXY; browser tests must reach the local
+      // dev servers and LAN origins directly.
+      args: ['--no-proxy-server'],
+      ...(chromiumExecutable === undefined ? {} : { executablePath: chromiumExecutable }),
+    },
   },
   projects: [
     {

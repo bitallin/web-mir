@@ -12,6 +12,7 @@ import {
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
 
+import { createUuid } from '../lib/uuid';
 import {
   clearReconnectToken,
   readReconnectToken,
@@ -149,7 +150,7 @@ export class WorldClient {
       return false;
     }
 
-    const commandId = crypto.randomUUID();
+    const commandId = createUuid();
     room.send(CLIENT_MESSAGES.moveTo, {
       protocolVersion: PROTOCOL_VERSION,
       commandId,
