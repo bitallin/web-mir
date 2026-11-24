@@ -1,18 +1,20 @@
-import { mapManifestSchema, TILE_UNITS } from '@web-legend/contracts';
+import { TILE_UNITS } from '@web-legend/contracts';
 import { describe, expect, it } from 'vitest';
 
-import rawTestMap from '../../../content/maps/phase1_test_map.json';
-import { gridFromManifest, type MovementGrid } from './grid';
+import type { MovementGrid } from './grid';
 import { findPath } from './pathfinding';
 import { tileCenter, tileOfUnits, WorldSimulation } from './simulation';
 
-function openGrid(): MovementGrid {
-  const rows = ['##########', '#........#', '#........#', '#........#', '##########'];
+function gridFromRows(rows: readonly string[]): MovementGrid {
   return {
-    width: 10,
-    height: 5,
+    width: rows[0]?.length ?? 0,
+    height: rows.length,
     isWalkable: (x, y) => rows[y]?.[x] === '.',
   };
+}
+
+function openGrid(): MovementGrid {
+  return gridFromRows(['##########', '#........#', '#........#', '#........#', '##########']);
 }
 
 function advance(simulation: WorldSimulation, steps: number, stepMs = 50): void {
@@ -123,12 +125,17 @@ describe('WorldSimulation', () => {
   });
 
   it('never enters a blocked tile while following a detour', () => {
-    const map = mapManifestSchema.parse(rawTestMap);
-    const grid = gridFromManifest(map);
+    const grid = gridFromRows([
+      '###############',
+      '#.............#',
+      '#.#####.#####.#',
+      '#.............#',
+      '###############',
+    ]);
     const simulation = new WorldSimulation(grid);
-    simulation.addPlayer({ id: 'p1', displayName: 'Alice', spawn: { x: 2, y: 10 }, colorIndex: 0 });
+    simulation.addPlayer({ id: 'p1', displayName: 'Alice', spawn: { x: 2, y: 1 }, colorIndex: 0 });
 
-    const path = findPath(grid, { x: 2, y: 10 }, { x: 14, y: 10 });
+    const path = findPath(grid, { x: 2, y: 1 }, { x: 13, y: 1 });
     expect(path).not.toBeNull();
     simulation.setPath('p1', path ?? []);
 
@@ -142,7 +149,7 @@ describe('WorldSimulation', () => {
       expect(grid.isWalkable(tile.x, tile.y)).toBe(true);
     }
 
-    expect(tileOfUnits(simulation.getPlayer('p1') ?? { x: 0, y: 0 })).toEqual({ x: 14, y: 10 });
+    expect(tileOfUnits(simulation.getPlayer('p1') ?? { x: 0, y: 0 })).toEqual({ x: 13, y: 1 });
   });
 
   it('prepends the current tile center when retargeted mid-tile and stays axis-aligned', () => {
@@ -226,11 +233,19 @@ describe('WorldSimulation', () => {
   });
 });
 
-describe('phase 1 test map reachability', () => {
-  it('exposes the sealed chamber as unreachable from the spawn area', () => {
-    const grid = gridFromManifest(mapManifestSchema.parse(rawTestMap));
-    expect(findPath(grid, { x: 15, y: 10 }, { x: 23, y: 5 })).toBeNull();
-    expect(findPath(grid, { x: 15, y: 10 }, { x: 2, y: 16 })).not.toBeNull();
+describe('sealed map areas', () => {
+  it('keeps an enclosed chamber unreachable from the open area', () => {
+    const grid = gridFromRows([
+      '#########',
+      '#.......#',
+      '#.#####.#',
+      '#.#...#.#',
+      '#.#####.#',
+      '#.......#',
+      '#########',
+    ]);
+    expect(findPath(grid, { x: 2, y: 1 }, { x: 4, y: 3 })).toBeNull();
+    expect(findPath(grid, { x: 2, y: 1 }, { x: 6, y: 5 })).not.toBeNull();
     expect(tileCenter({ x: 2, y: 16 })).toEqual({ x: 2_500, y: 16_500 });
   });
 });

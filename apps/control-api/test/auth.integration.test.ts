@@ -306,7 +306,7 @@ describe.runIf(databaseUrl !== undefined)('control API accounts, characters and 
     expect(created.character.classId).toBe('warrior');
     expect(created.character.realmCode).toBe('classic-01');
     expect(created.character.hp).toBe(120);
-    expect(created.character.mapId).toBe('phase1_test_map');
+    expect(created.character.mapId).toBe('starter_town');
 
     const duplicate = await app.inject({
       method: 'POST',

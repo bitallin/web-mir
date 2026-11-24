@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { createOpaqueToken, hashToken } from '@web-legend/auth';
 import { GAME_TICKET_TTL_SECONDS, TILE_UNITS } from '@web-legend/contracts';
-import { PHASE1_TEST_MAP } from '@web-legend/contracts/phase1-map';
+import { STARTER_TOWN_MAP, findMapManifest } from '@web-legend/contracts/maps';
 import {
   insertAccount,
   insertCharacter,
@@ -19,6 +19,13 @@ export type TestActor = {
   character: Character;
   ticket: string;
 };
+
+export function tileUnits(tile: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: tile.x * TILE_UNITS + TILE_UNITS / 2,
+    y: tile.y * TILE_UNITS + TILE_UNITS / 2,
+  };
+}
 
 export async function ensureTestRealm(db: Database): Promise<void> {
   await db
@@ -41,12 +48,16 @@ async function firstRealmId(db: Database): Promise<string> {
   return realm.id;
 }
 
-function spawnPosition(): { x: number; y: number } {
-  const spawn = PHASE1_TEST_MAP.spawnPoints[0];
-  if (spawn === undefined) {
-    throw new Error('technical map has no spawn point');
+function spawnPosition(mapId: string): { x: number; y: number } {
+  const map = findMapManifest(mapId);
+  if (map === undefined) {
+    throw new Error(`test actor references unknown map "${mapId}"`);
   }
-  return { x: spawn.x * TILE_UNITS + TILE_UNITS / 2, y: spawn.y * TILE_UNITS + TILE_UNITS / 2 };
+  const spawn = map.spawnPoints[0];
+  if (spawn === undefined) {
+    throw new Error(`map "${mapId}" has no spawn point`);
+  }
+  return tileUnits(spawn);
 }
 
 export async function issueTicket(
@@ -68,6 +79,7 @@ export async function issueTicket(
 export type CreateActorOptions = {
   position?: { x: number; y: number };
   facing?: number;
+  mapId?: string;
 };
 
 /**
@@ -81,6 +93,7 @@ export async function createActor(
 ): Promise<TestActor> {
   const suffix = uniqueSuffix();
   const realmId = await firstRealmId(db);
+  const mapId = options.mapId ?? STARTER_TOWN_MAP.mapId;
 
   const account = await insertAccount(db, {
     username: `test_${suffix}`.slice(0, 24),
@@ -88,7 +101,7 @@ export async function createActor(
     passwordHash: 'test-only-password-hash',
   });
 
-  const position = options.position ?? spawnPosition();
+  const position = options.position ?? spawnPosition(mapId);
   const character = await insertCharacter(db, {
     accountId: account.id,
     realmId,
@@ -101,7 +114,7 @@ export async function createActor(
     maxHp: 120,
     mp: 30,
     maxMp: 30,
-    mapId: PHASE1_TEST_MAP.id,
+    mapId,
     x: position.x,
     y: position.y,
     facing: options.facing ?? 2,

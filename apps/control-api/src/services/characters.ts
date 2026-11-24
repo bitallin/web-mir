@@ -4,7 +4,7 @@ import {
   normalizeCharacterName,
   type CreateCharacterRequest,
 } from '@web-legend/contracts';
-import { PHASE1_TEST_MAP } from '@web-legend/contracts/phase1-map';
+import { STARTER_TOWN_MAP } from '@web-legend/contracts/maps';
 import {
   findCharacterForAccount,
   findRealmById,
@@ -48,9 +48,9 @@ export class CharacterService {
     }
 
     const definition = CHARACTER_CLASS_CATALOG[input.classId];
-    const spawn = PHASE1_TEST_MAP.spawnPoints[0];
+    const spawn = STARTER_TOWN_MAP.spawnPoints[0];
     if (spawn === undefined) {
-      throw new Error('technical map has no spawn point');
+      throw new Error('starter town has no spawn point');
     }
 
     try {
@@ -66,7 +66,7 @@ export class CharacterService {
         maxHp: definition.baseMaxHp,
         mp: definition.baseMaxMp,
         maxMp: definition.baseMaxMp,
-        mapId: PHASE1_TEST_MAP.id,
+        mapId: STARTER_TOWN_MAP.mapId,
         x: spawn.x * TILE_UNITS + TILE_UNITS / 2,
         y: spawn.y * TILE_UNITS + TILE_UNITS / 2,
         facing: 2,

@@ -1,9 +1,14 @@
 import Phaser from 'phaser';
 
 import { WorldScene } from './WorldScene';
+import type { MapBundle } from './mapCatalog';
 import type { WorldBridge } from './worldBridge';
 
-export function createWorldGame(parent: HTMLElement, bridge: WorldBridge): Phaser.Game {
+export function createWorldGame(
+  parent: HTMLElement,
+  bridge: WorldBridge,
+  bundle: MapBundle,
+): Phaser.Game {
   return new Phaser.Game({
     type: Phaser.AUTO,
     parent,
@@ -15,12 +20,16 @@ export function createWorldGame(parent: HTMLElement, bridge: WorldBridge): Phase
       height: '100%',
     },
     render: {
-      antialias: true,
-      pixelArt: false,
+      // The technical art is pixel-sized and the development host renders with
+      // SwiftShader; nearest sampling and no antialiasing keep frame time low
+      // enough that socket callbacks are not delayed behind a slow frame.
+      antialias: false,
+      pixelArt: true,
+      roundPixels: true,
     },
     audio: {
       noAudio: true,
     },
-    scene: [new WorldScene(bridge)],
+    scene: [new WorldScene(bridge, bundle)],
   });
 }

@@ -112,6 +112,73 @@ export async function saveCharacterCheckpoint(
     .where(eq(characters.id, checkpoint.characterId));
 }
 
+export type CharacterTransfer = {
+  characterId: string;
+  mapId: string;
+  x: number;
+  y: number;
+  facing: number;
+  hp: number;
+  mp: number;
+};
+
+/**
+ * Commits a server-initiated map transfer. The map id is only written here:
+ * ordinary checkpoints never move a character between maps.
+ */
+export async function saveCharacterTransfer(
+  db: Database,
+  transfer: CharacterTransfer,
+  now: Date = new Date(),
+): Promise<void> {
+  await db
+    .update(characters)
+    .set({
+      mapId: transfer.mapId,
+      x: transfer.x,
+      y: transfer.y,
+      facing: transfer.facing,
+      hp: transfer.hp,
+      mp: transfer.mp,
+      version: sql`${characters.version} + 1`,
+      updatedAt: now,
+    })
+    .where(eq(characters.id, transfer.characterId));
+}
+
+export type RelocateCharactersInput = {
+  fromMapId: string;
+  toMapId: string;
+  x: number;
+  y: number;
+  facing: number;
+};
+
+/**
+ * Maintenance helper for retired map templates: moves every character still
+ * standing on `fromMapId` to the target map spawn. Idempotent by construction;
+ * returns the number of moved rows.
+ */
+export async function relocateCharactersFromMap(
+  db: Database,
+  input: RelocateCharactersInput,
+  now: Date = new Date(),
+): Promise<number> {
+  const moved = await db
+    .update(characters)
+    .set({
+      mapId: input.toMapId,
+      x: input.x,
+      y: input.y,
+      facing: input.facing,
+      version: sql`${characters.version} + 1`,
+      updatedAt: now,
+    })
+    .where(eq(characters.mapId, input.fromMapId))
+    .returning({ id: characters.id });
+  return moved.length;
+}
+
 export type AcquireLeaseInput = {
   characterId: string;
   sessionId: string;

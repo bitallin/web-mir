@@ -60,20 +60,11 @@ export type {
   RealmsResponse,
 } from './character';
 
-export {
-  isTileInsideMap,
-  isTileWalkable,
-  MAP_SCHEMA_VERSION,
-  MAP_TILE_FLOOR,
-  MAP_TILE_GRASS,
-  MAP_TILE_WALL,
-  mapManifestSchema,
-  tileCharAt,
-  tilePointSchema,
-} from './map';
-export type { MapManifest, TilePoint } from './map';
+export { tilePointSchema } from './map';
+export type { TilePoint } from './map';
 
 export {
+  CHAT_MESSAGE_MAX_LENGTH,
   CLIENT_MESSAGES,
   COMMAND_REJECTION_CODES,
   COMMAND_REJECTION_MESSAGES,
@@ -83,20 +74,56 @@ export {
   PLAYER_SPEED_UNITS_PER_SECOND,
   SERVER_MESSAGES,
   TILE_UNITS,
-  WORLD_ROOM_NAME,
+  chatMessageSchema,
+  chatSendSchema,
   commandAckSchema,
   commandRejectedSchema,
   commandRejectionCodeSchema,
   moveToCommandSchema,
+  sessionTransferSchema,
   systemNoticeSchema,
   worldJoinOptionsSchema,
 } from './realtime';
 export type {
+  ChatMessage,
+  ChatSend,
   CommandAck,
   CommandRejected,
   CommandRejectionCode,
   Facing,
   MoveToCommand,
+  SessionTransfer,
   SystemNotice,
   WorldJoinOptions,
 } from './realtime';
+
+export {
+  assetCharacterSchema,
+  assetManifestSchema,
+  assetMapEntrySchema,
+  assetTileSchema,
+  assetTilesetSchema,
+} from './assets';
+export type { AssetCharacter, AssetManifest, AssetTile, AssetTileset } from './assets';
+
+export {
+  MAP_RUNTIME_SCHEMA_VERSION,
+  STARTER_TOWN_MAP_ID,
+  STARTER_WILDS_MAP_ID,
+  isMapPointInside,
+  isMapTileWalkable,
+  mapIdFromRoomName,
+  mapIdSchema,
+  mapMonsterSpawnSchema,
+  mapNpcPointSchema,
+  mapPortalSchema,
+  mapRuntimeManifestSchema,
+  worldRoomNameFor,
+} from './mapRuntime';
+export type {
+  MapMonsterSpawn,
+  MapNpcPoint,
+  MapPortal,
+  MapRuntimeManifest,
+  MapTileset,
+} from './mapRuntime';

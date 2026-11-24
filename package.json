@@ -25,7 +25,10 @@
     "db:logs": "docker compose -f infra/docker/compose.yml logs -f postgres",
     "db:generate": "pnpm --filter @web-legend/persistence db:generate",
     "db:migrate": "pnpm --filter @web-legend/persistence db:migrate",
-    "db:seed": "pnpm --filter @web-legend/persistence db:seed"
+    "db:seed": "pnpm --filter @web-legend/persistence db:seed",
+    "maps:compile": "tsx packages/map-runtime/src/compileMaps.ts",
+    "repair:maps": "pnpm --filter @web-legend/control-api repair:maps",
+    "load:world": "pnpm --filter @web-legend/game-server load:world"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -74,24 +74,30 @@ web-mir/
 ├─ packages/
 │  ├─ contracts/      API/协议/角色 DTO/健康/错误码，客户端与服务端共享
 │  ├─ auth/           Argon2id 密码、会话令牌与一次性票据令牌（阶段 2 创建）
-│  ├─ game-simulation/ 固定 tick、移动推进、路径与边界（阶段 1 创建）
+│  ├─ game-simulation/ 固定 tick、移动推进、寻路、AOI（阶段 1/3）
+│  ├─ map-runtime/    Tiled 编译、导航与传送门运行时（阶段 3 创建）
 │  ├─ config/         Zod 环境变量校验与 .env 加载
 │  ├─ observability/  Pino 结构化日志与脱敏
 │  ├─ persistence/    Drizzle schema、数据库客户端、migrations
 │  └─ testkit/        可控 RNG、手动时钟等测试基础设施
+├─ content/
+│  ├─ maps/           Tiled 源图（.tmj）与编译产物（compiled/）
+│  └─ assets/         资源 manifest 与生成的占位 tileset/角色贴图
 ├─ docs/              ADR、阶段报告、状态与日志
 ├─ infra/docker/      PostgreSQL / Redis（scale profile）
 ├─ tests/e2e/         Playwright
 └─ AGENTS.md
 ```
 
-`game-simulation` 已在阶段 1 创建，承载固定 tick、路径与移动推进，不依赖
-Colyseus、Phaser、数据库或 HTTP。`auth` 已在阶段 2 创建，承载 Argon2id 密码哈希、
-会话令牌与票据令牌，只使用 Node 内置 `crypto`，不依赖 contracts、数据库或 app。
+`game-simulation` 已在阶段 1 创建并承载固定 tick、路径与移动推进，阶段 3 增加
+基于格子的 AOI；它不依赖 Colyseus、Phaser、数据库或 HTTP。`auth` 已在阶段 2
+创建，承载 Argon2id 密码哈希、会话令牌与票据令牌，只使用 Node 内置 `crypto`，
+不依赖 contracts、数据库或 app。`map-runtime` 已在阶段 3 创建，承载 Tiled 编译、
+checksum、导航格与传送门查询，只依赖 `contracts` 与 Node 内置模块。
 
 当前**尚未创建**的包及创建时机（ADR-013）：`content-schema`（阶段 7 内容发布）、
-`game-domain`（阶段 3 移动/阶段 4 战斗）、`game-application`（阶段 5 事务用例）、
-`map-runtime`（阶段 3）。不要提前创建空壳包。
+`game-domain`（阶段 4 战斗）、`game-application`（阶段 5 事务用例）。不要提前
+创建空壳包。
 
 强制依赖方向：
 
@@ -99,11 +105,17 @@ Colyseus、Phaser、数据库或 HTTP。`auth` 已在阶段 2 创建，承载 Ar
 - `auth` 只依赖 Node 内置模块；不得依赖 contracts、数据库、HTTP 框架或 app。
 - `persistence` 只依赖 `config` 和数据库库，不依赖 app。
 - `game-simulation` 只依赖 `contracts`；不得依赖 Colyseus、Phaser、数据库或 HTTP。
-- `control-api` 依赖 `auth`、`persistence`、`contracts`；不得导入 game-server。
-- `game-server` 依赖 `auth`、`persistence`、`game-simulation`、`contracts`；
-  不得导入 control-api。
-- `game-web` 只能导入 `contracts`、自身表现层与资源 manifest；不能导入服务端包
-  （含 `game-simulation`、`auth`）、数据库、Fastify、Colyseus 服务端或 Pino。
+- `map-runtime` 只依赖 `contracts` 与 Node 内置模块；不得依赖 Colyseus、数据库、
+  HTTP 框架、app 或 `game-simulation`。
+- `control-api` 依赖 `auth`、`persistence`、`contracts`（含 `contracts/maps`）；
+  不得导入 game-server 或 map-runtime。
+- `game-server` 依赖 `auth`、`persistence`、`game-simulation`、`map-runtime`、
+  `contracts`；不得导入 control-api。
+- `game-web` 只能导入 `contracts`（含 `contracts/maps`）、自身表现层与资源
+  manifest；不能导入服务端包（含 `game-simulation`、`map-runtime`、`auth`）、
+  数据库、Fastify、Colyseus 服务端或 Pino。
+- `admin-web` 只能通过 Control API 访问数据；只能导入 `contracts`，不得导入
+  Phaser、服务端包或数据库。
 - `admin-web` 只能通过 Control API 访问数据；只能导入 `contracts`，不得导入
   Phaser、服务端包或数据库。
 - `control-api` 与 `game-server` 不得互相导入。
@@ -183,6 +195,9 @@ pnpm typecheck
 pnpm test
 pnpm test:e2e
 pnpm build
+pnpm maps:compile        # 从 Tiled 源图生成编译产物；提交产物后测试会校验一致性
+pnpm repair:maps         # 幂等迁移退役地图上的角色（阶段 3 一次性维护命令）
+pnpm load:world          # 30 人地图负载检查，读取 /metrics 的 tick 指标
 ```
 
 测试要求：
@@ -249,6 +264,9 @@ pnpm build
 - Playwright 官方浏览器在当前系统不可下载；使用预装 Chromium 并通过
   `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指定。普通开发机应删除该变量并运行
   `pnpm exec playwright install chromium`。
+- Node 的 `fetch`（含 Colyseus SDK 的 matchmaking）拒绝 87 端口（WHATWG
+  bad port）。负载脚本因此通过 Vite 的 `/ws` 代理连接实时服务器，并用
+  `node:http` 读取 `/metrics`；不要把负载脚本改成直连 `fetch`。
 - Redis 属于扩容阶段，当前未启动；本地镜像不可用时不得用其他版本冒充 8.2。
 
 ## 13. 禁止事项

@@ -1,0 +1,84 @@
+{
+  "version": "phase3.1",
+  "tilesets": {
+    "terrain": {
+      "id": "terrain",
+      "image": "starter_terrain.png",
+      "tileWidth": 64,
+      "tileHeight": 32,
+      "columns": 4,
+      "tileCount": 8,
+      "tiles": [
+        {
+          "gid": 1,
+          "kind": "ground",
+          "name": "grass",
+          "colors": [3095342, 3424819]
+        },
+        {
+          "gid": 2,
+          "kind": "ground",
+          "name": "grass_dark",
+          "colors": [3358767, 3687727]
+        },
+        {
+          "gid": 3,
+          "kind": "ground",
+          "name": "dirt",
+          "colors": [4865837, 5589557]
+        },
+        {
+          "gid": 4,
+          "kind": "ground",
+          "name": "stone",
+          "colors": [3883077, 4672853]
+        },
+        {
+          "gid": 5,
+          "kind": "ground",
+          "name": "water",
+          "colors": [2572362, 2902613]
+        },
+        {
+          "gid": 6,
+          "kind": "ground",
+          "name": "wall",
+          "colors": [4870488, 5791591]
+        },
+        {
+          "gid": 7,
+          "kind": "deco",
+          "name": "tree",
+          "colors": [2373151, 2965798]
+        },
+        {
+          "gid": 8,
+          "kind": "deco",
+          "name": "flowers",
+          "colors": [3949872, 8022586]
+        }
+      ]
+    }
+  },
+  "characters": {
+    "player_placeholder": {
+      "id": "player_placeholder",
+      "image": "player_placeholder.png",
+      "frameWidth": 32,
+      "frameHeight": 48,
+      "directions": ["n", "e", "s", "w"],
+      "frames": 2,
+      "kind": "procedural-placeholder"
+    }
+  },
+  "maps": {
+    "starter_town": {
+      "source": "content/maps/starter_town.tmj",
+      "compiled": "content/maps/compiled/starter_town.json"
+    },
+    "starter_wilds": {
+      "source": "content/maps/starter_wilds.tmj",
+      "compiled": "content/maps/compiled/starter_wilds.json"
+    }
+  }
+}

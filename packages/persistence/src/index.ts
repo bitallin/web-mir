@@ -49,19 +49,23 @@ export {
   listCharactersByAccount,
   refreshCharacterLeases,
   releaseCharacterLease,
+  relocateCharactersFromMap,
   revokeSession,
   revokeSessionByAccessHash,
   rotateSession,
   saveCharacterCheckpoint,
+  saveCharacterTransfer,
 } from './repositories/index';
 export type {
   AcquireLeaseInput,
   CharacterCheckpoint,
+  CharacterTransfer,
   CharacterWithRealm,
   ConsumedGameTicket,
   CreateAccountInput,
   CreateCharacterInput,
   CreateGameTicketInput,
   CreateSessionInput,
+  RelocateCharactersInput,
   SessionTokenSet,
 } from './repositories/index';

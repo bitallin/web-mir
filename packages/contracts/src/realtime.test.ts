@@ -112,8 +112,8 @@ describe('server command messages', () => {
 });
 
 describe('simulation defaults', () => {
-  it('uses 20Hz simulation and a 10Hz patch rate', () => {
+  it('uses 20Hz simulation and a 20Hz patch rate', () => {
     expect(DEFAULT_TICK_HZ).toBe(20);
-    expect(DEFAULT_PATCH_RATE_MS).toBe(100);
+    expect(DEFAULT_PATCH_RATE_MS).toBe(50);
   });
 });

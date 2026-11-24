@@ -6,7 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./world-state": "./src/worldState.ts",
-    "./phase1-map": "./src/phase1Map.ts"
+    "./maps": "./src/maps.ts"
   },
   "types": "./src/index.ts",
   "scripts": {

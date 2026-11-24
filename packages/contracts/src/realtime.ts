@@ -5,18 +5,24 @@ import { tilePointSchema } from './map';
 /** Both sides read positions as integer sub-tile units. */
 export const TILE_UNITS = 1000 as const;
 export const DEFAULT_TICK_HZ = 20 as const;
-export const DEFAULT_PATCH_RATE_MS = 100 as const;
+/**
+ * State patches run at the simulation rate in phase 3. The architecture's
+ * initial 10Hz value left too little margin for the 250ms visibility gate once
+ * AOI views encode per client; phase 8 re-evaluates bandwidth at 30/50 players.
+ */
+export const DEFAULT_PATCH_RATE_MS = 50 as const;
 export const PLAYER_SPEED_UNITS_PER_SECOND = 4_000 as const;
-
-export const WORLD_ROOM_NAME = 'world_map' as const;
 
 export const CLIENT_MESSAGES = {
   moveTo: 'move.to',
+  chatSend: 'chat.send',
 } as const;
 
 export const SERVER_MESSAGES = {
   commandAck: 'command.ack',
   commandRejected: 'command.rejected',
+  chatMessage: 'chat.message',
+  sessionTransfer: 'session.transfer',
   systemNotice: 'system.notice',
 } as const;
 
@@ -58,6 +64,66 @@ export const moveToCommandSchema = z
   .strict();
 
 export type MoveToCommand = z.infer<typeof moveToCommandSchema>;
+
+export const CHAT_MESSAGE_MAX_LENGTH = 120 as const;
+
+/**
+ * Chat is not an asset operation, but it still carries a client-generated id so
+ * a duplicate delivery inside one session is dropped instead of being broadcast
+ * twice.
+ */
+export const chatSendSchema = z
+  .object({
+    protocolVersion: z.number().int().positive(),
+    clientMessageId: z.uuid(),
+    message: z
+      .string()
+      .min(1)
+      .max(CHAT_MESSAGE_MAX_LENGTH)
+      .refine((value) => value.trim().length > 0, 'message must not be blank')
+      .refine(
+        (value) =>
+          [...value].every((character) => {
+            const code = character.codePointAt(0) ?? 0;
+            return code >= 0x20 && code !== 0x7f;
+          }),
+        { message: 'message contains control characters' },
+      ),
+  })
+  .strict();
+
+export type ChatSend = z.infer<typeof chatSendSchema>;
+
+export const chatMessageSchema = z
+  .object({
+    messageId: z.uuid(),
+    playerId: z.uuid(),
+    displayName: z.string().min(1).max(32),
+    message: z.string().min(1).max(CHAT_MESSAGE_MAX_LENGTH),
+    channel: z.literal('map'),
+    serverTime: z.number().nonnegative(),
+  })
+  .strict();
+
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
+
+/**
+ * Sent only after the server has persisted the character's new map and released
+ * the old lease. The browser must fetch a fresh ticket and join the room for
+ * `mapId`; it cannot choose the destination itself.
+ */
+export const sessionTransferSchema = z
+  .object({
+    mapId: z
+      .string()
+      .min(3)
+      .max(32)
+      .regex(/^[a-z][a-z0-9_]*$/),
+    serverTime: z.number().nonnegative(),
+  })
+  .strict();
+
+export type SessionTransfer = z.infer<typeof sessionTransferSchema>;
 
 export const COMMAND_REJECTION_CODES = [
   'INVALID_PAYLOAD',

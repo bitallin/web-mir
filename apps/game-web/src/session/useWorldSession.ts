@@ -1,8 +1,9 @@
-import type { CharacterView, TilePoint } from '@web-legend/contracts';
+import type { CharacterView, ChatMessage, TilePoint } from '@web-legend/contracts';
 import type Phaser from 'phaser';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
 import { createWorldGame } from '../game/createWorldGame';
+import { mapBundleFor } from '../game/mapCatalog';
 import { WorldBridge } from '../game/worldBridge';
 import { loadRoomPreference } from '../lib/identity';
 import { WorldClient, type ConnectionStatus, type PlayerView } from '../net/worldClient';
@@ -16,12 +17,16 @@ export type SessionNotice = {
 export type SessionState = {
   status: ConnectionStatus;
   detail: string;
+  mapId: string;
+  instanceId: string;
   players: PlayerView[];
   selfId: string;
   latencyMs: number | null;
   commandCount: number;
   serverTick: number;
   roomId: string | null;
+  roomPlayerCount: number;
+  messages: ChatMessage[];
   notice: SessionNotice | null;
 };
 
@@ -30,16 +35,22 @@ export type WorldSessionOptions = {
   requestTicket: () => Promise<string>;
 };
 
-function initialState(characterId: string): SessionState {
+const MAX_CHAT_MESSAGES = 120;
+
+function initialState(character: CharacterView): SessionState {
   return {
     status: 'connecting',
     detail: '正在准备世界',
+    mapId: character.mapId,
+    instanceId: '1',
     players: [],
-    selfId: characterId,
+    selfId: character.id,
     latencyMs: null,
     commandCount: 0,
     serverTick: 0,
     roomId: null,
+    roomPlayerCount: 0,
+    messages: [],
     notice: null,
   };
 }
@@ -61,6 +72,7 @@ class WorldSession {
   private readonly updateState: (updater: (previous: SessionState) => SessionState) => void;
   private client: WorldClient | null = null;
   private game: Phaser.Game | null = null;
+  private mapId: string;
   private commandCount = 0;
   private debugInstalled = false;
 
@@ -73,6 +85,7 @@ class WorldSession {
     this.container = container;
     this.bridge = bridge;
     this.options = options;
+    this.mapId = options.character.mapId;
     this.updateState = updateState;
     this.bridge.onMoveRequest = (tile) => {
       this.moveTo(tile);
@@ -80,22 +93,40 @@ class WorldSession {
   }
 
   start(): void {
-    this.game = createWorldGame(this.container, this.bridge);
+    this.game = createWorldGame(this.container, this.bridge, mapBundleFor(this.mapId));
     this.installDebugHooks();
 
     const characterId = this.options.character.id;
     this.client = new WorldClient({
       url: resolveGameServerUrl(),
       characterId,
+      mapId: this.mapId,
       requestTicket: this.options.requestTicket,
       roomPreference: loadRoomPreference(),
       callbacks: {
         onSnapshot: (snapshot) => {
           this.bridge.pushSnapshot({ snapshot, selfId: characterId });
+          if (import.meta.env.DEV) {
+            const debug = window.__webLegendDebug;
+            if (debug !== undefined) {
+              debug.lastSnapshotAt = Date.now();
+              // Record the first moving snapshot after the probe is reset, so
+              // the E2E log shows the update that made the move visible.
+              if (
+                snapshot.players.some((player) => player.moving) &&
+                (debug.lastMovingSnapshotAt === undefined || debug.lastMovingSnapshotAt === 0)
+              ) {
+                debug.lastMovingSnapshotAt = Date.now();
+              }
+            }
+          }
           this.updateState((previous) => ({
             ...previous,
+            mapId: snapshot.mapId,
+            instanceId: snapshot.instanceId,
             players: snapshot.players,
             serverTick: snapshot.tick,
+            roomPlayerCount: snapshot.playerCount,
             selfId: characterId,
           }));
         },
@@ -107,12 +138,27 @@ class WorldSession {
         },
         onAck: (ack) => {
           this.bridge.pushAck(ack);
+          if (import.meta.env.DEV) {
+            const debug = window.__webLegendDebug;
+            if (debug !== undefined) {
+              debug.lastAckAt = Date.now();
+            }
+          }
         },
         onRejected: (rejected) => {
           this.updateState((previous) => ({
             ...previous,
             notice: { kind: 'warning', message: rejected.message, at: Date.now() },
           }));
+        },
+        onChat: (message) => {
+          this.updateState((previous) => ({
+            ...previous,
+            messages: [...previous.messages, message].slice(-MAX_CHAT_MESSAGES),
+          }));
+        },
+        onTransfer: (mapId) => {
+          this.handleTransfer(mapId);
         },
         onLatency: (latencyMs) => {
           this.updateState((previous) => ({ ...previous, latencyMs }));
@@ -124,10 +170,20 @@ class WorldSession {
   }
 
   moveTo(tile: TilePoint): void {
+    if (import.meta.env.DEV) {
+      const debug = window.__webLegendDebug;
+      if (debug !== undefined) {
+        debug.lastMoveIntentAt = Date.now();
+      }
+    }
     if (this.client?.sendMove(tile) === true) {
       this.commandCount += 1;
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
+  }
+
+  sendChat(text: string): boolean {
+    return this.client?.sendChat(text) ?? false;
   }
 
   rejoin(): void {
@@ -171,6 +227,31 @@ class WorldSession {
     game?.destroy(true);
   }
 
+  private handleTransfer(mapId: string): void {
+    this.updateState((previous) => ({
+      ...previous,
+      status: 'connecting',
+      detail: '正在前往新的地图',
+      mapId,
+      players: [],
+      messages: [],
+      roomPlayerCount: 0,
+    }));
+    this.switchMap(mapId);
+    if (this.client !== null) {
+      void this.client.transferTo(mapId);
+    }
+  }
+
+  private switchMap(mapId: string): void {
+    this.mapId = mapId;
+    const game = this.game;
+    this.game = null;
+    game?.destroy(true);
+    this.bridge.reset();
+    this.game = createWorldGame(this.container, this.bridge, mapBundleFor(mapId));
+  }
+
   private installDebugHooks(): void {
     if (!import.meta.env.DEV) {
       return;
@@ -181,6 +262,11 @@ class WorldSession {
       sceneGeneration: () => this.bridge.sceneGeneration(),
       dropConnection: () => this.client?.dropConnection() ?? false,
       leaveWorld: () => this.leave(),
+      currentMapId: () => this.client?.currentMapId ?? this.mapId,
+      moveToTile: (tileX, tileY) => {
+        this.moveTo({ x: tileX, y: tileY });
+        return true;
+      },
     };
     this.debugInstalled = true;
   }
@@ -196,6 +282,7 @@ class WorldSession {
 export type WorldSessionControls = {
   state: SessionState;
   rejoin: () => void;
+  sendChat: (text: string) => boolean;
 };
 
 /**
@@ -207,7 +294,7 @@ export function useWorldSession(
   options: WorldSessionOptions,
 ): WorldSessionControls {
   const characterId = options.character.id;
-  const [state, setState] = useState<SessionState>(() => initialState(characterId));
+  const [state, setState] = useState<SessionState>(() => initialState(options.character));
   const sessionRef = useRef<WorldSession | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -241,5 +328,7 @@ export function useWorldSession(
     sessionRef.current?.rejoin();
   }, []);
 
-  return { state, rejoin };
+  const sendChat = useCallback((text: string) => sessionRef.current?.sendChat(text) ?? false, []);
+
+  return { state, rejoin, sendChat };
 }

@@ -24,6 +24,8 @@ const serverPackages = [
   '@web-legend/testkit/*',
   '@web-legend/game-simulation',
   '@web-legend/game-simulation/*',
+  '@web-legend/map-runtime',
+  '@web-legend/map-runtime/*',
 ];
 
 const serverFrameworks = [

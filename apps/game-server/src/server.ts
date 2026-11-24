@@ -1,10 +1,7 @@
 import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import {
-  healthResponseSchema,
-  readinessResponseSchema,
-  WORLD_ROOM_NAME,
-} from '@web-legend/contracts';
+import { healthResponseSchema, readinessResponseSchema } from '@web-legend/contracts';
+import { MAP_MANIFESTS } from '@web-legend/contracts/maps';
 import { pingDatabase, type Database } from '@web-legend/persistence';
 import type { Logger } from 'pino';
 
@@ -12,6 +9,7 @@ import type { GameServerEnv } from './env';
 import { MetricsRegistry } from './metrics';
 import { DiagnosticsRoom } from './rooms/diagnosticsRoom';
 import { WorldMapRoom } from './rooms/worldMapRoom';
+import { createMapInstances } from './world/mapRegistry';
 import { SERVICE_VERSION } from './version';
 
 export type WorldRoomTuning = {
@@ -20,6 +18,11 @@ export type WorldRoomTuning = {
   reconnectGraceSeconds?: number;
   commandRateCapacity?: number;
   commandRateRefillPerSecond?: number;
+  chatRateCapacity?: number;
+  chatRateRefillPerSecond?: number;
+  checkpointIntervalMs?: number;
+  interestCellSize?: number;
+  interestRadiusCells?: number;
 };
 
 export type CreateGameServerOptions = {
@@ -96,13 +99,19 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
     },
   });
 
-  server.define(WORLD_ROOM_NAME, WorldMapRoom, {
-    database,
-    serverId: env.GAME_SERVER_ID,
-    logger,
-    metrics,
-    ...options.world,
-  });
+  // One fixed instance per map template for the MVP (ADR-018). The room type
+  // name carries the map id so matchmaking can never put a character in the
+  // wrong map room; the server still validates the persisted map on join.
+  for (const mapInstance of createMapInstances(MAP_MANIFESTS)) {
+    server.define(mapInstance.roomName, WorldMapRoom, {
+      database,
+      serverId: env.GAME_SERVER_ID,
+      logger,
+      metrics,
+      mapInstance,
+      ...options.world,
+    });
+  }
 
   if (env.NODE_ENV !== 'production') {
     server.define('diagnostics', DiagnosticsRoom);

@@ -478,3 +478,153 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=88
 `pnpm db:seed`，启动 84–87 开发栈，把 `http://<LAN-IP>:8584/` 交给用户测试；
 然后按阶段 2 报告第 10 节完成 Tiled 地图、map-runtime、地图实例/传送、AOI、
 节流 checkpoint 与同图聊天。
+
+---
+
+## 2026-11-24 · 阶段 3：正式地图、服务端移动和世界状态
+
+### 本次任务目标
+
+用真实 Tiled 地图替换阶段 1/2 的技术测试地图，完成地图编译、地图实例与 Room
+固定映射、服务端权威寻路/碰撞、主城 ↔ 野外传送、AOI、节流 checkpoint、同图
+聊天与 30 人 tick 指标。只执行阶段 3，不进入阶段 4。
+
+### 开工前检查
+
+- 阅读 AGENTS、PROJECT_STATUS、WORKLOG、架构 v2、MVP 计划 v2、阶段 2 报告与
+  ADR-017。
+- `git status` 干净；HEAD `85badc2`。
+- 数据库 2 条迁移；132 个角色仍位于已退役的 `phase1_test_map`。
+- 当前实现只有手写技术地图、单 `world_map` Room、无 AOI/传送/聊天；与阶段 3
+  计划一致，需要新的架构决策，先写 ADR-018。
+
+### 实施内容
+
+1. **content**
+   - 新增 Tiled 正交源图 `starter_town`（40×30）、`starter_wilds`（44×32），
+     四个地形/装饰图层与四个对象层（出生、传送、NPC、怪物刷点）。
+   - 生成并提交编译产物 `content/maps/compiled/*.json`（checksum、asset 版本）。
+   - 新增 `content/assets/manifest.json`、占位 tileset（8 tile）与
+     2 帧 × 4 方向角色 SpriteSheet。
+2. **contracts**
+   - 编译地图 schema、地图 ID、可走判定、room type 编解码、`/maps` 子路径。
+   - asset manifest schema。
+   - `chat.send`/`chat.message`/`session.transfer`；patch 间隔改为 50ms（20Hz）。
+   - `WorldState` 增加 `instanceId`、HP/MP；`players` 集合 `.view()`。
+   - 移除阶段 1 技术地图、`mapManifestSchema` 与 `phase1-map` 子路径。
+3. **map-runtime（新包）**
+   - Tiled 子集 schema；编译必需图层/网格/对象校验；跨图目标与可达性校验；
+     SHA-256 checksum；运行时导航格/传送门；`maps:compile` CLI。
+   - 9 个测试覆盖真实双图、产物新鲜度、非法图层/出生点/跨图目标/不可达传送门、
+     checksum 篡改。
+4. **game-simulation**
+   - `InterestManager`：8×8 分格、radius 1、加入/离开/跨格增量刷新；
+     6 个单元测试。
+   - 移除技术地图依赖；移动/寻路测试使用本地夹具。
+5. **persistence**
+   - `saveCharacterTransfer`（事务写入地图/坐标/朝向/HP/MP）。
+   - `relocateCharactersFromMap`（幂等迁移退役地图角色）。
+   - 无 schema 变更、无新迁移。
+6. **game-server**
+   - 每张地图固定 Room：`world_map:<mapId>`；加入时校验角色持久化地图。
+   - 编译导航格寻路/碰撞；站立传送门自动传送；传送中拒绝指令。
+   - 传送：写库 -> 释放租约 -> 移除旧实体 -> `session.transfer`。
+   - 每客户端 `StateView` AOI；离开释放视图。
+   - 20 秒节流 checkpoint；离开/宽限期/Dispose 立即保存。
+   - 同图聊天：Zod、120 字符、控制字符、4/2s 令牌桶、32 条去重、广播。
+   - 指标增加 chat/transfer；30 玩家负载脚本。
+7. **control-api**
+   - 建角出生点改为 `starter_town` 编译出生点。
+   - `repair:maps` 一次性迁移 132 个阶段 2 角色。
+8. **game-web**
+   - 编译地图 + asset manifest + tileset/角色帧加载。
+   - 静态地表合成 RenderTexture；墙体挤出、树冠遮挡、NPC/传送门标记、
+     脚底锚点 Sprite、Y 排序、路径预览、摄像机跟随。
+   - 传送后重建 Phaser 场景并丢弃旧快照。
+   - HUD 地图名/ID、HP/MP、附近玩家、聊天、tick；调试钩子增加传送与诊断。
+9. **测试**
+   - 新增地图编译、AOI、聊天、传送、AOI 集成、节流 checkpoint、错误地图加入、
+     真实浏览器传送/聊天/撞墙测试。
+   - 适配阶段 1/2 测试到新地图与新 room type。
+10. **文档**
+    - ADR-018；AGENTS/README；阶段 3 报告、PROJECT_STATUS、本日志与证据。
+
+### 关键技术决策
+
+- 地图源文件采用正交逻辑网格，伪等距投影只在客户端；逻辑与表现解耦。
+- 编译产物是运行时唯一信任的地图数据；checksum 不匹配拒绝启动。
+- 每张地图模板在 MVP 只有一个固定实例；room type 携带 mapId。
+- 客户端不能选图；角色持久化 `map_id` 决定加入哪个 Room。
+- 传送由服务端站立触发：先提交、再移除、再通知，避免双实体。
+- AOI 用格子兴趣 + Colyseus `StateView`；`players` 集合必须 `.view()` 才可过滤。
+- checkpoint 20 秒；地图只在传送事务中变化。
+- patch 20Hz（架构初始 10Hz）以满足 250ms 可见性门禁；阶段 8 重新评估带宽。
+
+### 执行的命令与结果
+
+```bash
+pnpm install
+pnpm maps:compile
+pnpm db:migrate
+pnpm db:seed
+pnpm repair:maps
+pnpm format
+pnpm verify
+PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
+pnpm load:world
+```
+
+结果：
+
+- 2 张地图编译成功；产物新鲜度测试通过。
+- 迁移 2 条；区服 seed 成功；132 个角色迁移到主城。
+- format / lint / typecheck 通过；33 个文件、167 个测试通过（约 6.3s）。
+- 4 个应用构建成功。
+- E2E 12/12 通过（约 1.1 分钟）；点击 → 远端 DOM 139ms，首个 moving 快照
+  101ms，服务端 ack 85ms；rAF 24/22 FPS（软件渲染）。
+- 30 人负载：30/30 加入、750 条移动接受、0 拒绝、tick p50 0.15ms、
+  p95 1.53ms、p99 2.20ms、max 3.11ms。
+- 数据库：2 条迁移、6 张表、481 个角色 `version > 0`、0 个活跃租约、
+  0 张未消费未过期票据。
+
+### 遇到的问题及解决方法
+
+1. **AOI 未过滤**：完全公开的 `players` 集合不会被 `StateView` 过滤；改为
+   `t.map(PlayerState).view()`，并用集成测试锁定远处玩家不可见。
+2. **250ms 可见性抖动（248–273ms）**：诊断为软件渲染下 rAF 约 13 FPS，WebSocket
+   回调被慢帧延迟。将静态地表/低层装饰合成到单个 RenderTexture，启用
+   nearest/`pixelArt`/关闭抗锯齿，并把 patch 调到 20Hz；修复后 rAF 22–27，
+   完整套件 139ms。
+3. **Node fetch 拒绝 87 端口**：Colyseus SDK matchmaking 使用 fetch，87 是 WHATWG
+   bad port。负载客户端改走 Vite `/ws` 代理，`/metrics` 用 `node:http` 读取。
+4. **随机负载穿过传送门**：1–2 个虚拟玩家被传送，房间人数不符。负载移动限定在
+   可达且传送门以西的区域。
+5. **E2E 撞墙点选到建筑内部**：(31,5) 是可走石地板；改用外墙 (30,5)。
+6. **阶段 2 角色无法进入新地图**：新增幂等 `pnpm repair:maps` 迁移 132 个角色。
+7. **`client.view = undefined` 与 exactOptionalPropertyTypes**：改为
+   `delete client.view`。
+8. **Lint 细节**：未绑定 Zod parse、控制字符正则、contracts 测试中的 node:crypto
+   类型解析问题，逐一修正。
+9. **地图产物过期风险**：编译测试重新生成并与提交产物逐字段比较。
+
+### 尚未解决的问题
+
+- 每张地图单固定实例；无多线路/Room drain。
+- 传送为离开/重新加入，非无缝迁移；无传送回执重试。
+- 聊天无过滤/频道/持久化。
+- 50 人 10 分钟压测、patch bytes、带宽未测。
+- NPC/怪物刷点只有数据；怪物与战斗在阶段 4。
+- 占位美术与软件渲染帧率；正式资源与目标机器渲染在后续阶段。
+- 集成/E2E/负载继续使用共享开发库。
+
+### 阶段提交
+
+- 阶段 3 主提交：待提交后记录
+  主题：`feat(phase-3): deliver compiled maps, AOI, transfers and chat`。
+
+### 下一步计划
+
+1. 等待 Tech Lead 审阅阶段 3 报告与证据。
+2. 批准后执行阶段 4：`game-domain` 战斗纯函数、两种怪物与刷点、服务端 RNG、
+   战士普攻/技能、CombatEvent、死亡与刷新、双浏览器一致性测试。
+3. 保持阶段 3 的 AOI、传送、租约、checkpoint、聊天测试为回归门禁。

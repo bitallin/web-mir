@@ -5,10 +5,10 @@
 
 ## 1. 当前阶段
 
-**阶段 2：账号、角色和连接票据 —— 已完成并通过用户实测验收（2026-11-24，8584 端口）。**
+**阶段 3：正式地图、服务端移动和世界状态 —— 已完成，等待 Tech Lead 审阅。**
 
-阶段 0、阶段 1、阶段 2 均已通过审阅。阶段 3（正式地图、服务端移动和世界状态）
-尚未开始，将在下一次会话启动。
+阶段 0、阶段 1、阶段 2 已通过审阅。阶段 4（怪物、战斗和技能）尚未开始，必须在
+阶段 3 审阅通过后启动。
 
 ## 2. 阶段进度
 
@@ -17,8 +17,8 @@
 | 阶段 0：工程底座               | 已完成 | 工程、依赖、质量门禁、数据库、健康检查、文档                        |
 | 阶段 1：双浏览器联机切片       | 已完成 | 测试地图、world_map Room、服务端移动、双浏览器可见、重连、HUD、E2E  |
 | 阶段 2：账号与票据             | 已完成 | 账号/会话、Argon2id、角色、一次性 ticket、角色租约、位置持久化、E2E |
-| 阶段 3：地图与世界状态         | 未开始 | 等待阶段 2 审阅通过                                                 |
-| 阶段 4：怪物与战斗             | 未开始 | —                                                                   |
+| 阶段 3：地图与世界状态         | 已完成 | Tiled 地图、map-runtime、地图实例/传送、AOI、节流 checkpoint、聊天  |
+| 阶段 4：怪物与战斗             | 未开始 | 等待阶段 3 审阅通过                                                 |
 | 阶段 5：掉落与资产持久化       | 未开始 | —                                                                   |
 | 阶段 6：聊天、PK 与体验        | 未开始 | —                                                                   |
 | 阶段 7：运营后台与内容发布     | 未开始 | —                                                                   |
@@ -26,7 +26,7 @@
 
 ## 3. 当前正在进行的任务
 
-无。阶段 2 已验收，阶段 3 将在下一次会话启动。
+无。阶段 3 代码、测试、负载与证据已完成，等待审阅。
 
 ## 4. 已完成内容
 
@@ -40,154 +40,181 @@
 
 ### 阶段 1 保留内容
 
-- `contracts` 的实时协议、严格 join 校验、地图 manifest 与 world-state schema。
+- `contracts` 的实时协议、严格 join 校验、world-state schema。
 - `game-simulation`：固定 tick、四方向 BFS、整数子格移动推进。
-- `world_map` Room：20Hz 模拟、10Hz patch、服务端权威移动、幂等、限频、重连。
+- `world_map` Room：20Hz 模拟、服务端权威移动、幂等、限频、重连。
 - 伪等距 Phaser 世界、React HUD、本地预测与远端插值。
 - 双人可见、刷新重连、断线恢复、Scene 重启、局域网 HTTP 的 E2E。
 
-### 阶段 2：账号、角色和连接票据
+### 阶段 2 保留内容
+
+- 账号/密码/登录/注册 schema、职业目录、角色名归一与唯一、一次性 ticket。
+- `auth`：Node 26 内置 Argon2id、256 bit 令牌、refresh 轮换。
+- `persistence`：accounts、account_sessions、characters、character_sessions、
+  game_tickets 与仓储；区服 seed。
+- `control-api`：注册/登录/刷新/登出、/me、区服、角色、ticket；HttpOnly Cookie、
+  CSRF Origin、16KB body、认证限频。
+- `game-server`：票据原子消费、区服/角色校验、单角色租约、位置恢复。
+- 登录/角色选择/世界三段式页面；E2E 与数据库证据。
+
+### 阶段 3：正式地图、服务端移动和世界状态
+
+`content/`：
+
+- Tiled 源图 `starter_town`（40×30）与 `starter_wilds`（44×32），图层
+  `ground`/`deco_low`/`deco_high`/`collision`，对象层 `spawn_points`/
+  `portals`/`npc_points`/`monster_spawns`。
+- 编译产物 `content/maps/compiled/*.json`，含 checksum、asset manifest 版本；
+  `pnpm maps:compile` 可重建，测试校验产物新鲜度。
+- `content/assets/manifest.json` 与生成的占位 tileset/角色贴图（8 个 tile、
+  2 帧 × 4 方向）。
 
 `packages/contracts`：
 
-- 账号/密码/登录/注册、账号视图、认证响应 schema。
-- 职业目录（战士/法师/道士及基础属性）、角色名规则、角色视图、创建/列表请求。
-- game ticket 请求/响应与 60 秒 TTL；`worldJoinOptionsSchema` 只接受
-  `{protocolVersion, ticket}`。
-- 错误码扩展：账号已存在、凭据错误、角色重名、角色上限、区服不存在。
-- `@web-legend/contracts/phase1-map`：客户端、Control API 与 Game Server
-  共享的测试地图。
+- 编译地图 schema、`worldRoomNameFor`、`mapIdFromRoomName`、`/maps` 子路径。
+- asset manifest schema。
+- `chat.send`/`chat.message`/`session.transfer`；patch 间隔 50ms。
+- `WorldState` 增加 `instanceId`、HP/MP；`players` 集合 `.view()` 支持 AOI。
+- 移除阶段 1 技术地图与 `mapManifestSchema`。
 
-`packages/auth`（新包）：
+`packages/map-runtime`（新包）：
 
-- Node 26 内置 Argon2id（OWASP 参数）、PHC 编码与常量时间校验。
-- 256 bit 不透明令牌、SHA-256 摘要、access/refresh 有效期策略。
+- Tiled 解析、图层/碰撞/对象校验、跨图传送校验、可达性校验、SHA-256 checksum。
+- 运行时导航格、传送门查询、单位坐标转 tile。
+- 9 个测试，包含真实双图编译与非法地图用例。
+
+`packages/game-simulation`：
+
+- `InterestManager`：8×8 tile 分格、radius 1、增量视图更新。
+- AOI 单元测试；移动/寻路测试改为本地夹具，不再依赖已退役技术地图。
 
 `packages/persistence`：
 
-- 迁移 `0001_peaceful_rachel_grey.sql`：`accounts`、`account_sessions`、
-  `characters`、`character_sessions`、`game_tickets`。
-- 区服内角色名唯一索引 `(realm_id, name_normalized)`。
-- 账号/会话/角色/票据/租约仓储；唯一冲突识别沿 `cause` 链。
-- `pnpm db:seed` 幂等写入默认区服 `classic-01`。
-
-`apps/control-api`：
-
-- 注册、登录、刷新（轮换）、登出（撤销）、`/me`、`/realms`。
-- 角色列表、创建、读取（所有权校验）。
-- 一次性 game ticket 签发（60 秒，绑定角色与区服）。
-- HttpOnly + SameSite=Lax Cookie；生产 Secure；access 15 分钟、refresh 30 天。
-- CSRF Origin 校验、16KB body 限制、认证令牌桶限频。
-- 未知账号占位 Argon2 校验，降低账号枚举时序差。
+- `saveCharacterTransfer` 事务写入地图/坐标/朝向/HP/MP。
+- `relocateCharactersFromMap` 幂等迁移退役地图角色。
+- 无 schema 变更、无新迁移。
 
 `apps/game-server`：
 
-- `DATABASE_URL` + `GAME_SERVER_ID`；就绪探针包含数据库。
-- `onAuth` 原子消费票据、校验角色/区服、获取单角色租约。
-- 删除全部开发身份分支；生产与开发都只接受真实票据。
-- 入图恢复持久化位置/朝向；非法坐标回退出生点。
-- 离开、宽限期结束、Room dispose 时 checkpoint 并释放租约；30 秒租约、10 秒续租。
+- 每张地图固定 Room：`world_map:starter_town`、`world_map:starter_wilds`。
+- 加入时校验角色持久化地图与 Room 一致；不接受客户端选图。
+- 编译导航格寻路/碰撞/目标校验；站立传送门自动服务端传送。
+- 传送：写入新地图/坐标 -> 释放租约 -> 移除旧实体 -> `session.transfer`；
+  客户端重新取 ticket 加入目标 Room。
+- 每客户端 `StateView` AOI；增量加入/移除；离开释放视图。
+- 20 秒节流 checkpoint，离开/宽限期/Dispose 立即保存。
+- 同图聊天：120 字符、控制字符拒绝、4/2s 令牌桶、32 条去重、Room 广播。
+- 指标增加 chat/transfer；30 玩家负载脚本。
+
+`apps/control-api`：
+
+- 新建角色出生在主城编译出生点。
+- `pnpm repair:maps` 将 132 个阶段 2 角色迁移到主城（幂等）。
 
 `apps/game-web`：
 
-- 登录/注册页、角色选择与创建页、世界页三段式流程。
-- API 客户端自动 refresh 重试；错误 envelope 展示服务端消息。
-- 每次入图获取新 ticket；重连 token 按角色隔离。
-- 移除 `?name/?key` 开发身份参数；保留 DEV-only `?fresh/?join` 测试隔离。
+- 加载编译地图 + asset manifest；tileset 与角色帧注册。
+- 静态地表/低层装饰合成到单个 RenderTexture；墙体挤出、树冠遮挡、NPC/传送门标记。
+- 脚底锚点、Y 深度排序、摄像机跟随、路径预览。
+- 传送后重建场景并丢弃旧快照；HUD 地图名/ID、附近玩家、HP/MP、聊天、tick。
+- 开发调试钩子增加 `moveToTile`、`currentMapId` 与可见性诊断。
 
 `tests` 与文档：
 
-- 31 个测试文件、146 个测试；9 个真实浏览器 E2E。
-- ADR-017（账号会话、ticket、租约），ADR-015 标记 Superseded。
-- 阶段 2 报告、认证/角色/双人截图、WebSocket 日志、数据库证据。
+- 33 个测试文件、167 个测试；12 个真实浏览器 E2E。
+- ADR-018；AGENTS/README 更新；阶段 3 报告与截图/日志/负载/数据库证据。
 
 ## 5. 尚未完成内容
 
-- 阶段 3 起全部玩法与业务：Tiled 地图、map-runtime、AOI、地图切换、怪物、
-  战斗、技能、掉落、背包、装备、金币、聊天、PK、复活、运营后台和内容发布。
-- 周期位置/HP/MP checkpoint（当前仅离开时保存）。
-- 票据与会话清理任务；多进程租约协调与崩溃恢复优化。
-- 多地图、多线路、多 Game Server、Redis Presence/Driver。
-- 生产部署、HTTPS/WSS、分布式限频、监控接入、压测、备份恢复。
+- 阶段 4 起全部玩法：怪物、战斗、技能、掉落、背包、装备、金币、PK、复活。
+- 运营后台、管理员 RBAC、Outbox、内容 Draft/Release/回滚（阶段 7）。
+- 多地图线路、多 Game Server、Redis Presence/Driver、Room drain（阶段 8）。
+- 50 人 10 分钟压测、patch bytes、带宽、崩溃恢复演练（阶段 8）。
+- 聊天过滤、频道、私聊、持久化与审核（阶段 6/7）。
+- NPC 行为与怪物实体：当前只有编译数据点与 NPC 标记。
 - 独立测试数据库或临时 schema（阶段 5 前）。
 - 密码找回、邮箱验证、MFA。
-- 正式美术资源与 Tiled 管线；当前地图与角色仍是明确标识的技术占位资产。
+- 正式美术资源与 Tiled 资源管线视觉门禁；当前为明确标识的占位资产。
 
 ## 6. 当前技术风险
 
-| 风险                                | 影响                          | 缓解                                                      |
-| ----------------------------------- | ----------------------------- | --------------------------------------------------------- |
-| 进程崩溃后角色租约最长 30 秒仍有效  | 重启后短时间提示“另一台设备”  | 正常离开立即释放；阶段 3/8 增加进程注册与恢复策略         |
-| 位置仅在离开/dispose 时 checkpoint  | 崩溃丢失最近移动              | 阶段 3 实现节流 checkpoint；已提交的角色与资产不受影响    |
-| 票据/会话行不自动清理               | 表增长                        | MVP 数据量小；阶段 7/8 增加清理任务与指标                 |
-| 认证限频为单进程内存                | 多实例下限频不一致            | 阶段 8 使用网关或 Redis；MVP 单实例                       |
-| access token 每次请求查库           | 认证请求增加数据库读          | MVP 规模可接受；后续可加缓存或签名 token                  |
-| 共享开发数据库                      | 测试数据残留、并行污染        | 唯一账号/角色名；阶段 5 前建立独立测试库                  |
-| 技术测试地图与占位角色视觉          | 不代表最终画面与手感          | 阶段 3 接 Tiled/资源管线                                  |
-| 250ms 可见性目标接近本机上限        | 容器/软件渲染下偶发接近 200ms | 实测 141–204ms；后续超标先查 patch 与渲染，不降低断言     |
-| Colyseus 0.18 API 较新              | 升级可能改变 Room/重连行为    | 真实 WebSocket 集成测试锁定 join/移动/拒绝/重连/租约/指标 |
-| 单房间 30/50 人容量尚未实测         | 阶段 8 目标未知               | 阶段 8 真实压测；当前 50 人上限只是保护值                 |
-| 角色数量上限“先查后插”              | 极端并发可超过 8 个           | 不影响资产安全；后续加数据库约束或事务                    |
-| 开发 PostgreSQL 端口发布在所有接口  | 共享主机暴露风险              | 仅本地开发；生产使用私有网络                              |
-| 容器 inotify 限额 8192              | watcher ENOSPC                | 默认后端无 watch、Vite 轮询                               |
-| Playwright 浏览器无法在当前系统下载 | E2E 依赖预装 Chromium         | `.env` 指定 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`              |
-| Redis 8.2 本地镜像不可用            | scale profile 暂不可启动      | MVP 不依赖 Redis                                          |
+| 风险                                | 影响                         | 缓解                                               |
+| ----------------------------------- | ---------------------------- | -------------------------------------------------- |
+| 单地图固定实例                      | 无法按人数开线路             | MVP 单实例；阶段 8 增加实例与路由                  |
+| 传送为离开/重新加入                 | 切换有短暂加载               | 服务端先提交再通知；客户端重建场景；后续优化体验   |
+| 传送提交后客户端未加入目标 Room     | 角色停留在目标地图           | 重新进入即可恢复；后续加传送回执与重试             |
+| AOI 依赖 Colyseus StateView 行为    | 升级可能改变过滤/带宽        | 集成测试锁定远处不可见、近处可见、离开释放         |
+| checkpoint 20 秒                    | 崩溃最多丢 20 秒瞬时状态     | 正常离开立即保存；资产不在 tick/内存中             |
+| 聊天无持久化/过滤                   | 无审核与跨图能力             | 阶段 6/7 增加                                      |
+| 软件渲染下浏览器约 22–27 FPS        | 客户端帧率与可见延迟受影响   | 静态地表合批、nearest 渲染、20Hz patch；真机应更高 |
+| patch 20Hz 带宽约翻倍               | 30/50 人带宽需实测           | 阶段 8 记录 patch bytes 并重新评估                 |
+| Node fetch 拒绝 87 端口             | 负载脚本不能直连 matchmaking | 通过 Vite `/ws` 代理 + `node:http` 读指标          |
+| 30 人短时负载不是容量承诺           | 不能据此宣称 50 人稳定       | 阶段 8 固定机器规格、10 分钟压测                   |
+| 进程崩溃后租约最长 30 秒仍有效      | 重启后短时间提示“另一台设备” | 正常离开立即释放；阶段 8 增加进程注册与恢复策略    |
+| 票据/会话行不自动清理               | 表增长                       | MVP 数据量小；阶段 7/8 增加清理任务与指标          |
+| 认证/聊天限频为单进程内存           | 多实例下不一致               | 阶段 8 使用网关或 Redis；MVP 单实例                |
+| 共享开发数据库                      | 测试数据残留、并行污染       | 唯一账号/角色名；阶段 5 前建立独立测试库           |
+| 技术占位美术                        | 不代表最终画面               | 阶段 8 前完成资源门禁与正式素材                    |
+| 开发 PostgreSQL 端口发布在所有接口  | 共享主机暴露风险             | 仅本地开发；生产使用私有网络                       |
+| 容器 inotify 限额 8192              | watcher ENOSPC               | 默认后端无 watch、Vite 轮询                        |
+| Playwright 浏览器无法在当前系统下载 | E2E 依赖预装 Chromium        | `.env` 指定 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`       |
+| Redis 8.2 本地镜像不可用            | scale profile 暂不可启动     | MVP 不依赖 Redis                                   |
 
 ## 7. 已知问题
 
-- 当前主机 84–87 被用户已有的开发栈占用；本阶段 E2E 在 8844–8847 运行同一套
-  新代码（仅端口不同，未停止用户进程）。正常环境使用默认端口。
+- 当前开发栈在 84–87（宿主机 8584–8587）运行；`http://<LAN-IP>:8584/` 可供实测。
 - `pnpm dev` 默认不热重载后端；修改后端需重启开发栈。前端 Vite 轮询热更新。
-- 开发端口为 84/85/86/87，而非架构示例中的 5173/5174/3000/2567。
+- Node 的 `fetch`（含 Colyseus SDK matchmaking）拒绝 87 端口；负载脚本通过
+  Vite `/ws` 代理连接并用 `node:http` 读取 `/metrics`。
 - 浏览器通过同源 `/ws` 访问实时服务器；生产反向代理必须转发该路径的 HTTP 与
   WebSocket，或设置 `VITE_GAME_SERVER_URL`。
 - `/api` 与 `/ws` 开发代理必须保留原始 Host（`changeOrigin: false`），否则
   CSRF Origin 校验会拒绝局域网来源。
-- `?fresh/?join` 仅在开发构建生效；生产构建忽略。`?name/?key` 已移除。
-- 管理后台仍只有阶段 0 健康状态与交付说明，没有业务页面（阶段 7）。
+- `?fresh/?join` 仅在开发构建生效；`?join` 指向的房间必须与角色当前地图一致，
+  传送后不要用旧 roomId 重载。
 - 角色被另一客户端控制时统一返回 525；客户端展示服务端消息，但不区分“租约被占”
-  与“票据失效”的错误码。
-- `pnpm test:e2e` 会执行迁移与区服 seed，并启动 game-web、admin-web、
-  control-api、game-server 四个服务；开发栈已运行时加
-  `PLAYWRIGHT_SKIP_WEBSERVER=true`。
-- 集成与 E2E 使用共享开发库，会留下测试账号/角色/票据记录。
+  与“票据失效/地图不一致”的错误码。
+- `pnpm test:e2e` 会执行迁移与区服 seed，并启动四个服务；开发栈已运行时加
+  `PLAYWRIGHT_SKIP_WEBSERVER=true`。本次 E2E 在 84–87 上运行。
+- 集成与 E2E 使用共享开发库，会留下测试账号/角色/票据记录；当前库有 509 个
+  `starter_town` 角色、3 个 `starter_wilds` 角色。
+- 技术占位 tileset 与角色 Sprite 由脚本生成；Tiled 源图为正交逻辑网格，客户端
+  做伪等距投影（ADR-018）。
+- `patch` 为 20Hz；阶段 8 需重新评估带宽与频率。
 
 ## 8. 阻塞事项
 
-无阻塞。阶段 2 已由用户在 8584 实测通过；阶段 3 待下一次会话启动。
+无阻塞。阶段 3 已完成并等待 Tech Lead 审阅；阶段 4 待审阅通过后启动。
 
 ## 9. 最近一次测试结果
 
 日期：2026-11-24
 
-| 检查        | 命令                                                        | 结果                                     |
-| ----------- | ----------------------------------------------------------- | ---------------------------------------- |
-| 格式        | `pnpm format:check`                                         | 通过                                     |
-| Lint / 边界 | `pnpm lint`                                                 | 通过（0 error / 0 warning）              |
-| 类型        | `pnpm typecheck`                                            | 通过（根配置 + 12 个 workspace）         |
-| 单元/集成   | `pnpm test`                                                 | 31 个文件，146 个测试全部通过（约 4.5s） |
-| 浏览器      | `PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e`（8844–8847） | 9 个测试全部通过（约 44s）               |
-| 构建        | `pnpm build`                                                | 4 个应用全部成功                         |
-| 迁移        | `pnpm db:migrate`                                           | 2 条迁移在真实 PostgreSQL 18.3 执行      |
-| 区服        | `pnpm db:seed`                                              | 幂等写入 `classic-01`                    |
+| 检查        | 命令                                           | 结果                                          |
+| ----------- | ---------------------------------------------- | --------------------------------------------- |
+| 格式        | `pnpm format:check`                            | 通过                                          |
+| Lint / 边界 | `pnpm lint`                                    | 通过（0 error / 0 warning）                   |
+| 类型        | `pnpm typecheck`                               | 通过（根配置 + 12 个 workspace）              |
+| 单元/集成   | `pnpm test`                                    | 33 个文件，167 个测试全部通过（约 6.3s）      |
+| 浏览器      | `PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e` | 12 个测试全部通过（约 1.1 分钟）              |
+| 构建        | `pnpm build`                                   | 4 个应用全部成功                              |
+| 地图编译    | `pnpm maps:compile`                            | 2 张地图、checksum 稳定                       |
+| 角色迁移    | `pnpm repair:maps`                             | 132 个角色迁移到 `starter_town`               |
+| 负载        | `pnpm load:world`                              | 30/30 玩家、750 接受、0 拒绝、tick p95 1.53ms |
 
-用户验收（2026-11-24）：
+阶段 3 关键证据：
 
-- 用户在 `http://<LAN-IP>:8584/` 完成注册、创建角色并进入世界，确认测试通过。
-- 遗留的 8588 演示栈（旧 game-server 89）已停止；阶段 2 统一使用 84–87。
-- 用户决定保留 PostgreSQL 容器，下一次会话继续使用现有数据。
-
-阶段 2 关键证据：
-
-- 双人可见延迟：完整套件 141ms；单独运行 184ms；均 < 250ms。
-- 票据一次性：110 张票据中 101 已消费、9 已过期、0 张未消费未过期。
-- 租约：集成测试与 E2E 均证明第二客户端被拒；测试结束 0 个活跃租约。
-- 位置恢复与 checkpoint：集成测试逐字段断言；90 个角色记录 version > 0。
-- 认证安全：未知账号 401、错误密码 401、跨账号读取/票据 404、旧 refresh 401、
-  登出后 access/refresh 均 401、跨源写 403、限频 429。
-- 生产门禁：伪造 ticket 与自报身份字段均 525；diagnostics Room 不存在（520）。
-- 局域网 HTTP：注册、建角、入图、移动全部通过；`isSecureContext === false`。
-- 证据目录：`docs/phase-reports/phase-02/`。
+- 双人移动可见：点击 → 远端 DOM 139ms（完整 12 测试套件）；点击 → 远端首个
+  moving 快照 101ms；点击 → 服务端 ack 85ms。
+- 传送：主城 → 野外 → 主城双向；旧 Room 实体先移除；新 Room 人数 1；数据库
+  `map_id` 与目标坐标一致。
+- AOI：相距 34 格的两名玩家在各自客户端只看到自己；权威 Room 玩家数为 2。
+- 聊天：双浏览器收到同一消息；重复 id 只广播一次；121 字符与突发被拒。
+- 负载：30 人持续移动 10 秒，tick p50 0.15ms、p95 1.53ms、p99 2.20ms、
+  max 3.11ms，229 个样本。
+- 数据库：2 条迁移、6 张表、481 个角色 `version > 0`、0 个活跃租约、
+  0 张未消费未过期票据。
+- 证据目录：`docs/phase-reports/phase-03/`。
 
 ## 10. 最近一次 Git 提交
 
@@ -195,7 +222,7 @@
 - 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
 - 阶段 1 修复提交：`954155f`、`5f2dbbf`、`f4b74ff`
 - 阶段 2 主提交：`df45db7feb83f973129626c51c013d9fecc98d69`
-  主题：`feat(phase-2): deliver accounts, characters and one-time game tickets`
+- 阶段 3 主提交：待本次提交后由 `docs(phase-3)` 提交记录
 
 ## 11. 当前环境事实
 
@@ -203,12 +230,15 @@
 - Docker 24.0.5，Docker Compose v5.7.0；PostgreSQL 18.3。
 - SSH 容器端口映射：宿主机 `8580-8589` → 容器 `80-89`；项目默认使用 84–87。
 - PostgreSQL 从 SSH 容器通过网关 `192.51.0.1:5432` 访问。
-- Playwright 使用预装 Chromium 131。
-- 本地开发库当前有 132 个测试账号、108 个测试角色、110 张票据（均来自真实
-  集成/E2E 流程）。
+- Playwright 使用预装 Chromium 131；浏览器在软件渲染下约 22–27 FPS。
+- 开发库当前有 571 个账号、512 个角色（509 主城 / 3 野外）、548 张票据
+  （520 消费 / 28 过期 / 0 开放）、0 个活跃租约。
+- 阶段 2 创建的 132 个角色已通过 `pnpm repair:maps` 迁移到主城。
 
 ## 12. 下一步
 
-下一次会话开始阶段 3，按 `docs/phase-reports/PHASE_02_REPORT.md` 第 10 节执行：
-Tiled 地图、map-runtime、地图实例与传送、AOI、节流 checkpoint 与同图聊天。
-会话开始时先启动 84–87 开发栈并交给用户测试。阶段 3 验收通过前不得进入阶段 4。
+1. Tech Lead 审阅阶段 3 报告、ADR-018 与证据。
+2. 审阅通过后执行阶段 4：`game-domain` 战斗纯函数、两种怪物与刷点、服务端 RNG、
+   战士普攻/技能、CombatEvent、死亡与刷新、双浏览器一致性测试。
+3. 保持阶段 3 的 AOI、传送、租约、checkpoint、聊天测试为回归门禁。
+4. 阶段 4 验收通过前不得进入阶段 5。

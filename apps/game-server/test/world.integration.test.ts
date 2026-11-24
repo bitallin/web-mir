@@ -3,14 +3,21 @@ import { createServer as createNetServer } from 'node:net';
 
 import { Client, type Room as SdkRoom } from '@colyseus/sdk';
 import {
+  STARTER_TOWN_MAP_ID,
+  STARTER_WILDS_MAP_ID,
+  chatMessageSchema,
   commandAckSchema,
+  sessionTransferSchema,
   commandRejectedSchema,
   PROTOCOL_VERSION,
   TILE_UNITS,
-  WORLD_ROOM_NAME,
+  worldRoomNameFor,
+  type ChatMessage,
   type CommandAck,
   type CommandRejected,
+  type SessionTransfer,
 } from '@web-legend/contracts';
+import { STARTER_TOWN_MAP, STARTER_WILDS_MAP } from '@web-legend/contracts/maps';
 import {
   WorldState,
   type PlayerStateInstance,
@@ -28,7 +35,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { GameServerEnv } from '../src/env';
 import { createGameServer, type GameServerRuntime } from '../src/server';
-import { createActor, issueTicket, type TestActor } from './worldTestHelpers';
+import { createActor, issueTicket, tileUnits, type TestActor } from './worldTestHelpers';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -173,9 +180,12 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
     return instance;
   }
 
-  async function createWorld(ticket: string): Promise<WorldRoom> {
+  async function createWorld(
+    ticket: string,
+    mapId: string = STARTER_TOWN_MAP_ID,
+  ): Promise<WorldRoom> {
     const room = (await client().create(
-      WORLD_ROOM_NAME,
+      worldRoomNameFor(mapId),
       joinOptions(ticket),
       WorldState,
     )) as WorldRoom;
@@ -211,7 +221,7 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
       env,
       logger: logger(),
       database: db,
-      world: { reconnectGraceSeconds: 1 },
+      world: { reconnectGraceSeconds: 1, checkpointIntervalMs: 250 },
     });
 
     await runtime.listen();
@@ -240,7 +250,7 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
       'both players visible',
     );
 
-    expect(aliceRoom.state.mapId).toBe('phase1_test_map');
+    expect(aliceRoom.state.mapId).toBe(STARTER_TOWN_MAP_ID);
     expect(aliceRoom.state.tickHz).toBe(20);
 
     const names = [...bobRoom.state.players.values()].map((player) => player.displayName).sort();
@@ -359,7 +369,7 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
       protocolVersion: PROTOCOL_VERSION,
       commandId: randomUUID(),
       clientSequence: 3,
-      targetTileX: 23,
+      targetTileX: 21,
       targetTileY: 5,
     });
     expect(sealed.code).toBe('UNREACHABLE');
@@ -673,5 +683,235 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
     const stored = await findCharacterById(db, alice.character.id);
     expect(stored?.y).toBe(target.y * TILE_UNITS + TILE_UNITS / 2);
     expect(stored?.version).toBeGreaterThan(alice.character.version);
+
+    // A fresh room must restore the committed position from PostgreSQL.
+    const restartTicket = await issueTicket(db, alice);
+    const restarted = await createWorld(restartTicket);
+    const restored = await waitForPlayer(restarted, alice.character.id);
+    expect(restored.x).toBe(targetX);
+    expect(restored.y).toBe(target.y * TILE_UNITS + TILE_UNITS / 2);
+  });
+
+  it('throttled checkpoints persist movement without leaving the world', async () => {
+    const alice = await createActor(db, 'Alice');
+    const room = await createWorld(alice.ticket);
+    await waitForPlayer(room, alice.character.id);
+    const tile = playerTile(room, alice.character.id);
+    expect(tile).toBeDefined();
+    if (tile === undefined) {
+      return;
+    }
+    const target = { x: tile.x + 1, y: tile.y };
+    const targetX = target.x * TILE_UNITS + TILE_UNITS / 2;
+
+    const ack = waitForMessage<CommandAck>(room, 'command.ack', (body) =>
+      commandAckSchema.parse(body),
+    );
+    room.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetTileX: target.x,
+      targetTileY: target.y,
+    });
+    await ack;
+
+    await waitUntilAsync(
+      async () => (await findCharacterById(db, alice.character.id))?.x === targetX,
+      5_000,
+      'throttled checkpoint',
+    );
+    await waitUntil(
+      () => room.state.players.get(alice.character.id)?.x === targetX,
+      5_000,
+      'server position',
+    );
+  });
+
+  it('only sends entities inside the AOI cells to each client', async () => {
+    const alice = await createActor(db, 'Alice', { position: tileUnits({ x: 2, y: 10 }) });
+    const bob = await createActor(db, 'Bob', { position: tileUnits({ x: 36, y: 10 }) });
+    const aliceRoom = await createWorld(alice.ticket);
+    const bobRoom = await joinWorld(aliceRoom.roomId, bob.ticket);
+
+    await waitUntil(
+      () => aliceRoom.state.playerCount === 2 && bobRoom.state.playerCount === 2,
+      5_000,
+      'both players in the authoritative room',
+    );
+    await waitUntil(
+      () => playerCount(aliceRoom) === 1 && playerCount(bobRoom) === 1,
+      5_000,
+      'AOI filtering',
+    );
+
+    expect(aliceRoom.state.players.get(alice.character.id)).toBeDefined();
+    expect(aliceRoom.state.players.get(bob.character.id)).toBeUndefined();
+    expect(bobRoom.state.players.get(bob.character.id)).toBeDefined();
+    expect(bobRoom.state.players.get(alice.character.id)).toBeUndefined();
+  });
+
+  it('broadcasts same-map chat, deduplicates ids and enforces limits', async () => {
+    const alice = await createActor(db, 'Alice');
+    const bob = await createActor(db, 'Bob');
+    const aliceRoom = await createWorld(alice.ticket);
+    const bobRoom = await joinWorld(aliceRoom.roomId, bob.ticket);
+    await waitUntil(
+      () => playerCount(aliceRoom) === 2 && playerCount(bobRoom) === 2,
+      5_000,
+      'both players visible',
+    );
+
+    const aliceMessages: ChatMessage[] = [];
+    const bobMessages: ChatMessage[] = [];
+    const aliceRejections: CommandRejected[] = [];
+    const offAliceChat = aliceRoom.onMessage('chat.message', (payload: unknown) => {
+      aliceMessages.push(chatMessageSchema.parse(payload));
+    });
+    const offBobChat = bobRoom.onMessage('chat.message', (payload: unknown) => {
+      bobMessages.push(chatMessageSchema.parse(payload));
+    });
+    const offReject = aliceRoom.onMessage('command.rejected', (payload: unknown) => {
+      aliceRejections.push(commandRejectedSchema.parse(payload));
+    });
+
+    try {
+      const clientMessageId = randomUUID();
+      const chat = {
+        protocolVersion: PROTOCOL_VERSION,
+        clientMessageId,
+        message: '组队去野外吗？',
+      };
+      aliceRoom.send('chat.send', chat);
+      await waitUntil(
+        () => aliceMessages.length >= 1 && bobMessages.length >= 1,
+        5_000,
+        'chat broadcast',
+      );
+      expect(bobMessages[0]?.message).toBe('组队去野外吗？');
+      expect(bobMessages[0]?.playerId).toBe(alice.character.id);
+
+      aliceRoom.send('chat.send', chat);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(aliceMessages).toHaveLength(1);
+
+      aliceRoom.send('chat.send', {
+        protocolVersion: PROTOCOL_VERSION,
+        clientMessageId: randomUUID(),
+        message: 'x'.repeat(121),
+      });
+      await waitUntil(
+        () => aliceRejections.some((rejection) => rejection.code === 'INVALID_PAYLOAD'),
+        5_000,
+        'oversized chat rejection',
+      );
+
+      for (let index = 0; index < 12; index += 1) {
+        aliceRoom.send('chat.send', {
+          protocolVersion: PROTOCOL_VERSION,
+          clientMessageId: randomUUID(),
+          message: `burst ${String(index)}`,
+        });
+      }
+      await waitUntil(
+        () => aliceRejections.some((rejection) => rejection.code === 'RATE_LIMITED'),
+        5_000,
+        'chat rate limit',
+      );
+    } finally {
+      offAliceChat();
+      offBobChat();
+      offReject();
+    }
+  });
+
+  it('transfers through a portal without duplicating the character and back again', async () => {
+    const alice = await createActor(db, 'Alice', {
+      position: tileUnits({ x: 38, y: 15 }),
+    });
+    const room = await createWorld(alice.ticket);
+
+    const outbound = await waitForMessage<SessionTransfer>(room, 'session.transfer', (payload) =>
+      sessionTransferSchema.parse(payload),
+    );
+    expect(outbound.mapId).toBe(STARTER_WILDS_MAP_ID);
+
+    const townPortal = STARTER_TOWN_MAP.portals[0];
+    if (townPortal === undefined) {
+      throw new Error('starter town has no portal');
+    }
+    const entry = tileUnits(townPortal.targetTile);
+
+    await waitUntilAsync(
+      async () => {
+        const stored = await findCharacterById(db, alice.character.id);
+        return stored?.mapId === STARTER_WILDS_MAP_ID && stored.x === entry.x;
+      },
+      5_000,
+      'persisted map transfer',
+    );
+    await waitUntil(
+      () => room.state.players.get(alice.character.id) === undefined,
+      5_000,
+      'removed from the old map',
+    );
+    await waitUntilAsync(
+      async () => (await findCharacterLease(db, alice.character.id)) === undefined,
+      5_000,
+      'lease released by transfer',
+    );
+    await room.leave();
+
+    const wildsTicket = await issueTicket(db, alice);
+    const wildsRoom = await createWorld(wildsTicket, STARTER_WILDS_MAP_ID);
+    const wildsPlayer = await waitForPlayer(wildsRoom, alice.character.id);
+    expect(wildsPlayer.x).toBe(entry.x);
+    expect(wildsPlayer.y).toBe(entry.y);
+    expect(playerCount(wildsRoom)).toBe(1);
+
+    // A character persisted in the wilds cannot enter the town room.
+    const wrongMapTicket = await issueTicket(db, alice);
+    await expect(createWorld(wrongMapTicket, STARTER_TOWN_MAP_ID)).rejects.toMatchObject({
+      code: 525,
+    });
+
+    // Walk back onto the return portal.
+    const returnTile = { x: 1, y: 16 };
+    const backAck = waitForMessage<CommandAck>(wildsRoom, 'command.ack', (body) =>
+      commandAckSchema.parse(body),
+    );
+    wildsRoom.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetTileX: returnTile.x,
+      targetTileY: returnTile.y,
+    });
+    await backAck;
+
+    const inbound = await waitForMessage<SessionTransfer>(
+      wildsRoom,
+      'session.transfer',
+      (payload) => sessionTransferSchema.parse(payload),
+    );
+    expect(inbound.mapId).toBe(STARTER_TOWN_MAP_ID);
+
+    const townPortalBack = STARTER_WILDS_MAP.portals[0];
+    if (townPortalBack === undefined) {
+      throw new Error('starter wilds has no portal');
+    }
+    const backEntry = tileUnits(townPortalBack.targetTile);
+    await waitUntilAsync(
+      async () => {
+        const stored = await findCharacterById(db, alice.character.id);
+        return (
+          stored?.mapId === STARTER_TOWN_MAP_ID &&
+          stored.x === backEntry.x &&
+          stored.y === backEntry.y
+        );
+      },
+      5_000,
+      'persisted return transfer',
+    );
   });
 });

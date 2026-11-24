@@ -1,7 +1,7 @@
 import { createServer as createNetServer } from 'node:net';
 
 import { Client } from '@colyseus/sdk';
-import { PROTOCOL_VERSION, WORLD_ROOM_NAME } from '@web-legend/contracts';
+import { PROTOCOL_VERSION, STARTER_TOWN_MAP_ID, worldRoomNameFor } from '@web-legend/contracts';
 import { createLogger } from '@web-legend/observability';
 import { createDatabase, type DatabaseHandle } from '@web-legend/persistence';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -79,7 +79,7 @@ describe('production game server', () => {
     const client = new Client(baseUrl);
 
     await expect(
-      client.create(WORLD_ROOM_NAME, {
+      client.create(worldRoomNameFor(STARTER_TOWN_MAP_ID), {
         protocolVersion: PROTOCOL_VERSION,
         ticket: 'A'.repeat(43),
       }),
@@ -90,7 +90,7 @@ describe('production game server', () => {
     const client = new Client(baseUrl);
 
     await expect(
-      client.create(WORLD_ROOM_NAME, {
+      client.create(worldRoomNameFor(STARTER_TOWN_MAP_ID), {
         protocolVersion: PROTOCOL_VERSION,
         ticket: 'A'.repeat(43),
         accountId: 'admin',

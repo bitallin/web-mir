@@ -1,26 +1,24 @@
 import Phaser from 'phaser';
 import {
-  isTileWalkable,
-  MAP_TILE_GRASS,
   PLAYER_SPEED_UNITS_PER_SECOND,
   TILE_UNITS,
-  tileCharAt,
   type CommandAck,
-  type MapManifest,
   type TilePoint,
 } from '@web-legend/contracts';
 
 import type { PlayerView } from '../net/worldClient';
 import { createProjection, TILE_HEIGHT, TILE_WIDTH, type ScreenPoint } from './projection';
-import { TECHNICAL_MAP } from './technicalMap';
+import type { MapBundle } from './mapCatalog';
 import type { SceneSnapshot, WorldBridge, WorldSceneHandle } from './worldBridge';
 
 const DISPLAY_FONT = '"Noto Serif SC", "Songti SC", "SimSun", Georgia, serif';
-const WALL_HEIGHT = 22;
+const WALL_HEIGHT = 24;
 const MAX_FRAME_MS = 100;
 const SNAP_DISTANCE_UNITS = 900;
+const GROUND_DEPTH = -10_000;
+const WALK_ANIMATION_MS = 150;
 
-const PLAYER_COLORS = [0x7fa8c9, 0xc98f6a, 0x8fbf8a, 0xb48fc9, 0xc9b56a, 0x6aa8a8];
+const PLAYER_COLORS = [0x9fc4e0, 0xe0b087, 0xa8d6a1, 0xcf9fe0, 0xe0d18f, 0x8fd0d0];
 
 type UnitPoint = { x: number; y: number };
 
@@ -42,41 +40,33 @@ function tileCenterUnits(tile: TilePoint): UnitPoint {
 class PlayerVisual {
   readonly container: Phaser.GameObjects.Container;
   readonly nameText: Phaser.GameObjects.Text;
+  readonly sprite: Phaser.GameObjects.Sprite;
   readonly isSelf: boolean;
   current: ScreenPoint = { x: 0, y: 0 };
   target: ScreenPoint = { x: 0, y: 0 };
   private initialized = false;
+  private animationClock = 0;
+  private facing = 2;
+  private moving = false;
+  private frameIndex = 0;
 
-  constructor(scene: Phaser.Scene, displayName: string, colorIndex: number, isSelf: boolean) {
+  constructor(
+    scene: Phaser.Scene,
+    displayName: string,
+    colorIndex: number,
+    isSelf: boolean,
+    framePrefix: string,
+  ) {
     this.isSelf = isSelf;
-    const color = PLAYER_COLORS[colorIndex % PLAYER_COLORS.length] ?? PLAYER_COLORS[0] ?? 0x7fa8c9;
+    const color = PLAYER_COLORS[colorIndex % PLAYER_COLORS.length] ?? PLAYER_COLORS[0] ?? 0x9fc4e0;
 
-    const body = scene.add.graphics();
-    body.fillStyle(0x000000, 0.35);
-    body.fillEllipse(0, 0, 28, 12);
-    if (isSelf) {
-      body.lineStyle(2, 0xc9a227, 0.9);
-      body.strokeEllipse(0, 0, 34, 16);
-    }
-    body.fillStyle(color, 1);
-    body.fillPoints(
-      toVector2([
-        { x: -9, y: 0 },
-        { x: 9, y: 0 },
-        { x: 6, y: -26 },
-        { x: -6, y: -26 },
-      ]),
-      true,
-    );
-    body.fillStyle(0x24211d, 1);
-    body.fillRect(-7, -9, 14, 3);
-    body.fillStyle(0xd8c3a5, 1);
-    body.fillCircle(0, -33, 7);
-    body.fillStyle(0x2b2118, 1);
-    body.fillEllipse(0, -37, 15, 9);
+    this.sprite = scene.add
+      .sprite(0, 0, 'characters', `${framePrefix}d2f0`)
+      .setOrigin(0.5, 1)
+      .setTint(color);
 
     this.nameText = scene.add
-      .text(0, -45, displayName, {
+      .text(0, -50, displayName, {
         fontFamily: DISPLAY_FONT,
         fontSize: '13px',
         color: isSelf ? '#e5c15a' : '#e8e0cd',
@@ -85,7 +75,7 @@ class PlayerVisual {
       })
       .setOrigin(0.5, 1);
 
-    this.container = scene.add.container(0, 0, [body, this.nameText]);
+    this.container = scene.add.container(0, 0, [this.sprite, this.nameText]);
   }
 
   setDisplayName(displayName: string): void {
@@ -108,7 +98,12 @@ class PlayerVisual {
     }
   }
 
-  update(deltaMs: number): void {
+  setMotion(moving: boolean, facing: number): void {
+    this.moving = moving;
+    this.facing = ((facing % 4) + 4) % 4;
+  }
+
+  update(deltaMs: number, framePrefix: string): void {
     const factor = 1 - Math.exp(-deltaMs / 70);
     this.current = {
       x: lerp(this.current.x, this.target.x, factor),
@@ -116,6 +111,15 @@ class PlayerVisual {
     };
     this.container.setPosition(this.current.x, this.current.y);
     this.container.setDepth(this.current.y);
+
+    if (this.moving) {
+      this.animationClock += deltaMs;
+      this.frameIndex = Math.floor(this.animationClock / WALK_ANIMATION_MS) % 2;
+    } else {
+      this.animationClock = 0;
+      this.frameIndex = 0;
+    }
+    this.sprite.setFrame(`${framePrefix}d${String(this.facing)}f${String(this.frameIndex)}`);
   }
 
   destroy(): void {
@@ -124,27 +128,38 @@ class PlayerVisual {
 }
 
 /**
- * Phase 1 technical world scene: pseudo-isometric ground, foot-anchored players
- * with Y-depth sorting, server-driven remote interpolation, short local
- * prediction along the server-approved path, and intent-only input.
+ * Phase-3 world scene. It renders the compiled map manifest with the asset
+ * manifest's tileset, keeps foot-anchored players Y-sorted, and drives local
+ * prediction only from server-approved paths.
  */
 export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private readonly bridge: WorldBridge;
-  private readonly map: MapManifest = TECHNICAL_MAP;
-  private readonly projection = createProjection(TECHNICAL_MAP);
+  private readonly bundle: MapBundle;
+  private readonly projection: ReturnType<typeof createProjection>;
   private readonly visuals = new Map<string, PlayerVisual>();
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private selfId: string | null = null;
   private predicted: UnitPoint | null = null;
   private path: UnitPoint[] = [];
   private speed: number = PLAYER_SPEED_UNITS_PER_SECOND;
+  private readonly framePrefix = 'p';
 
-  constructor(bridge: WorldBridge) {
+  constructor(bridge: WorldBridge, bundle: MapBundle) {
     super('world');
     this.bridge = bridge;
+    this.bundle = bundle;
+    this.projection = createProjection(bundle.manifest);
+  }
+
+  preload(): void {
+    this.load.image('terrain', this.bundle.terrainImageUrl);
+    this.load.image('characters', this.bundle.playerImageUrl);
   }
 
   create(): void {
+    this.registerTilesetFrames();
+    this.registerCharacterFrames();
+
     const camera = this.cameras.main;
     camera.setBackgroundColor('#0b0d10');
     camera.setBounds(0, 0, this.projection.mapWidth, this.projection.mapHeight);
@@ -155,9 +170,12 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     this.predicted = null;
     this.path = [];
 
-    this.drawGround();
-    this.drawWalls();
+    this.drawMap();
+    this.drawPortals();
+    this.drawNpcs();
     this.pathGraphics = this.add.graphics().setDepth(1);
+
+    camera.fadeIn(280, 11, 13, 16);
 
     this.input.on('pointerdown', this.handlePointerDown, this);
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
@@ -182,7 +200,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
     let focus: ScreenPoint | null = null;
     for (const visual of this.visuals.values()) {
-      visual.update(delta);
+      visual.update(delta, this.framePrefix);
       if (visual.isSelf) {
         focus = visual.current;
       }
@@ -202,11 +220,18 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       let visual = this.visuals.get(player.playerId);
       const isSelf = player.playerId === this.selfId;
       if (visual === undefined) {
-        visual = new PlayerVisual(this, player.displayName, player.colorIndex, isSelf);
+        visual = new PlayerVisual(
+          this,
+          player.displayName,
+          player.colorIndex,
+          isSelf,
+          this.framePrefix,
+        );
         this.visuals.set(player.playerId, visual);
       }
       visual.setDisplayName(player.displayName);
       visual.setConnected(player.connected);
+      visual.setMotion(player.moving, player.facing);
 
       if (isSelf) {
         this.applySelfPosition(player);
@@ -244,6 +269,47 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
   restart(): void {
     this.scene.restart();
+  }
+
+  private registerTilesetFrames(): void {
+    const texture = this.textures.get('terrain');
+    const { tileset } = this.bundle;
+    for (let gid = 1; gid <= tileset.tileCount; gid += 1) {
+      const name = `tile-${String(gid - 1)}`;
+      if (texture.has(name)) {
+        continue;
+      }
+      const column = (gid - 1) % tileset.columns;
+      const row = Math.floor((gid - 1) / tileset.columns);
+      texture.add(
+        name,
+        0,
+        column * tileset.tileWidth,
+        row * tileset.tileHeight,
+        tileset.tileWidth,
+        tileset.tileHeight,
+      );
+    }
+  }
+
+  private registerCharacterFrames(): void {
+    const texture = this.textures.get('characters');
+    const { player } = this.bundle;
+    for (let direction = 0; direction < player.directions.length; direction += 1) {
+      for (let frame = 0; frame < player.frames; frame += 1) {
+        const name = `${this.framePrefix}d${String(direction)}f${String(frame)}`;
+        if (!texture.has(name)) {
+          texture.add(
+            name,
+            0,
+            frame * player.frameWidth,
+            direction * player.frameHeight,
+            player.frameWidth,
+            player.frameHeight,
+          );
+        }
+      }
+    }
   }
 
   private applySelfPosition(player: PlayerView): void {
@@ -322,57 +388,143 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     return waypoints.filter((point) => point.x !== start.x || point.y !== start.y);
   }
 
-  private drawGround(): void {
-    const ground = this.add.graphics().setDepth(-10_000);
-    for (let y = 0; y < this.map.height; y += 1) {
-      for (let x = 0; x < this.map.width; x += 1) {
-        const center = this.projection.tileCenter({ x, y });
-        const grass = tileCharAt(this.map, x, y) === MAP_TILE_GRASS;
-        const tone = (x + y) % 2 === 0;
-        const color = grass ? (tone ? 0x2f3b2e : 0x344233) : tone ? 0x2b3034 : 0x272c30;
+  private drawMap(): void {
+    const { manifest, tilesByGid } = this.bundle;
+    const width = manifest.width;
+    const { ground, decoLow, decoHigh, collision } = manifest.layers;
 
-        ground.fillStyle(color, 1);
-        ground.fillPoints(this.diamond(center.x, center.y), true);
-        ground.lineStyle(1, 0x1a1d20, 0.7);
-        ground.strokePoints(this.diamond(center.x, center.y), true);
-      }
-    }
-  }
+    // Static ground and low decoration are stamped once into a single
+    // render texture. Under software WebGL, one texture instead of ~1,200
+    // sprites keeps frame time low enough for the 250ms visibility gate.
+    const staticLayer = this.add
+      .renderTexture(0, 0, this.projection.mapWidth, this.projection.mapHeight)
+      .setOrigin(0, 0)
+      .setDepth(GROUND_DEPTH);
 
-  private drawWalls(): void {
-    for (let y = 0; y < this.map.height; y += 1) {
-      for (let x = 0; x < this.map.width; x += 1) {
-        if (isTileWalkable(this.map, x, y)) {
+    for (let y = 0; y < manifest.height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        const gid = ground[index] ?? 0;
+        if (gid === 0) {
+          continue;
+        }
+        const tile = tilesByGid.get(gid);
+        if (tile === undefined) {
           continue;
         }
         const center = this.projection.tileCenter({ x, y });
-        const wall = this.add.graphics();
-        wall.setPosition(center.x, center.y);
-        wall.setDepth(center.y + TILE_HEIGHT / 2 - 2);
-
-        const leftFace = [
-          { x: -TILE_WIDTH / 2, y: -WALL_HEIGHT },
-          { x: 0, y: TILE_HEIGHT / 2 - WALL_HEIGHT },
-          { x: 0, y: TILE_HEIGHT / 2 },
-          { x: -TILE_WIDTH / 2, y: 0 },
-        ];
-        const rightFace = [
-          { x: 0, y: TILE_HEIGHT / 2 - WALL_HEIGHT },
-          { x: TILE_WIDTH / 2, y: -WALL_HEIGHT },
-          { x: TILE_WIDTH / 2, y: 0 },
-          { x: 0, y: TILE_HEIGHT / 2 },
-        ];
-        wall.fillStyle(0x30353a, 1);
-        wall.fillPoints(toVector2(leftFace), true);
-        wall.fillStyle(0x3a4046, 1);
-        wall.fillPoints(toVector2(rightFace), true);
-
-        const top = this.diamond(0, -WALL_HEIGHT);
-        wall.fillStyle(0x4a5158, 1);
-        wall.fillPoints(top, true);
-        wall.lineStyle(1, 0x23272b, 1);
-        wall.strokePoints(top, true);
+        if (tile.name === 'wall' || (collision[index] === 1 && tile.name === 'tree')) {
+          this.drawWall(center, tile.colors);
+        } else {
+          staticLayer.stamp('terrain', `tile-${String(gid - 1)}`, center.x, center.y);
+        }
       }
+    }
+
+    for (let y = 0; y < manifest.height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        const center = this.projection.tileCenter({ x, y });
+        const lowGid = decoLow[index] ?? 0;
+        if (lowGid > 0) {
+          staticLayer.stamp('terrain', `tile-${String(lowGid - 1)}`, center.x, center.y);
+        }
+        const highGid = decoHigh[index] ?? 0;
+        if (highGid > 0) {
+          this.add
+            .image(center.x, center.y, 'terrain', `tile-${String(highGid - 1)}`)
+            .setDepth(center.y + TILE_HEIGHT / 2 + 2);
+        }
+      }
+    }
+
+    staticLayer.render();
+  }
+
+  private drawWall(center: ScreenPoint, colors: readonly [number, number]): void {
+    const wall = this.add.graphics();
+    wall.setPosition(center.x, center.y);
+    wall.setDepth(center.y + TILE_HEIGHT / 2 - 2);
+
+    const leftFace = [
+      { x: -TILE_WIDTH / 2, y: -WALL_HEIGHT },
+      { x: 0, y: TILE_HEIGHT / 2 - WALL_HEIGHT },
+      { x: 0, y: TILE_HEIGHT / 2 },
+      { x: -TILE_WIDTH / 2, y: 0 },
+    ];
+    const rightFace = [
+      { x: 0, y: TILE_HEIGHT / 2 - WALL_HEIGHT },
+      { x: TILE_WIDTH / 2, y: -WALL_HEIGHT },
+      { x: TILE_WIDTH / 2, y: 0 },
+      { x: 0, y: TILE_HEIGHT / 2 },
+    ];
+    const top = this.diamond(0, -WALL_HEIGHT);
+
+    wall.fillStyle(colors[1], 1);
+    wall.fillPoints(toVector2(leftFace), true);
+    wall.fillStyle(colors[0], 1);
+    wall.fillPoints(toVector2(rightFace), true);
+    wall.fillStyle(0x4a5158, 1);
+    wall.fillPoints(top, true);
+    wall.lineStyle(1, 0x23272b, 1);
+    wall.strokePoints(top, true);
+  }
+
+  private drawPortals(): void {
+    for (const portal of this.bundle.manifest.portals) {
+      const center = this.projection.tileCenter(portal.tile);
+      const marker = this.add.graphics().setDepth(2);
+      marker.lineStyle(2, 0x8fd0d0, 0.9);
+      marker.strokeEllipse(center.x, center.y, TILE_WIDTH * 0.72, TILE_HEIGHT * 0.72);
+      marker.fillStyle(0x8fd0d0, 0.18);
+      marker.fillEllipse(center.x, center.y, TILE_WIDTH * 0.72, TILE_HEIGHT * 0.72);
+
+      this.add
+        .text(center.x, center.y - 34, portal.label, {
+          fontFamily: DISPLAY_FONT,
+          fontSize: '12px',
+          color: '#b9e6e6',
+          stroke: '#0b0d10',
+          strokeThickness: 4,
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(center.y + TILE_HEIGHT);
+
+      this.tweens.add({
+        targets: marker,
+        alpha: { from: 0.55, to: 1 },
+        duration: 1_400,
+        yoyo: true,
+        repeat: -1,
+      });
+    }
+  }
+
+  private drawNpcs(): void {
+    for (const npc of this.bundle.manifest.npcPoints) {
+      const center = this.projection.tileCenter(npc.tile);
+      const marker = this.add.graphics().setDepth(center.y + 1);
+      marker.fillStyle(0x2b2118, 0.5);
+      marker.fillEllipse(center.x, center.y, 20, 9);
+      marker.fillStyle(0xc9a227, 1);
+      marker.fillTriangle(
+        center.x,
+        center.y - 26,
+        center.x - 7,
+        center.y - 10,
+        center.x + 7,
+        center.y - 10,
+      );
+      this.add
+        .text(center.x, center.y - 30, npc.name, {
+          fontFamily: DISPLAY_FONT,
+          fontSize: '12px',
+          color: '#e5c15a',
+          stroke: '#0b0d10',
+          strokeThickness: 4,
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(center.y + 2);
     }
   }
 
@@ -383,6 +535,14 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       { x: centerX, y: centerY + TILE_HEIGHT / 2 },
       { x: centerX - TILE_WIDTH / 2, y: centerY },
     ]);
+  }
+
+  private isTileWalkable(tile: TilePoint): boolean {
+    const { manifest } = this.bundle;
+    if (tile.x < 0 || tile.y < 0 || tile.x >= manifest.width || tile.y >= manifest.height) {
+      return false;
+    }
+    return manifest.layers.collision[tile.y * manifest.width + tile.x] === 0;
   }
 
   private drawPath(path: readonly TilePoint[]): void {
@@ -405,7 +565,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
   private readonly handlePointerDown = (pointer: Phaser.Input.Pointer): void => {
     const tile = this.projection.toTile(pointer.worldX, pointer.worldY);
-    if (!isTileWalkable(this.map, tile.x, tile.y)) {
+    if (!this.isTileWalkable(tile)) {
       this.showMarker(tile, 0xb04a3a);
       return;
     }

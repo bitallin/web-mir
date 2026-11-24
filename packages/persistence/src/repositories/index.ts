@@ -11,13 +11,17 @@ export {
   findCharacterForAccount,
   insertCharacter,
   listCharactersByAccount,
+  relocateCharactersFromMap,
   saveCharacterCheckpoint,
+  saveCharacterTransfer,
 } from './characters';
 export type {
   AcquireLeaseInput,
   CharacterCheckpoint,
+  CharacterTransfer,
   CharacterWithRealm,
   CreateCharacterInput,
+  RelocateCharactersInput,
 } from './characters';
 export {
   acquireCharacterLease,

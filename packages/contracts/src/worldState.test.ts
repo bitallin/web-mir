@@ -5,7 +5,7 @@ import { PlayerState, WorldState } from './worldState';
 describe('WorldState schema', () => {
   it('holds players in a synchronized map', () => {
     const state = new WorldState();
-    state.mapId = 'phase1_test_map';
+    state.mapId = 'starter_town';
     state.playerCount = 1;
 
     const player = new PlayerState();

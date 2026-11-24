@@ -1,0 +1,7 @@
+migrations 2
+tables account_sessions,accounts,character_sessions,characters,game_tickets,realms
+characters by map starter_town=509, starter_wilds=3
+characters version>0 481
+active leases 0
+tickets {"consumed":520,"expired":28,"open":0,"total":548}
+accounts 571

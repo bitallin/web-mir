@@ -6,33 +6,35 @@ Fastify Control API 和 Colyseus 实时服务器。
 
 ## 当前状态
 
-**阶段 2：账号、角色和连接票据，已完成，等待 Tech Lead 审阅。**
+**阶段 3：正式地图、服务端移动和世界状态，已完成，等待 Tech Lead 审阅。**
 
-- 阶段 0 的工程底座已通过审阅并保留。
-- 阶段 1 交付：服务端权威测试地图、`world_map` Room、20Hz 模拟、意图式
-  `move.to`、双浏览器互相可见、断线重连、Phaser 伪等距世界与 React HUD。
-- 阶段 2 交付：账号注册/登录/刷新/登出、Argon2id 密码、HttpOnly 会话 Cookie、
-  角色创建与区服内唯一名称、一次性 game ticket、单角色会话租约、角色位置持久化、
-  游戏服票据校验与离开时 checkpoint。
-- 尚未实现：Tiled 正式地图与 AOI（阶段 3）、怪物、战斗、掉落、背包、金币、
-  聊天、PK 和运营后台业务。
+- 阶段 0 的工程底座、阶段 1 的双人实时切片、阶段 2 的账号与票据均已通过审阅。
+- 阶段 3 交付：Tiled 源图 `starter_town` / `starter_wilds`、`map-runtime` 编译
+  与 checksum、地图实例固定映射、服务端权威寻路与碰撞、主城 ↔ 野外传送、
+  格子 AOI、20 秒节流 checkpoint、同图聊天、tileset/角色贴图与伪等距世界渲染。
+- 尚未实现：怪物、战斗、技能、掉落、背包、装备、金币、PK、复活、运营后台和
+  内容发布（阶段 4–7）。
 - 详细状态见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)，工作记录见
-  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 2 验收报告见
-  [docs/phase-reports/PHASE_02_REPORT.md](docs/phase-reports/PHASE_02_REPORT.md)。
+  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 3 验收报告见
+  [docs/phase-reports/PHASE_03_REPORT.md](docs/phase-reports/PHASE_03_REPORT.md)。
 
-## 阶段 2：如何体验
+## 阶段 3：如何体验
 
 1. 按“从零启动”启动 PostgreSQL、执行迁移与 `pnpm db:seed`，再运行 `pnpm dev`。
+   阶段 2 的旧角色可用 `pnpm repair:maps` 迁移到主城出生点。
 2. 打开两个独立浏览器窗口（或一个普通窗口 + 一个无痕窗口）访问
    <http://localhost:8584/>。
 3. 每个窗口注册独立账号，选择职业并创建角色，点击“进入世界”。
-4. 两个角色进入同一地图后互相可见；点击地面移动，服务端寻路并推进。
-5. 刷新页面会回到角色选择；再次“进入世界”会在重连宽限期内恢复原座位。
-6. 同一角色在另一浏览器登录并进入世界会被服务端拒绝（单角色租约）。
-7. 通过 `http://<局域网IP>:<端口>/` 直接访问即可，不要求 HTTPS 或 localhost。
+4. 两个角色在晨曦主城互相可见；点击地面移动，服务端寻路并推进；点击墙壁不会
+   发出移动指令。
+5. 走到主城东侧传送门（或点击）进入静语荒野，再走回传送门返回主城；切换地图
+   时角色不会重复生成。
+6. 在左下角地图频道输入消息，同地图的另一个玩家会看到。
+7. 刷新页面会回到角色选择；再次“进入世界”会在重连宽限期内恢复原座位。
+8. 同一角色在另一浏览器登录并进入世界会被服务端拒绝（单角色租约）。
 
-账号身份只来自服务端签发的会话 Cookie 与一次性票据（ADR-017）。浏览器不再能
-自报角色 ID、位置或身份。开发环境保留 `?fresh=1`（新建房间）与
+账号身份只来自服务端签发的会话 Cookie 与一次性票据（ADR-017），地图归属只由
+服务端持久档案决定（ADR-018）。开发环境保留 `?fresh=1`（新建房间）与
 `?join=<roomId>`（加入指定房间）用于测试隔离，生产构建忽略。
 
 ## 技术架构
@@ -170,6 +172,9 @@ pnpm exec playwright install chromium
 | `pnpm db:generate`       | 根据 Drizzle schema 生成迁移             |
 | `pnpm db:migrate`        | 对 `DATABASE_URL` 执行迁移               |
 | `pnpm db:seed`           | 幂等写入默认区服 `classic-01`            |
+| `pnpm maps:compile`      | Tiled 源图编译为运行时 manifest          |
+| `pnpm repair:maps`       | 幂等迁移退役地图上的角色                 |
+| `pnpm load:world`        | 30 人地图负载检查并读取 tick 指标        |
 
 E2E 会执行迁移与区服 seed，并启动 game-web、admin-web、control-api 和
 game-server 四个开发服务；如果开发栈已运行，可复用现有服务：
@@ -179,8 +184,8 @@ PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
 ```
 
 E2E 使用真实账号、角色与票据，通过开发专用参数为每个场景创建独立 Room；证据
-（认证页、角色页、双人截图、WebSocket 帧日志、可见延迟）写入
-`docs/phase-reports/phase-02/`。若默认端口被其他开发栈占用，可在运行时覆盖端口：
+（认证页、角色页、双人截图、传送与聊天截图、WebSocket 帧日志、可见延迟）写入
+`docs/phase-reports/phase-03/`。若默认端口被其他开发栈占用，可在运行时覆盖端口：
 
 ```bash
 GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=8847 pnpm test:e2e
@@ -197,11 +202,15 @@ apps/
 packages/
   contracts/      协议、账号/角色 DTO、world-state schema、健康检查、错误 envelope
   auth/           Argon2id 密码、会话令牌、一次性票据令牌
-  game-simulation/ 固定 tick、路径搜索、移动推进（纯逻辑）
+  game-simulation/ 固定 tick、路径搜索、移动推进、AOI（纯逻辑）
+  map-runtime/    Tiled 编译、checksum、导航格与传送门运行时
   config/         Zod 环境变量与 .env 加载
   observability/  Pino 日志与脱敏
   persistence/    Drizzle schema、账号/角色/票据仓储、迁移
   testkit/        可控 RNG、手动时钟
+content/
+  maps/           Tiled 源图与编译产物
+  assets/         资源 manifest 与生成的占位 tileset/角色贴图
 docs/
   ADR/            架构决策记录
   phase-reports/  阶段报告与证据截图
@@ -211,9 +220,10 @@ infra/docker/     PostgreSQL，Redis 为 scale profile
 tests/e2e/        Playwright
 ```
 
-`game-simulation` 在阶段 1 创建，`auth` 在阶段 2 创建。未创建的包
-（`game-domain`、`game-application`、`map-runtime`、`content-schema`）在出现
+`game-simulation` 在阶段 1 创建，`auth` 在阶段 2 创建，`map-runtime` 在阶段 3
+创建。未创建的包（`game-domain`、`game-application`、`content-schema`）在出现
 真实消费者时创建，原因见 [ADR-013](docs/ADR/ADR-013-package-realization.md)。
+地图与 AOI 决策见 [ADR-018](docs/ADR/ADR-018-phase3-map-runtime-aoi-transfer.md)。
 
 浏览器通过同源 `/ws` 访问实时服务器：开发环境由 Vite 代理到 `GAME_SERVER_PORT`，
 `/matchmake` HTTP 和 WebSocket upgrade 共用该路径；生产部署需要在反向代理配置

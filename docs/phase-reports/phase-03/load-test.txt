@@ -1,0 +1,5 @@
+# 30-player starter_town load check
+# 2026-11-24T08:14:01Z
+load: 30 players, 10s, room world_map:starter_town, client ws://127.0.0.1:84/ws, metrics http://127.0.0.1:87
+joined 30/30 clients accepted=750 rejected=0
+room 09FIvTzjr: players=30 tick p50=0.15ms p95=1.53ms p99=2.2ms max=3.11ms samples=229

@@ -142,6 +142,9 @@ importers:
       '@web-legend/game-simulation':
         specifier: workspace:*
         version: link:../../packages/game-simulation
+      '@web-legend/map-runtime':
+        specifier: workspace:*
+        version: link:../../packages/map-runtime
       '@web-legend/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -224,6 +227,15 @@ importers:
       '@web-legend/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/map-runtime:
+    dependencies:
+      '@web-legend/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/observability:
     dependencies:

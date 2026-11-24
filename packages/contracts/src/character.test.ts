@@ -19,7 +19,7 @@ const validCharacterView = {
   maxHp: 120,
   mp: 30,
   maxMp: 30,
-  mapId: 'phase1_test_map',
+  mapId: 'starter_town',
   x: 15_500,
   y: 10_500,
   facing: 2,

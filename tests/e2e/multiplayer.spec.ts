@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
-const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'phase-02');
+const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'phase-03');
 const PASSWORD = 'phase-two-password';
 
 test.describe.configure({ mode: 'serial' });
@@ -263,6 +263,11 @@ test('two accounts create characters and see each other within 250ms', async ({ 
     { name: alice.characterName, x: startTileX, y: startTileY },
   );
 
+  await bob.page.evaluate(() => {
+    if (window.__webLegendDebug !== undefined) {
+      window.__webLegendDebug.lastMovingSnapshotAt = 0;
+    }
+  });
   await alice.page.mouse.click(point.x, point.y);
   const clickedAt = await alice.page.evaluate(() => window.__e2eClickAt ?? 0);
   const observedAt = await bobObservedAt;
@@ -280,12 +285,60 @@ test('two accounts create characters and see each other within 250ms', async ({ 
     timeout: 5_000,
   });
 
+  const [aliceDebug, bobDebug, aliceFps, bobFps] = await Promise.all([
+    alice.page.evaluate(() => ({
+      intentAt: window.__webLegendDebug?.lastMoveIntentAt ?? 0,
+      ackAt: window.__webLegendDebug?.lastAckAt ?? 0,
+      snapshotAt: window.__webLegendDebug?.lastSnapshotAt ?? 0,
+    })),
+    bob.page.evaluate(() => ({
+      movingAt: window.__webLegendDebug?.lastMovingSnapshotAt ?? 0,
+    })),
+    alice.page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          let frames = 0;
+          const started = performance.now();
+          const step = (): void => {
+            frames += 1;
+            if (performance.now() - started < 1_000) {
+              requestAnimationFrame(step);
+            } else {
+              resolve(frames);
+            }
+          };
+          requestAnimationFrame(step);
+        }),
+    ),
+    bob.page.evaluate(
+      () =>
+        new Promise<number>((resolve) => {
+          let frames = 0;
+          const started = performance.now();
+          const step = (): void => {
+            frames += 1;
+            if (performance.now() - started < 1_000) {
+              requestAnimationFrame(step);
+            } else {
+              resolve(frames);
+            }
+          };
+          requestAnimationFrame(step);
+        }),
+    ),
+  ]);
+
   await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'two-players-alice.png') });
   await bob.page.screenshot({ path: join(ARTIFACT_DIR, 'two-players-bob.png') });
   writeFileSync(
     join(ARTIFACT_DIR, 'websocket.log'),
     `# Colyseus websocket frames observed by browser contexts\n` +
       `# room ${alice.roomId}; first move visible to the other client after ${String(visibleAfterMs)}ms\n` +
+      `# click->intent ${String(aliceDebug.intentAt - clickedAt)}ms; ` +
+      `intent->server ack ${String(aliceDebug.ackAt - aliceDebug.intentAt)}ms; ` +
+      `click->Bob first moving snapshot ${String(bobDebug.movingAt - clickedAt)}ms; ` +
+      `click->Bob DOM ${String(observedAt - clickedAt)}ms; ` +
+      `rAF/s Alice ${String(aliceFps)} Bob ${String(bobFps)}\n` +
       websocketLog.join('\n') +
       '\n',
   );
@@ -475,4 +528,82 @@ test('registration and the world work on a plain-HTTP LAN origin', async ({ brow
     await context.close();
     opened.pop();
   }
+});
+
+test('clicking a blocked tile sends no move command', async ({ browser }) => {
+  const alice = await registerWorld(browser, { prefix: 'Alice', query: '?fresh=1' });
+  const self = alice.page.locator('[data-testid="player-row"][data-self="true"]');
+  const beforeTile = {
+    x: await self.getAttribute('data-tile-x'),
+    y: await self.getAttribute('data-tile-y'),
+  };
+
+  const point = await screenPointForTile(alice.page, 30, 5);
+  await alice.page.mouse.click(point.x, point.y);
+
+  await expect(alice.page.getByTestId('command-count')).toHaveText('指令 0');
+  await expect(self).toHaveAttribute('data-tile-x', beforeTile.x ?? '');
+  await expect(self).toHaveAttribute('data-tile-y', beforeTile.y ?? '');
+});
+
+test('a character crosses the town wilds portal and returns without duplicates', async ({
+  browser,
+}) => {
+  mkdirSync(ARTIFACT_DIR, { recursive: true });
+  const alice = await registerWorld(browser, { prefix: 'Portal', query: '?fresh=1' });
+  const mapName = alice.page.getByTestId('map-name');
+  const self = alice.page.locator('[data-testid="player-row"][data-self="true"]');
+
+  await expect(mapName).toHaveAttribute('data-map-id', 'starter_town');
+  await alice.page.evaluate(() => window.__webLegendDebug?.moveToTile(38, 15));
+
+  await expect(mapName).toHaveAttribute('data-map-id', 'starter_wilds', { timeout: 30_000 });
+  await expect(alice.page.getByTestId('connection-status')).toHaveAttribute(
+    'data-status',
+    'connected',
+    { timeout: 20_000 },
+  );
+  await expectPlayers(alice.page, 1);
+  await expect(self).toHaveCount(1);
+  await expect(self).toHaveAttribute('data-tile-x', '2', { timeout: 10_000 });
+  await expect(self).toHaveAttribute('data-tile-y', '16');
+  expect(await alice.page.evaluate(() => window.__webLegendDebug?.currentMapId() ?? '')).toBe(
+    'starter_wilds',
+  );
+  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'wilds-after-transfer.png') });
+
+  await alice.page.evaluate(() => window.__webLegendDebug?.moveToTile(1, 16));
+
+  await expect(mapName).toHaveAttribute('data-map-id', 'starter_town', { timeout: 20_000 });
+  await expect(alice.page.getByTestId('connection-status')).toHaveAttribute(
+    'data-status',
+    'connected',
+    { timeout: 20_000 },
+  );
+  await expectPlayers(alice.page, 1);
+  await expect(self).toHaveCount(1);
+  await expect(self).toHaveAttribute('data-tile-x', '37', { timeout: 10_000 });
+  await expect(self).toHaveAttribute('data-tile-y', '15');
+  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'town-after-return.png') });
+});
+
+test('chat reaches the other player on the same map', async ({ browser }) => {
+  mkdirSync(ARTIFACT_DIR, { recursive: true });
+  const alice = await registerWorld(browser, { prefix: 'Alice', query: '?fresh=1' });
+  const bob = await joinWorld(browser, alice.roomId, 'Bob');
+  await expectPlayers(alice.page, 2);
+  await expectPlayers(bob.page, 2);
+
+  const message = '一起打怪吗？';
+  await alice.page.getByTestId('chat-input').fill(message);
+  await alice.page.getByTestId('chat-send').click();
+
+  await expect(alice.page.getByTestId('chat-message')).toContainText(message, {
+    timeout: 10_000,
+  });
+  await expect(bob.page.getByTestId('chat-message')).toContainText(message, {
+    timeout: 10_000,
+  });
+  await expect(bob.page.getByTestId('chat-message')).toContainText(alice.characterName);
+  await bob.page.screenshot({ path: join(ARTIFACT_DIR, 'chat-received.png') });
 });

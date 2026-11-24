@@ -1,8 +1,13 @@
-import { CHARACTER_CLASS_CATALOG, TILE_UNITS, type CharacterView } from '@web-legend/contracts';
-import { useCallback, useRef } from 'react';
+import {
+  CHAT_MESSAGE_MAX_LENGTH,
+  CHARACTER_CLASS_CATALOG,
+  TILE_UNITS,
+  type CharacterView,
+} from '@web-legend/contracts';
+import { useCallback, useRef, useState } from 'react';
 
 import { issueGameTicket } from '../api/client';
-import { TECHNICAL_MAP } from '../game/technicalMap';
+import { mapNameFor } from '../game/mapCatalog';
 import type { ConnectionStatus } from '../net/worldClient';
 import { useWorldSession } from '../session/useWorldSession';
 
@@ -14,7 +19,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   failed: '连接失败',
 };
 
-const COLOR_HEX = ['#7fa8c9', '#c98f6a', '#8fbf8a', '#b48fc9', '#c9b56a', '#6aa8a8'];
+const COLOR_HEX = ['#9fc4e0', '#e0b087', '#a8d6a1', '#cf9fe0', '#e0d18f', '#8fd0d0'];
 
 function tileOf(player: { x: number; y: number }): { x: number; y: number } {
   return {
@@ -30,14 +35,27 @@ export type GameScreenProps = {
 
 export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [chatDraft, setChatDraft] = useState('');
   const requestTicket = useCallback(async () => {
     const response = await issueGameTicket(character.id);
     return response.ticket;
   }, [character.id]);
-  const { state, rejoin } = useWorldSession(containerRef, { character, requestTicket });
+  const { state, rejoin, sendChat } = useWorldSession(containerRef, { character, requestTicket });
 
   const classDefinition = CHARACTER_CLASS_CATALOG[character.classId];
-  const selfName = state.players.find((player) => player.playerId === state.selfId)?.displayName;
+  const self = state.players.find((player) => player.playerId === state.selfId);
+  const selfName = self?.displayName;
+  const mapName = mapNameFor(state.mapId);
+
+  const submitChat = useCallback(() => {
+    const draft = chatDraft;
+    if (draft.trim().length === 0) {
+      return;
+    }
+    if (sendChat(draft)) {
+      setChatDraft('');
+    }
+  }, [chatDraft, sendChat]);
 
   return (
     <div className="shell">
@@ -49,7 +67,13 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <h1>Web Legend</h1>
           <p className="phase">
             {character.name} · {classDefinition.name} Lv.{character.level}
-            <span>阶段 2</span>
+            <span>阶段 3</span>
+          </p>
+          <p className="vitals" data-testid="vitals">
+            HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
+            <span>
+              法力 {self?.mp ?? character.mp}/{self?.maxMp ?? character.maxMp}
+            </span>
           </p>
         </div>
 
@@ -71,7 +95,9 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <div className="connection-meta">
             <span data-testid="latency">{state.latencyMs ?? '—'} ms</span>
             <span data-testid="room-id">{state.roomId ?? '—'}</span>
-            <span>{TECHNICAL_MAP.name}</span>
+            <span data-testid="map-name" data-map-id={state.mapId}>
+              {mapName}
+            </span>
             {(state.status === 'failed' || state.status === 'disconnected') && (
               <button type="button" className="rejoin" onClick={rejoin}>
                 重新加入
@@ -86,8 +112,13 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
 
       <aside className="hud players-panel" aria-label="在线玩家">
         <div className="panel-heading">
-          <h2>在线玩家</h2>
-          <span data-testid="player-count">{state.players.length}</span>
+          <h2>附近玩家</h2>
+          <span>
+            <span data-testid="player-count">{state.players.length}</span>
+            {state.roomPlayerCount > state.players.length
+              ? ` / ${String(state.roomPlayerCount)}`
+              : ''}
+          </span>
         </div>
         <ul>
           {state.players.map((player) => {
@@ -124,12 +155,55 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               </li>
             );
           })}
-          {state.players.length === 0 ? <li className="empty">等待其他玩家进入世界</li> : null}
+          {state.players.length === 0 ? <li className="empty">附近没有其他玩家</li> : null}
         </ul>
       </aside>
 
+      <aside className="hud chat-panel" aria-label="同图聊天">
+        <div className="panel-heading">
+          <h2>地图频道</h2>
+          <span>{mapName}</span>
+        </div>
+        <ul data-testid="chat-log">
+          {state.messages.length === 0 ? (
+            <li className="empty">同地图的玩家都能看到这里的消息</li>
+          ) : null}
+          {state.messages.map((message) => (
+            <li
+              key={message.messageId}
+              data-testid="chat-message"
+              data-player-id={message.playerId}
+            >
+              <span className="chat-author">{message.displayName}</span>
+              <span className="chat-text">{message.message}</span>
+            </li>
+          ))}
+        </ul>
+        <form
+          className="chat-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitChat();
+          }}
+        >
+          <input
+            type="text"
+            data-testid="chat-input"
+            placeholder="说点什么…"
+            maxLength={CHAT_MESSAGE_MAX_LENGTH}
+            value={chatDraft}
+            onChange={(event) => {
+              setChatDraft(event.target.value);
+            }}
+          />
+          <button type="submit" data-testid="chat-send">
+            发送
+          </button>
+        </form>
+      </aside>
+
       <footer className="hud hud-bottom">
-        <p>点击地面移动 · 服务端 20Hz 权威模拟</p>
+        <p>点击地面移动 · 走到传送门切换地图 · 服务端 20Hz 权威模拟</p>
         <p data-testid="command-count">指令 {state.commandCount}</p>
         <p>tick {state.serverTick}</p>
         <p>协议 v1 · 一次性票据 · Colyseus 0.18</p>

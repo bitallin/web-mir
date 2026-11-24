@@ -19,6 +19,10 @@ export const PlayerState = schema(
     moving: t.boolean().default(false),
     connected: t.boolean().default(true),
     colorIndex: t.uint8().default(0),
+    hp: t.number().default(0),
+    maxHp: t.number().default(1),
+    mp: t.number().default(0),
+    maxMp: t.number().default(0),
   },
   'PlayerState',
 );
@@ -28,11 +32,14 @@ export type PlayerStateInstance = InstanceType<typeof PlayerState>;
 export const WorldState = schema(
   {
     mapId: t.string().default(''),
+    instanceId: t.string().default(''),
     serverTick: t.number().default(0),
     playerCount: t.uint8().default(0),
     tickHz: t.number().default(DEFAULT_TICK_HZ),
     speedUnitsPerSecond: t.number().default(PLAYER_SPEED_UNITS_PER_SECOND),
-    players: t.map(PlayerState),
+    // `.view()` makes the collection filterable: each client receives only the
+    // PlayerState instances its AOI StateView was given (ADR-018).
+    players: t.map(PlayerState).view(),
   },
   'WorldState',
 );

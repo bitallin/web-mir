@@ -16,6 +16,8 @@ export type RoomMetricsSnapshot = {
   acceptedCommands: number;
   rejectedCommands: number;
   rejectionsByCode: Record<string, number>;
+  chatMessages: number;
+  transfers: number;
   tick: TickStats;
 };
 
@@ -36,6 +38,8 @@ export class RoomMetrics {
   private players = 0;
   private acceptedCommands = 0;
   private rejectedCommands = 0;
+  private chatMessages = 0;
+  private transfers = 0;
   private readonly rejectionsByCode = new Map<string, number>();
 
   constructor(
@@ -57,6 +61,14 @@ export class RoomMetrics {
   recordRejectedCommand(code: CommandRejectionCode): void {
     this.rejectedCommands += 1;
     this.rejectionsByCode.set(code, (this.rejectionsByCode.get(code) ?? 0) + 1);
+  }
+
+  recordChatMessage(): void {
+    this.chatMessages += 1;
+  }
+
+  recordTransfer(): void {
+    this.transfers += 1;
   }
 
   setPlayers(count: number): void {
@@ -81,6 +93,8 @@ export class RoomMetrics {
       acceptedCommands: this.acceptedCommands,
       rejectedCommands: this.rejectedCommands,
       rejectionsByCode: Object.fromEntries(this.rejectionsByCode),
+      chatMessages: this.chatMessages,
+      transfers: this.transfers,
       tick: this.tickStats(),
     };
   }
@@ -94,6 +108,8 @@ export type MetricsSnapshot = {
     roomsCreated: number;
     acceptedCommands: number;
     rejectedCommands: number;
+    chatMessages: number;
+    transfers: number;
   };
   timestamp: string;
 };
@@ -103,6 +119,8 @@ export class MetricsRegistry {
   private roomsCreated = 0;
   private acceptedCommands = 0;
   private rejectedCommands = 0;
+  private chatMessages = 0;
+  private transfers = 0;
 
   register(roomId: string): RoomMetrics {
     const metrics = new RoomMetrics(roomId);
@@ -119,6 +137,8 @@ export class MetricsRegistry {
     const snapshot = metrics.snapshot();
     this.acceptedCommands += snapshot.acceptedCommands;
     this.rejectedCommands += snapshot.rejectedCommands;
+    this.chatMessages += snapshot.chatMessages;
+    this.transfers += snapshot.transfers;
     this.rooms.delete(roomId);
   }
 
@@ -129,6 +149,8 @@ export class MetricsRegistry {
 
     const activeAccepted = rooms.reduce((total, room) => total + room.acceptedCommands, 0);
     const activeRejected = rooms.reduce((total, room) => total + room.rejectedCommands, 0);
+    const activeChat = rooms.reduce((total, room) => total + room.chatMessages, 0);
+    const activeTransfers = rooms.reduce((total, room) => total + room.transfers, 0);
 
     return {
       service: 'game-server',
@@ -138,6 +160,8 @@ export class MetricsRegistry {
         roomsCreated: this.roomsCreated,
         acceptedCommands: this.acceptedCommands + activeAccepted,
         rejectedCommands: this.rejectedCommands + activeRejected,
+        chatMessages: this.chatMessages + activeChat,
+        transfers: this.transfers + activeTransfers,
       },
       timestamp: new Date().toISOString(),
     };

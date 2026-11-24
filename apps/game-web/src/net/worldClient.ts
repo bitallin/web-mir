@@ -1,11 +1,15 @@
 import { Client, type Room } from '@colyseus/sdk';
 import {
+  CHAT_MESSAGE_MAX_LENGTH,
   CLIENT_MESSAGES,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
-  WORLD_ROOM_NAME,
+  chatMessageSchema,
   commandAckSchema,
   commandRejectedSchema,
+  sessionTransferSchema,
+  worldRoomNameFor,
+  type ChatMessage,
   type CommandAck,
   type CommandRejected,
   type TilePoint,
@@ -33,10 +37,15 @@ export type PlayerView = {
   moving: boolean;
   connected: boolean;
   colorIndex: number;
+  hp: number;
+  maxHp: number;
+  mp: number;
+  maxMp: number;
 };
 
 export type WorldSnapshot = {
   mapId: string;
+  instanceId: string;
   tick: number;
   playerCount: number;
   players: PlayerView[];
@@ -48,12 +57,16 @@ export type WorldClientCallbacks = {
   onRoom: (roomId: string) => void;
   onAck: (ack: CommandAck) => void;
   onRejected: (rejected: CommandRejected) => void;
+  onChat: (message: ChatMessage) => void;
+  onTransfer: (mapId: string) => void;
   onLatency: (latencyMs: number) => void;
 };
 
 export type WorldClientOptions = {
   url: string;
   characterId: string;
+  /** Persisted map of the selected character; the server must agree. */
+  mapId: string;
   /** Fetches a fresh one-time ticket from the Control API for every new join. */
   requestTicket: () => Promise<string>;
   roomPreference?: RoomPreference;
@@ -94,23 +107,31 @@ function joinErrorMessage(error: unknown): string {
 
 /**
  * Colyseus client wrapper. It renders schema state for React and the Phaser
- * scene, and submits intent-only `move.to` commands. It never computes
- * authoritative results.
+ * scene, submits intent-only `move.to` and chat commands, and follows the
+ * server's map-transfer instruction by fetching a fresh ticket and joining the
+ * target map room. It never chooses an authoritative position or map.
  */
 export class WorldClient {
   private readonly options: WorldClientOptions;
   private room: WorldRoom | null = null;
+  private mapId: string;
   private sequence = 0;
   private stopped = false;
+  private transferring = false;
   private pingTimer: number | null = null;
   private readonly unsubscribers: (() => void)[] = [];
 
   constructor(options: WorldClientOptions) {
     this.options = options;
+    this.mapId = options.mapId;
   }
 
   get characterId(): string {
     return this.options.characterId;
+  }
+
+  get currentMapId(): string {
+    return this.mapId;
   }
 
   async start(): Promise<void> {
@@ -133,39 +154,12 @@ export class WorldClient {
       }
     }
 
-    try {
-      const ticket = await this.options.requestTicket();
-      if (this.stopped) {
-        return;
-      }
-
-      this.options.callbacks.onStatus('connecting', '正在连接世界');
-      const joinOptions = { protocolVersion: PROTOCOL_VERSION, ticket };
-      const preference = this.options.roomPreference ?? { mode: 'joinOrCreate' };
-
-      const joined =
-        preference.mode === 'create'
-          ? client.create(WORLD_ROOM_NAME, joinOptions, WorldState)
-          : preference.mode === 'joinById'
-            ? client.joinById(preference.roomId, joinOptions, WorldState)
-            : client.joinOrCreate(WORLD_ROOM_NAME, joinOptions, WorldState);
-      const room = (await joined) as WorldRoom;
-
-      if (this.stopped) {
-        await room.leave();
-        return;
-      }
-      this.attach(room);
-    } catch (error) {
-      if (!this.stopped) {
-        this.options.callbacks.onStatus('failed', joinErrorMessage(error));
-      }
-    }
+    await this.joinFresh(this.options.roomPreference ?? { mode: 'joinOrCreate' });
   }
 
   sendMove(target: TilePoint): boolean {
     const room = this.room;
-    if (room === null || this.stopped) {
+    if (room === null || this.stopped || this.transferring) {
       return false;
     }
 
@@ -179,6 +173,48 @@ export class WorldClient {
     });
     this.sequence += 1;
     return true;
+  }
+
+  sendChat(text: string): boolean {
+    const room = this.room;
+    const message = text.trim();
+    if (
+      room === null ||
+      this.stopped ||
+      this.transferring ||
+      message.length === 0 ||
+      message.length > CHAT_MESSAGE_MAX_LENGTH
+    ) {
+      return false;
+    }
+
+    room.send(CLIENT_MESSAGES.chatSend, {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: createUuid(),
+      message,
+    });
+    return true;
+  }
+
+  /** Follows a server-issued `session.transfer`: leave and join the target map. */
+  async transferTo(mapId: string): Promise<void> {
+    if (this.stopped || this.transferring) {
+      return;
+    }
+    this.transferring = true;
+    this.options.callbacks.onStatus('connecting', '正在前往新的地图');
+
+    await this.detachCurrentRoom();
+    clearReconnectToken();
+    this.mapId = mapId;
+
+    try {
+      // The destination is fixed by the server; a development room preference
+      // must not send the character back to the previous room.
+      await this.joinFresh({ mode: 'joinOrCreate' });
+    } finally {
+      this.transferring = false;
+    }
   }
 
   async stop(): Promise<void> {
@@ -216,6 +252,54 @@ export class WorldClient {
     await this.start();
   }
 
+  private async joinFresh(preference: RoomPreference): Promise<void> {
+    const client = new Client(this.options.url);
+    try {
+      const ticket = await this.options.requestTicket();
+      if (this.stopped) {
+        return;
+      }
+
+      this.options.callbacks.onStatus('connecting', '正在连接世界');
+      const joinOptions = { protocolVersion: PROTOCOL_VERSION, ticket };
+      const roomName = worldRoomNameFor(this.mapId);
+
+      const joined =
+        preference.mode === 'create'
+          ? client.create(roomName, joinOptions, WorldState)
+          : preference.mode === 'joinById'
+            ? client.joinById(preference.roomId, joinOptions, WorldState)
+            : client.joinOrCreate(roomName, joinOptions, WorldState);
+      const room = (await joined) as WorldRoom;
+
+      if (this.stopped) {
+        await room.leave();
+        return;
+      }
+      this.attach(room);
+    } catch (error) {
+      if (!this.stopped) {
+        this.options.callbacks.onStatus('failed', joinErrorMessage(error));
+      }
+    }
+  }
+
+  private async detachCurrentRoom(): Promise<void> {
+    this.clearPingTimer();
+    for (const unsubscribe of this.unsubscribers.splice(0)) {
+      unsubscribe();
+    }
+    const room = this.room;
+    this.room = null;
+    if (room !== null) {
+      try {
+        await room.leave();
+      } catch {
+        // Leaving a room whose socket already closed is harmless.
+      }
+    }
+  }
+
   private attach(room: WorldRoom): void {
     this.room = room;
     this.sequence = 0;
@@ -223,7 +307,7 @@ export class WorldClient {
     // which would turn an early network blip into a permanent leave.
     room.reconnection.minUptime = 0;
     this.options.callbacks.onRoom(room.roomId);
-    this.options.callbacks.onStatus('connected', `房间 ${room.roomId}`);
+    this.options.callbacks.onStatus('connected', `房间 ${room.roomId} · ${this.mapId}`);
     storeReconnectToken(this.options.characterId, room.reconnectionToken);
 
     const handleStateChange = (state: WorldStateInstance): void => {
@@ -252,6 +336,25 @@ export class WorldClient {
       }),
     );
 
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.chatMessage, (payload: unknown) => {
+        const parsed = chatMessageSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onChat(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.sessionTransfer, (payload: unknown) => {
+        const parsed = sessionTransferSchema.safeParse(payload);
+        if (!parsed.success || this.transferring) {
+          return;
+        }
+        this.options.callbacks.onTransfer(parsed.data.mapId);
+      }),
+    );
+
     const handleDrop = (): void => {
       this.options.callbacks.onStatus('reconnecting', '网络中断，正在重连');
     };
@@ -262,7 +365,7 @@ export class WorldClient {
 
     const handleReconnect = (): void => {
       storeReconnectToken(this.options.characterId, room.reconnectionToken);
-      this.options.callbacks.onStatus('connected', `房间 ${room.roomId}`);
+      this.options.callbacks.onStatus('connected', `房间 ${room.roomId} · ${this.mapId}`);
     };
     room.onReconnect(handleReconnect);
     this.unsubscribers.push(() => {
@@ -311,11 +414,16 @@ export class WorldClient {
         moving: player.moving,
         connected: player.connected,
         colorIndex: player.colorIndex,
+        hp: player.hp,
+        maxHp: player.maxHp,
+        mp: player.mp,
+        maxMp: player.maxMp,
       });
     });
 
     this.options.callbacks.onSnapshot({
       mapId: state.mapId,
+      instanceId: state.instanceId,
       tick: state.serverTick,
       playerCount: state.playerCount,
       players,

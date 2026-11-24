@@ -1,25 +1,32 @@
 import { CloseCode, ErrorCode, Room, ServerError, type Client } from '@colyseus/core';
+import { StateView } from '@colyseus/schema';
 import { hashToken } from '@web-legend/auth';
 import {
+  CHAT_MESSAGE_MAX_LENGTH,
   CLIENT_MESSAGES,
   COMMAND_REJECTION_MESSAGES,
   DEFAULT_PATCH_RATE_MS,
   DEFAULT_TICK_HZ,
   FACING,
-  isTileInsideMap,
-  isTileWalkable,
-  moveToCommandSchema,
   PLAYER_SPEED_UNITS_PER_SECOND,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
+  TILE_UNITS,
+  chatMessageSchema,
+  chatSendSchema,
   commandAckSchema,
   commandRejectedSchema,
+  moveToCommandSchema,
+  sessionTransferSchema,
   tilePointSchema,
   worldJoinOptionsSchema,
+  type ChatMessage,
   type CommandAck,
   type CommandRejected,
   type CommandRejectionCode,
   type Facing,
+  type MapPortal,
+  type SessionTransfer,
   type TilePoint,
 } from '@web-legend/contracts';
 import {
@@ -29,13 +36,13 @@ import {
   type WorldStateInstance,
 } from '@web-legend/contracts/world-state';
 import {
+  DEFAULT_INTEREST,
+  InterestManager,
   createFixedStepRunner,
   findPath,
-  gridFromManifest,
   tileOfUnits,
   WorldSimulation,
   type FixedStepRunner,
-  type MovementGrid,
 } from '@web-legend/game-simulation';
 import {
   acquireCharacterLease,
@@ -45,13 +52,15 @@ import {
   refreshCharacterLeases,
   releaseCharacterLease,
   saveCharacterCheckpoint,
+  saveCharacterTransfer,
   type Database,
 } from '@web-legend/persistence';
 import type { Logger } from 'pino';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import type { MetricsRegistry, RoomMetrics } from '../metrics';
-import { PHASE1_TEST_MAP } from '../world/mapLoader';
+import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket, type TokenBucket } from '../world/rateLimiter';
 
 export type WorldMapRoomOptions = {
@@ -59,17 +68,27 @@ export type WorldMapRoomOptions = {
   serverId: string;
   logger: Logger;
   metrics: MetricsRegistry;
+  mapInstance: MapInstance;
   tickHz?: number;
   patchRateMs?: number;
   reconnectGraceSeconds?: number;
   commandRateCapacity?: number;
   commandRateRefillPerSecond?: number;
+  chatRateCapacity?: number;
+  chatRateRefillPerSecond?: number;
+  checkpointIntervalMs?: number;
+  interestCellSize?: number;
+  interestRadiusCells?: number;
 };
 
 const DEFAULT_RECONNECT_GRACE_SECONDS = 15;
 const DEFAULT_COMMAND_RATE_CAPACITY = 10;
 const DEFAULT_COMMAND_RATE_REFILL_PER_SECOND = 10;
+const DEFAULT_CHAT_RATE_CAPACITY = 4;
+const DEFAULT_CHAT_RATE_REFILL_PER_SECOND = 2;
+const DEFAULT_CHECKPOINT_INTERVAL_MS = 20_000;
 const RECENT_COMMAND_WINDOW = 32;
+const RECENT_CHAT_WINDOW = 32;
 const COLOR_COUNT = 6;
 
 /**
@@ -97,12 +116,21 @@ const authDataSchema = z.object({
 type WorldAuthData = z.infer<typeof authDataSchema>;
 
 type SessionRecord = {
+  client: Client;
   playerId: string;
   lastSequence: number;
   recentAcks: Map<string, CommandAck>;
   rateBucket: TokenBucket;
+  chatBucket: TokenBucket;
+  recentChatIds: Set<string>;
   hp: number;
   mp: number;
+  transferring: boolean;
+  transferTargetMapId: string | null;
+  checkpointing: boolean;
+  lastCheckpointAt: number;
+  view: StateView;
+  visible: Set<string>;
 };
 
 function colorIndexFor(characterId: string): number {
@@ -142,10 +170,18 @@ function extractCommandMeta(raw: unknown): { commandId?: string; clientSequence?
   return meta;
 }
 
+function tileCenter(tile: TilePoint): { x: number; y: number } {
+  return {
+    x: tile.x * TILE_UNITS + TILE_UNITS / 2,
+    y: tile.y * TILE_UNITS + TILE_UNITS / 2,
+  };
+}
+
 /**
- * One Colyseus room per map instance (ADR-003). The room performs connection
- * adaptation only: ticket validation, lease acquisition, rate limiting, routing
- * and state synchronization. Movement rules live in `@web-legend/game-simulation`.
+ * One Colyseus room per map instance (ADR-003 / ADR-018). The room performs
+ * connection adaptation only: ticket validation, lease acquisition, rate
+ * limiting, routing, AOI filtering and state synchronization. Movement and
+ * map rules live in `@web-legend/game-simulation` and `@web-legend/map-runtime`.
  */
 export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   override maxClients = 50;
@@ -154,23 +190,31 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
   private options!: WorldMapRoomOptions;
   private metrics!: RoomMetrics;
-  private grid!: MovementGrid;
+  private map!: MapInstance;
   private simulation!: WorldSimulation;
+  private interest!: InterestManager;
   private runner!: FixedStepRunner;
   private tick = 0;
+  private checkpointIntervalMs = DEFAULT_CHECKPOINT_INTERVAL_MS;
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly sessionByPlayer = new Map<string, string>();
 
   override onCreate(options: WorldMapRoomOptions): void {
     this.options = options;
-    this.grid = gridFromManifest(PHASE1_TEST_MAP);
-    this.simulation = new WorldSimulation(this.grid);
+    this.map = options.mapInstance;
+    this.simulation = new WorldSimulation(this.map.runtime.grid);
+    this.interest = new InterestManager({
+      cellSize: options.interestCellSize ?? DEFAULT_INTEREST.cellSize,
+      radiusCells: options.interestRadiusCells ?? DEFAULT_INTEREST.radiusCells,
+    });
     this.metrics = options.metrics.register(this.roomId);
 
     const tickHz = options.tickHz ?? DEFAULT_TICK_HZ;
     const patchRateMs = options.patchRateMs ?? DEFAULT_PATCH_RATE_MS;
+    this.checkpointIntervalMs = options.checkpointIntervalMs ?? DEFAULT_CHECKPOINT_INTERVAL_MS;
 
-    this.state.mapId = PHASE1_TEST_MAP.id;
+    this.state.mapId = this.map.mapId;
+    this.state.instanceId = this.map.instanceId;
     this.state.tickHz = tickHz;
     this.state.speedUnitsPerSecond = PLAYER_SPEED_UNITS_PER_SECOND;
     this.setPatchRate(patchRateMs);
@@ -190,15 +234,22 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.moveTo, (client, message) => {
       this.handleMove(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.chatSend, (client, message) => {
+      this.handleChat(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
     }, LEASE_REFRESH_INTERVAL_MS);
+    this.clock.setInterval(() => {
+      void this.checkpointAll();
+    }, this.checkpointIntervalMs);
 
     options.logger.info(
       {
         roomId: this.roomId,
-        mapId: PHASE1_TEST_MAP.id,
+        mapId: this.map.mapId,
+        instanceId: this.map.instanceId,
         tickHz,
         patchRateMs,
         serverId: options.serverId,
@@ -253,6 +304,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     player.playerId = auth.characterId;
     player.displayName = auth.displayName;
     player.colorIndex = colorIndexFor(auth.characterId);
+    player.hp = auth.hp;
+    player.maxHp = auth.maxHp;
+    player.mp = auth.mp;
+    player.maxMp = auth.maxMp;
     const position = this.simulation.getPlayer(auth.characterId);
     player.x = position?.x ?? 0;
     player.y = position?.y ?? 0;
@@ -260,7 +315,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.state.players.set(auth.characterId, player);
     this.state.playerCount = this.state.players.size;
 
-    this.sessions.set(client.sessionId, {
+    const view = new StateView();
+    const session: SessionRecord = {
+      client,
       playerId: auth.characterId,
       lastSequence: -1,
       recentAcks: new Map(),
@@ -270,15 +327,34 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           this.options.commandRateRefillPerSecond ?? DEFAULT_COMMAND_RATE_REFILL_PER_SECOND,
         startMs: Date.now(),
       }),
+      chatBucket: createTokenBucket({
+        capacity: this.options.chatRateCapacity ?? DEFAULT_CHAT_RATE_CAPACITY,
+        refillPerSecond:
+          this.options.chatRateRefillPerSecond ?? DEFAULT_CHAT_RATE_REFILL_PER_SECOND,
+        startMs: Date.now(),
+      }),
+      recentChatIds: new Set(),
       hp: auth.hp,
       mp: auth.mp,
-    });
+      transferring: false,
+      transferTargetMapId: null,
+      checkpointing: false,
+      lastCheckpointAt: Date.now(),
+      view,
+      visible: new Set(),
+    };
+    this.sessions.set(client.sessionId, session);
     this.sessionByPlayer.set(auth.characterId, client.sessionId);
+    client.view = view;
+
+    const affected = this.interest.add(auth.characterId, spawn.tile);
+    this.refreshViews(affected);
     this.metrics.setPlayers(this.state.players.size);
 
     this.options.logger.info(
       {
         roomId: this.roomId,
+        mapId: this.map.mapId,
         characterId: auth.characterId,
         accountId: auth.accountId,
         spawn: spawn.tile,
@@ -293,11 +369,18 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (session === undefined) {
       return;
     }
+    session.client = client;
+    client.view = session.view;
     // A refreshed browser starts a fresh client with sequence 0; accepting its
     // commands again must not depend on the pre-refresh sequence counter.
     session.lastSequence = -1;
     session.recentAcks.clear();
+    session.recentChatIds.clear();
     this.setConnected(session.playerId, true);
+
+    if (session.transferring && session.transferTargetMapId !== null) {
+      this.sendTransfer(client, session.transferTargetMapId);
+    }
     this.options.logger.info(
       { roomId: this.roomId, characterId: session.playerId },
       'player reconnected',
@@ -310,7 +393,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
 
-    if (code === CloseCode.CONSENTED) {
+    if (code === CloseCode.CONSENTED || session.transferring) {
       await this.removeSession(client.sessionId);
       return;
     }
@@ -362,6 +445,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       throw new ServerError(ErrorCode.AUTH_FAILED, '该区服当前不可进入');
     }
 
+    // The ticket alone never chooses a map; the persisted character decides,
+    // and the room only accepts players whose map matches its instance.
+    if (character.mapId !== this.map.mapId) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '角色当前不在此地图，请重新进入');
+    }
+
     const leaseAcquired = await acquireCharacterLease(this.options.database, {
       characterId: character.id,
       sessionId: client.sessionId,
@@ -393,22 +482,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     tile: TilePoint;
     position?: { x: number; y: number };
   } {
-    if (auth.mapId === PHASE1_TEST_MAP.id) {
+    if (auth.mapId === this.map.mapId) {
       const tile = tileOfUnits({ x: auth.x, y: auth.y });
-      if (
-        isTileInsideMap(PHASE1_TEST_MAP, tile.x, tile.y) &&
-        isTileWalkable(PHASE1_TEST_MAP, tile.x, tile.y)
-      ) {
+      if (this.map.runtime.isStandable(tile)) {
         return { tile, position: { x: auth.x, y: auth.y } };
       }
       this.options.logger.warn(
         { roomId: this.roomId, characterId: auth.characterId, x: auth.x, y: auth.y },
         'stored character position is not walkable; using a spawn point',
-      );
-    } else {
-      this.options.logger.warn(
-        { roomId: this.roomId, characterId: auth.characterId, mapId: auth.mapId },
-        'character is on a map this server does not run yet; using a spawn point',
       );
     }
     return { tile: this.pickSpawnPoint() };
@@ -435,13 +516,78 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
   }
 
+  /** Merged checkpoint: positions and HP/MP are saved at a throttled interval. */
+  private async checkpointAll(): Promise<void> {
+    const now = Date.now();
+    await Promise.allSettled(
+      [...this.sessions.values()].map(async (session) => {
+        if (session.transferring || session.checkpointing) {
+          return;
+        }
+        if (now - session.lastCheckpointAt < this.checkpointIntervalMs) {
+          return;
+        }
+        const player = this.simulation.getPlayer(session.playerId);
+        if (player === undefined) {
+          return;
+        }
+        session.checkpointing = true;
+        session.lastCheckpointAt = now;
+        try {
+          await saveCharacterCheckpoint(this.options.database, {
+            characterId: session.playerId,
+            x: player.x,
+            y: player.y,
+            facing: player.facing,
+            hp: session.hp,
+            mp: session.mp,
+          });
+        } catch (error) {
+          this.options.logger.error(
+            { err: error, roomId: this.roomId, characterId: session.playerId },
+            'failed to checkpoint character position',
+          );
+        } finally {
+          session.checkpointing = false;
+        }
+      }),
+    );
+  }
+
   private simulateTick(): void {
     const started = performance.now();
     this.state.serverTick = this.tick;
     this.tick += 1;
 
     this.simulation.step(1_000 / this.state.tickHz);
+    this.syncPlayers();
 
+    for (const player of this.simulation.listPlayers()) {
+      const sessionId = this.sessionByPlayer.get(player.id);
+      const session = sessionId === undefined ? undefined : this.sessions.get(sessionId);
+      if (session === undefined || session.transferring) {
+        continue;
+      }
+      const portal = this.map.runtime.portalAt(tileOfUnits(player));
+      if (portal !== undefined) {
+        session.transferring = true;
+        session.transferTargetMapId = portal.targetMapId;
+        this.simulation.clearPath(player.id);
+        void this.beginTransfer(session, portal, player);
+      }
+    }
+
+    for (const player of this.simulation.listPlayers()) {
+      const affected = this.interest.move(player.id, tileOfUnits(player));
+      if (affected.length > 0) {
+        this.refreshViews(affected);
+      }
+    }
+
+    this.metrics.recordTick(performance.now() - started);
+  }
+
+  private syncPlayers(): void {
     for (const player of this.simulation.listPlayers()) {
       const statePlayer = this.state.players.get(player.id);
       if (statePlayer === undefined) {
@@ -452,14 +598,118 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       statePlayer.facing = player.facing;
       statePlayer.moving = player.moving;
     }
+  }
 
-    this.metrics.recordTick(performance.now() - started);
+  /**
+   * Applies AOI visibility to one player's Colyseus view. Only ids whose
+   * visibility actually changed are written, so a tick with no cell crossing
+   * produces no view operations.
+   */
+  private refreshViews(playerIds: readonly string[]): void {
+    for (const playerId of new Set(playerIds)) {
+      const sessionId = this.sessionByPlayer.get(playerId);
+      if (sessionId === undefined) {
+        continue;
+      }
+      const session = this.sessions.get(sessionId);
+      if (session === undefined) {
+        continue;
+      }
+
+      const desired = this.interest.visibleIdsFor(playerId);
+      for (const visibleId of desired) {
+        if (session.visible.has(visibleId)) {
+          continue;
+        }
+        const statePlayer = this.state.players.get(visibleId);
+        if (statePlayer !== undefined) {
+          session.view.add(statePlayer);
+          session.visible.add(visibleId);
+        }
+      }
+      for (const visibleId of [...session.visible]) {
+        if (desired.has(visibleId)) {
+          continue;
+        }
+        const statePlayer = this.state.players.get(visibleId);
+        if (statePlayer !== undefined) {
+          session.view.remove(statePlayer);
+        }
+        session.visible.delete(visibleId);
+      }
+    }
+  }
+
+  private async beginTransfer(
+    session: SessionRecord,
+    portal: MapPortal,
+    player: { facing: Facing },
+  ): Promise<void> {
+    const target = tileCenter(portal.targetTile);
+    try {
+      await saveCharacterTransfer(this.options.database, {
+        characterId: session.playerId,
+        mapId: portal.targetMapId,
+        x: target.x,
+        y: target.y,
+        facing: player.facing,
+        hp: session.hp,
+        mp: session.mp,
+      });
+      await releaseCharacterLease(
+        this.options.database,
+        session.playerId,
+        session.client.sessionId,
+      );
+    } catch (error) {
+      session.transferring = false;
+      session.transferTargetMapId = null;
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, characterId: session.playerId },
+        'failed to persist map transfer',
+      );
+      return;
+    }
+
+    session.transferTargetMapId = portal.targetMapId;
+    session.lastCheckpointAt = Date.now();
+
+    // The target map is committed: remove the entity from this instance before
+    // telling the browser to leave, so the character never exists twice.
+    const affected = this.interest.remove(session.playerId);
+    this.refreshViews(affected);
+    this.simulation.removePlayer(session.playerId);
+    this.state.players.delete(session.playerId);
+    this.state.playerCount = this.state.players.size;
+    this.metrics.setPlayers(this.state.players.size);
+    this.metrics.recordTransfer();
+    this.sendTransfer(session.client, portal.targetMapId);
+
+    this.options.logger.info(
+      {
+        roomId: this.roomId,
+        characterId: session.playerId,
+        fromMapId: this.map.mapId,
+        toMapId: portal.targetMapId,
+        portalId: portal.id,
+      },
+      'player transferred between maps',
+    );
+  }
+
+  private sendTransfer(client: Client, mapId: string): void {
+    const message: SessionTransfer = { mapId, serverTime: Date.now() };
+    client.send(SERVER_MESSAGES.sessionTransfer, sessionTransferSchema.parse(message));
   }
 
   private handleMove(client: Client, raw: unknown): void {
     const session = this.sessions.get(client.sessionId);
     if (session === undefined) {
       this.sendRejection(client, {}, 'INVALID_SESSION');
+      return;
+    }
+    if (session.transferring) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_SESSION');
       return;
     }
 
@@ -515,15 +765,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     const target: TilePoint = { x: command.targetTileX, y: command.targetTileY };
-    if (!isTileInsideMap(PHASE1_TEST_MAP, target.x, target.y)) {
-      this.sendRejection(
-        client,
-        { commandId: command.commandId, clientSequence: command.clientSequence },
-        'INVALID_TARGET',
-      );
-      return;
-    }
-    if (!isTileWalkable(PHASE1_TEST_MAP, target.x, target.y)) {
+    if (!this.map.runtime.isWalkable(target.x, target.y)) {
       this.sendRejection(
         client,
         { commandId: command.commandId, clientSequence: command.clientSequence },
@@ -532,7 +774,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
 
-    const path = findPath(this.grid, tileOfUnits(player), target);
+    const path = findPath(this.map.runtime.grid, tileOfUnits(player), target);
     if (path === null) {
       this.sendRejection(
         client,
@@ -566,6 +808,61 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     client.send(SERVER_MESSAGES.commandAck, commandAckSchema.parse(ack));
     this.metrics.recordAcceptedCommand();
+  }
+
+  private handleChat(client: Client, raw: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, {}, 'INVALID_SESSION');
+      return;
+    }
+    if (session.transferring) {
+      this.sendRejection(client, {}, 'INVALID_SESSION');
+      return;
+    }
+
+    const parsed = chatSendSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, {}, 'INVALID_PAYLOAD');
+      return;
+    }
+    if (parsed.data.protocolVersion !== PROTOCOL_VERSION) {
+      this.sendRejection(client, {}, 'PROTOCOL_MISMATCH');
+      return;
+    }
+
+    if (session.recentChatIds.has(parsed.data.clientMessageId)) {
+      return;
+    }
+    if (!session.chatBucket.take(Date.now())) {
+      this.sendRejection(client, {}, 'RATE_LIMITED');
+      return;
+    }
+
+    session.recentChatIds.add(parsed.data.clientMessageId);
+    if (session.recentChatIds.size > RECENT_CHAT_WINDOW) {
+      const oldest = session.recentChatIds.values().next();
+      if (!oldest.done) {
+        session.recentChatIds.delete(oldest.value);
+      }
+    }
+
+    const statePlayer = this.state.players.get(session.playerId);
+    const message: ChatMessage = {
+      messageId: randomUUID(),
+      playerId: session.playerId,
+      displayName: statePlayer?.displayName ?? '',
+      message: parsed.data.message.trim().slice(0, CHAT_MESSAGE_MAX_LENGTH),
+      channel: 'map',
+      serverTime: Date.now(),
+    };
+    if (message.displayName.length === 0) {
+      this.sendRejection(client, {}, 'INVALID_SESSION');
+      return;
+    }
+
+    this.broadcast(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(message));
+    this.metrics.recordChatMessage();
   }
 
   private sendRejection(
@@ -605,14 +902,15 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       }),
     );
 
-    for (const point of PHASE1_TEST_MAP.spawnPoints) {
+    for (const point of this.map.runtime.manifest.spawnPoints) {
       if (!occupied.has(`${String(point.x)}:${String(point.y)}`)) {
         return point;
       }
     }
 
-    const fallbackIndex = this.simulation.listPlayers().length % PHASE1_TEST_MAP.spawnPoints.length;
-    return PHASE1_TEST_MAP.spawnPoints[fallbackIndex] ?? tilePointSchema.parse({ x: 1, y: 1 });
+    const spawnPoints = this.map.runtime.manifest.spawnPoints;
+    const fallbackIndex = this.simulation.listPlayers().length % spawnPoints.length;
+    return spawnPoints[fallbackIndex] ?? tilePointSchema.parse({ x: 1, y: 1 });
   }
 
   private async removeSession(sessionId: string): Promise<void> {
@@ -624,40 +922,53 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const player = this.simulation.getPlayer(session.playerId);
     this.sessions.delete(sessionId);
     this.sessionByPlayer.delete(session.playerId);
+
+    const affected = this.interest.remove(session.playerId);
+    this.refreshViews(affected);
     this.simulation.removePlayer(session.playerId);
     this.state.players.delete(session.playerId);
     this.state.playerCount = this.state.players.size;
     this.metrics.setPlayers(this.state.players.size);
 
-    if (player !== undefined) {
+    delete session.client.view;
+    session.view.dispose();
+
+    if (!session.transferring) {
+      if (player !== undefined) {
+        try {
+          await saveCharacterCheckpoint(this.options.database, {
+            characterId: session.playerId,
+            x: player.x,
+            y: player.y,
+            facing: player.facing,
+            hp: session.hp,
+            mp: session.mp,
+          });
+        } catch (error) {
+          this.options.logger.error(
+            { err: error, roomId: this.roomId, characterId: session.playerId },
+            'failed to checkpoint character position',
+          );
+        }
+      }
+
       try {
-        await saveCharacterCheckpoint(this.options.database, {
-          characterId: session.playerId,
-          x: player.x,
-          y: player.y,
-          facing: player.facing,
-          hp: session.hp,
-          mp: session.mp,
-        });
+        await releaseCharacterLease(this.options.database, session.playerId, sessionId);
       } catch (error) {
         this.options.logger.error(
           { err: error, roomId: this.roomId, characterId: session.playerId },
-          'failed to checkpoint character position',
+          'failed to release character lease',
         );
       }
     }
 
-    try {
-      await releaseCharacterLease(this.options.database, session.playerId, sessionId);
-    } catch (error) {
-      this.options.logger.error(
-        { err: error, roomId: this.roomId, characterId: session.playerId },
-        'failed to release character lease',
-      );
-    }
-
     this.options.logger.info(
-      { roomId: this.roomId, characterId: session.playerId, clients: this.state.players.size },
+      {
+        roomId: this.roomId,
+        characterId: session.playerId,
+        transferred: session.transferring,
+        clients: this.state.players.size,
+      },
       'player left world',
     );
   }

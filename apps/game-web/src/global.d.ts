@@ -13,6 +13,14 @@ declare global {
       sceneGeneration: () => number;
       dropConnection: () => boolean;
       leaveWorld: () => Promise<void>;
+      currentMapId: () => string;
+      /** Test-only input hook: submits the same intent a ground click sends. */
+      moveToTile: (tileX: number, tileY: number) => boolean;
+      /** Diagnostics for the E2E visibility measurement. */
+      lastMoveIntentAt?: number;
+      lastAckAt?: number;
+      lastSnapshotAt?: number;
+      lastMovingSnapshotAt?: number;
     };
   }
 }

@@ -1,22 +1,14 @@
-import { isTileWalkable, type MapManifest, type TilePoint } from '@web-legend/contracts';
+import type { TilePoint } from '@web-legend/contracts';
 
 /**
- * The movement domain only needs walkability; the phase 1 test map manifest
- * satisfies it now, and the phase 3 compiled navigation grid will as well.
+ * The movement domain only needs walkability. The server adapts a compiled
+ * map runtime (or any other navigation source) to this shape.
  */
 export type MovementGrid = {
   width: number;
   height: number;
   isWalkable: (x: number, y: number) => boolean;
 };
-
-export function gridFromManifest(map: MapManifest): MovementGrid {
-  return {
-    width: map.width,
-    height: map.height,
-    isWalkable: (x, y) => isTileWalkable(map, x, y),
-  };
-}
 
 export function isInsideGrid(grid: MovementGrid, point: TilePoint): boolean {
   return (

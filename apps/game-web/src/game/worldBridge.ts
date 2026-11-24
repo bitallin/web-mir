@@ -41,6 +41,11 @@ export class WorldBridge {
     }
   }
 
+  /** Drops the last snapshot when the map instance changes. */
+  reset(): void {
+    this.latestSnapshot = null;
+  }
+
   pushSnapshot(data: SceneSnapshot): void {
     this.latestSnapshot = data;
     this.scene?.applySnapshot(data);

@@ -10,6 +10,12 @@ declare global {
       sceneGeneration: () => number;
       dropConnection: () => boolean;
       leaveWorld: () => Promise<void>;
+      currentMapId: () => string;
+      moveToTile: (tileX: number, tileY: number) => boolean;
+      lastMoveIntentAt?: number;
+      lastAckAt?: number;
+      lastSnapshotAt?: number;
+      lastMovingSnapshotAt?: number;
     };
   }
 }
