@@ -240,9 +240,20 @@ test('a page refresh reconnects to the living room without duplicating the playe
   );
   await expectPlayers(alice.page, 2);
   await expectPlayers(bob.page, 2);
-  await expect(
-    bob.page.locator(`[data-testid="player-row"][data-name="${aliceName}"]`),
-  ).toHaveCount(1);
+  const bobSeesAlice = bob.page.locator(`[data-testid="player-row"][data-name="${aliceName}"]`);
+  await expect(bobSeesAlice).toHaveCount(1);
+
+  // The refreshed client restarts its command sequence at zero; the first
+  // move after reconnection must still be accepted by the server.
+  const aliceSelf = alice.page.locator('[data-testid="player-row"][data-self="true"]');
+  const startTileX = Number(await aliceSelf.getAttribute('data-tile-x'));
+  const target = { x: startTileX >= 18 ? 14 : 18, y: 10 };
+  const point = await screenPointForTile(alice.page, target.x, target.y);
+  await alice.page.mouse.click(point.x, point.y);
+  await expect(bobSeesAlice).toHaveAttribute('data-tile-x', String(target.x), {
+    timeout: 5_000,
+  });
+  await expect(alice.page.getByTestId('command-count')).toHaveText('指令 1');
 
   await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'after-refresh.png') });
 });

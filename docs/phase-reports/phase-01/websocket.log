@@ -1,17 +1,19 @@
 # Colyseus websocket frames observed by the Alice browser context
-# room 7pw4gwUke; first move visible to Bob after 136ms
-connected ws://127.0.0.1:8844/?token=KAsQjust0zYO
+# room i5WFfF9Yg; first move visible to Bob after 174ms
+connected ws://127.0.0.1:8844/?token=jPGrLv77YDOm
 recv 20 bytes
-connected ws://127.0.0.1:8844/ws/vTisy18o5/7pw4gwUke?sessionId=EAj_MNscs&skipHandshake=1
+connected ws://127.0.0.1:8844/ws/-dOg7qCDl/i5WFfF9Yg?sessionId=KB2-UWQlN&skipHandshake=1
 recv 19 bytes
 sent 1 bytes
 sent 1 bytes
-recv 149 bytes
+recv 259 bytes
 recv 1 bytes
+recv 117 bytes
+recv 9 bytes
 recv 3 bytes
 recv 3 bytes
 recv 3 bytes
-connected ws://127.0.0.1:8844/?token=KAsQjust0zYO
+connected ws://127.0.0.1:8844/?token=jPGrLv77YDOm
 recv 20 bytes
 recv 3 bytes
 recv 3 bytes
@@ -24,15 +26,13 @@ recv 3 bytes
 recv 3 bytes
 recv 3 bytes
 recv 3 bytes
-connected ws://127.0.0.1:8844/ws/vTisy18o5/7pw4gwUke?sessionId=x7AeChLDT&skipHandshake=1
+connected ws://127.0.0.1:8844/ws/-dOg7qCDl/i5WFfF9Yg?sessionId=PBz8DaK0Z&skipHandshake=1
 recv 122 bytes
-recv 3 bytes
 recv 19 bytes
 sent 1 bytes
 sent 1 bytes
+recv 3 bytes
 recv 264 bytes
-recv 3 bytes
-recv 3 bytes
 recv 1 bytes
 recv 3 bytes
 recv 3 bytes
@@ -50,11 +50,11 @@ recv 3 bytes
 recv 3 bytes
 recv 3 bytes
 sent 120 bytes
+recv 190 bytes
+recv 3 bytes
 recv 3 bytes
 recv 13 bytes
-recv 190 bytes
 recv 13 bytes
-recv 9 bytes
 recv 9 bytes
 recv 9 bytes
 recv 9 bytes
@@ -64,12 +64,16 @@ recv 9 bytes
 recv 9 bytes
 recv 9 bytes
 sent 1 bytes
-recv 9 bytes
 recv 1 bytes
 recv 9 bytes
 recv 9 bytes
+recv 9 bytes
+recv 9 bytes
 recv 11 bytes
 recv 11 bytes
+recv 3 bytes
+recv 3 bytes
+recv 3 bytes
 recv 3 bytes
 recv 3 bytes
 recv 3 bytes

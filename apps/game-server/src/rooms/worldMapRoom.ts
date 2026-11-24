@@ -228,6 +228,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (session === undefined) {
       return;
     }
+    // A refreshed browser starts a fresh client with sequence 0; accepting its
+    // commands again must not depend on the pre-refresh sequence counter.
+    session.lastSequence = -1;
+    session.recentAcks.clear();
     this.setConnected(session.playerId, true);
     this.options.logger.info(
       { roomId: this.roomId, playerId: session.playerId },

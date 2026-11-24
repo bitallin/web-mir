@@ -423,6 +423,23 @@ describe('world_map room', () => {
     room.reconnection.minDelay = 100;
     room.reconnection.maxDelay = 300;
 
+    const beforeDrop = waitForMessage<CommandAck>(room, 'command.ack', (body) =>
+      commandAckSchema.parse(body),
+    );
+    const beforeTile = playerTile(room, playerId);
+    expect(beforeTile).toBeDefined();
+    if (beforeTile === undefined) {
+      return;
+    }
+    room.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetTileX: beforeTile.x + 1,
+      targetTileY: beforeTile.y,
+    });
+    await beforeDrop;
+
     const reconnected = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Timed out waiting for reconnect')), 10_000);
       room.onReconnect.once(() => {
@@ -442,6 +459,7 @@ describe('world_map room', () => {
     );
     expect(playerCount(room)).toBe(1);
 
+    // A fresh page after reconnection starts its sequence at 0 again.
     const ack = waitForMessage<CommandAck>(room, 'command.ack', (body) =>
       commandAckSchema.parse(body),
     );
@@ -457,7 +475,9 @@ describe('world_map room', () => {
       targetTileX: tile.x + 1,
       targetTileY: tile.y,
     });
-    expect((await ack).path.length).toBeGreaterThan(0);
+    const replayed = await ack;
+    expect(replayed.deduplicated).toBe(false);
+    expect(replayed.path.length).toBeGreaterThan(0);
   });
 
   it('removes the player after the reconnect grace period expires', async () => {
