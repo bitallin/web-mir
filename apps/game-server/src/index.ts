@@ -1,4 +1,5 @@
 import { createLogger } from '@web-legend/observability';
+import { createDatabase } from '@web-legend/persistence';
 
 import { loadGameServerEnv } from './env';
 import { createGameServer } from './server';
@@ -11,7 +12,8 @@ async function main(): Promise<void> {
     pretty: env.NODE_ENV === 'development',
   });
 
-  const runtime = createGameServer({ env, logger });
+  const database = createDatabase(env.DATABASE_URL, { max: 10 });
+  const runtime = createGameServer({ env, logger, database: database.db });
   let shuttingDown = false;
 
   const shutdown = async (signal: string): Promise<void> => {
@@ -23,6 +25,7 @@ async function main(): Promise<void> {
 
     try {
       await runtime.shutdown();
+      await database.close();
       logger.info('game server stopped');
     } catch (error) {
       logger.error({ err: error }, 'game server shutdown failed');
@@ -45,6 +48,7 @@ async function main(): Promise<void> {
     );
   } catch (error) {
     logger.error({ err: error }, 'game server failed to start');
+    await database.close();
     process.exitCode = 1;
   }
 }

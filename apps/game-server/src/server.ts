@@ -5,6 +5,7 @@ import {
   readinessResponseSchema,
   WORLD_ROOM_NAME,
 } from '@web-legend/contracts';
+import { pingDatabase, type Database } from '@web-legend/persistence';
 import type { Logger } from 'pino';
 
 import type { GameServerEnv } from './env';
@@ -24,6 +25,7 @@ export type WorldRoomTuning = {
 export type CreateGameServerOptions = {
   env: GameServerEnv;
   logger: Logger;
+  database: Database;
   world?: WorldRoomTuning;
 };
 
@@ -36,7 +38,7 @@ export type GameServerRuntime = {
 
 export function createGameServer(options: CreateGameServerOptions): GameServerRuntime {
   const startedAt = Date.now();
-  const { env, logger } = options;
+  const { env, logger, database } = options;
   const metrics = new MetricsRegistry();
 
   const server = new Server({
@@ -61,13 +63,28 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
         );
       });
 
-      app.get('/health/ready', (_request, response) => {
-        response.status(200).json(
+      app.get('/health/ready', async (_request, response) => {
+        const databaseOk = await pingDatabase(database);
+        if (!databaseOk) {
+          logger.warn('game server readiness database check failed');
+        }
+
+        const checks = [
+          { name: 'room-runtime', status: 'ok' as const },
+          {
+            name: 'database',
+            status: databaseOk ? ('ok' as const) : ('error' as const),
+            ...(databaseOk ? {} : { detail: 'database unreachable' }),
+          },
+        ];
+        const healthy = databaseOk;
+
+        response.status(healthy ? 200 : 503).json(
           readinessResponseSchema.parse({
-            status: 'ok',
+            status: healthy ? 'ok' : 'degraded',
             service: 'game-server',
             version: SERVICE_VERSION,
-            checks: [{ name: 'room-runtime', status: 'ok' }],
+            checks,
             timestamp: new Date().toISOString(),
           }),
         );
@@ -80,8 +97,8 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
   });
 
   server.define(WORLD_ROOM_NAME, WorldMapRoom, {
-    // Phase 2 replaces this with one-time game tickets (ADR-015).
-    allowDevIdentity: env.NODE_ENV !== 'production',
+    database,
+    serverId: env.GAME_SERVER_ID,
     logger,
     metrics,
     ...options.world,

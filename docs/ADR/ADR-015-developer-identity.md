@@ -1,6 +1,6 @@
 # ADR-015: 阶段 1 临时开发身份与重连凭据
 
-- 状态：Accepted
+- 状态：Superseded by [ADR-017](ADR-017-accounts-sessions-game-tickets.md)（2026-11-24）
 - 日期：2026-11-24
 - 关联：MVP 计划阶段 1 任务 4、阶段 2 票据；架构文档 8.7、11.2
 
@@ -68,3 +68,16 @@
 - WebSocket 握手校验并消费 ticket，删除开发身份分支；
 - 删除或迁移 `?name/?key/?fresh/?join` 调试参数；
 - 本 ADR 标记为 Superseded，并由阶段 2 报告引用。
+
+## 替代记录（阶段 2）
+
+阶段 2 已完成本 ADR 的全部退出条件：
+
+- Control API 签发短时、一次性、绑定 account/character/realm 的 game ticket；
+- `world_map` join options 只剩 `{protocolVersion, ticket}`，开发身份分支已删除，
+  `?name/?key` 参数已移除；
+- 生产与开发环境均只接受真实票据；
+- `?fresh=1` / `?join=<roomId>` 作为测试隔离参数保留（仅 DEV 构建生效），
+  不再承担身份功能。
+
+新决策见 [ADR-017](ADR-017-accounts-sessions-game-tickets.md)。

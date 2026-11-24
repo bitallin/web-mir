@@ -1,10 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
-const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'phase-01');
+const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'phase-02');
+const PASSWORD = 'phase-two-password';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -12,18 +14,22 @@ type WorldPage = {
   context: BrowserContext;
   page: Page;
   roomId: string;
+  characterName: string;
 };
 
-type OpenOptions = {
-  fresh?: boolean;
-  joinId?: string;
-};
-
-const opened: WorldPage[] = [];
+const opened: { context: BrowserContext; page: Page }[] = [];
 const websocketLog: string[] = [];
 
-function uniqueName(prefix: string): string {
-  return `${prefix}${String(Math.floor(Math.random() * 9_000) + 1_000)}`;
+function token(): string {
+  return randomUUID().replace(/-/gu, '').slice(0, 6);
+}
+
+function uniqueUsername(prefix: string): string {
+  return `${prefix}_${token()}`;
+}
+
+function uniqueCharacterName(prefix: string): string {
+  return `${prefix}${token()}`;
 }
 
 function lanAddress(): string | null {
@@ -37,22 +43,12 @@ function lanAddress(): string | null {
   return null;
 }
 
-async function openWorld(
+async function openPage(
   browser: Browser,
-  displayName: string,
-  options: OpenOptions = {},
-): Promise<WorldPage> {
+  url = '/',
+): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext();
   const page = await context.newPage();
-  const key = `e2e-${crypto.randomUUID()}`;
-  const params = new URLSearchParams({ name: displayName, key });
-  if (options.fresh === true) {
-    params.set('fresh', '1');
-  }
-  if (options.joinId !== undefined) {
-    params.set('join', options.joinId);
-  }
-
   page.on('websocket', (socket) => {
     websocketLog.push(`connected ${socket.url()}`);
     socket.on('framesent', (event) => {
@@ -62,8 +58,57 @@ async function openWorld(
       websocketLog.push(`recv ${String(event.payload.length)} bytes`);
     });
   });
+  await page.goto(url);
+  const entry = { context, page };
+  opened.push(entry);
+  return entry;
+}
 
-  await page.goto(`/?${params.toString()}`);
+async function registerAndCreateCharacter(
+  page: Page,
+  username: string,
+  characterName: string,
+  query = '',
+): Promise<void> {
+  if (query.length > 0) {
+    await page.goto(`/${query}`);
+  }
+  await page.getByRole('tab', { name: '注册' }).click();
+  await page.getByTestId('auth-username').fill(username);
+  await page.getByTestId('auth-password').fill(PASSWORD);
+  await page.getByTestId('auth-submit').click();
+  await expect(page.getByTestId('account-name')).toHaveText(username, { timeout: 20_000 });
+
+  await page.getByTestId('character-name').fill(characterName);
+  await page.getByTestId('character-create').click();
+  await expect(
+    page.locator(`[data-testid="character-card"][data-character-name="${characterName}"]`),
+  ).toHaveCount(1, { timeout: 10_000 });
+}
+
+async function loginAndSelectCharacter(
+  page: Page,
+  username: string,
+  characterName: string,
+  query = '',
+): Promise<void> {
+  if (query.length > 0) {
+    await page.goto(`/${query}`);
+  }
+  await page.getByTestId('auth-username').fill(username);
+  await page.getByTestId('auth-password').fill(PASSWORD);
+  await page.getByTestId('auth-submit').click();
+  await expect(page.getByTestId('account-name')).toHaveText(username, { timeout: 20_000 });
+  await expect(
+    page.locator(`[data-testid="character-card"][data-character-name="${characterName}"]`),
+  ).toHaveCount(1);
+}
+
+async function enterWorld(page: Page, characterName: string): Promise<string> {
+  await page
+    .locator(`[data-testid="character-card"][data-character-name="${characterName}"]`)
+    .getByTestId('enter-world')
+    .click();
   await expect(page.getByTestId('connection-status')).toHaveAttribute('data-status', 'connected', {
     timeout: 20_000,
   });
@@ -75,10 +120,28 @@ async function openWorld(
   if (roomId === '' || roomId === '—') {
     throw new Error('The client did not report a room id');
   }
+  return roomId;
+}
 
-  const world = { context, page, roomId };
-  opened.push(world);
-  return world;
+async function registerWorld(
+  browser: Browser,
+  options: { prefix: string; query?: string },
+): Promise<WorldPage> {
+  const { context, page } = await openPage(browser);
+  const username = uniqueUsername(options.prefix.toLowerCase());
+  const characterName = uniqueCharacterName(options.prefix);
+  await registerAndCreateCharacter(page, username, characterName, options.query ?? '');
+  const roomId = await enterWorld(page, characterName);
+  return { context, page, roomId, characterName };
+}
+
+async function joinWorld(browser: Browser, roomId: string, prefix: string): Promise<WorldPage> {
+  const { context, page } = await openPage(browser);
+  const username = uniqueUsername(prefix.toLowerCase());
+  const characterName = uniqueCharacterName(prefix);
+  await registerAndCreateCharacter(page, username, characterName, `?join=${roomId}`);
+  await enterWorld(page, characterName);
+  return { context, page, roomId, characterName };
 }
 
 async function expectPlayers(page: Page, count: number): Promise<void> {
@@ -98,35 +161,37 @@ async function screenPointForTile(page: Page, x: number, y: number) {
   return point;
 }
 
-async function waitForSceneGeneration(page: Page, expected: number): Promise<void> {
-  await expect
-    .poll(async () => page.evaluate(() => window.__webLegendDebug?.sceneGeneration() ?? 0), {
-      timeout: 10_000,
-    })
-    .toBe(expected);
-}
-
 test.afterEach(async () => {
-  for (const world of opened.splice(0)) {
+  for (const entry of opened.splice(0)) {
     try {
-      await world.page.evaluate(() => window.__webLegendDebug?.leaveWorld());
+      await entry.page.evaluate(() => window.__webLegendDebug?.leaveWorld());
     } catch {
-      // Page may already be closed.
+      // Page may already be closed or outside the world.
     }
-    await world.context.close();
+    await entry.context.close();
   }
 });
 
-test('two browser contexts see each other and movement reaches the other client within 250ms', async ({
-  browser,
-}) => {
+test('two accounts create characters and see each other within 250ms', async ({ browser }) => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
 
-  const aliceName = uniqueName('Alice');
-  const bobName = uniqueName('Bob');
-  const alice = await openWorld(browser, aliceName, { fresh: true });
-  const bob = await openWorld(browser, bobName, { joinId: alice.roomId });
+  const entry = await openPage(browser);
+  await entry.page.screenshot({ path: join(ARTIFACT_DIR, 'auth-screen.png') });
 
+  const aliceUsername = uniqueUsername('alice');
+  const aliceCharacter = uniqueCharacterName('Alice');
+  await registerAndCreateCharacter(entry.page, aliceUsername, aliceCharacter, '?fresh=1');
+  await entry.page.screenshot({ path: join(ARTIFACT_DIR, 'character-screen.png') });
+  const aliceRoomId = await enterWorld(entry.page, aliceCharacter);
+  const alice: WorldPage = {
+    context: entry.context,
+    page: entry.page,
+    roomId: aliceRoomId,
+    characterName: aliceCharacter,
+  };
+  await expectPlayers(alice.page, 1);
+
+  const bob = await joinWorld(browser, alice.roomId, 'Bob');
   await expectPlayers(alice.page, 2);
   await expectPlayers(bob.page, 2);
 
@@ -134,16 +199,15 @@ test('two browser contexts see each other and movement reaches the other client 
   const startTileX = Number(await aliceSelf.getAttribute('data-tile-x'));
   const startTileY = Number(await aliceSelf.getAttribute('data-tile-y'));
 
-  const bobSeesAlice = bob.page.locator(`[data-testid="player-row"][data-name="${aliceName}"]`);
+  const bobSeesAlice = bob.page.locator(
+    `[data-testid="player-row"][data-name="${alice.characterName}"]`,
+  );
   await expect(bobSeesAlice).toHaveCount(1);
 
   const target = { x: 18, y: 10 };
   await alice.page.waitForFunction(() => window.__webLegendDebug !== undefined);
   const point = await screenPointForTile(alice.page, target.x, target.y);
 
-  // Measure what the players actually observe: the pointer event timestamp in
-  // Alice's renderer and the moment Bob's DOM reflects the change. Node-side
-  // Playwright IPC is deliberately excluded from the 250ms budget.
   await alice.page.evaluate(() => {
     delete window.__e2eClickAt;
     document.querySelector('canvas')?.addEventListener(
@@ -196,7 +260,7 @@ test('two browser contexts see each other and movement reaches the other client 
           characterData: true,
         });
       }),
-    { name: aliceName, x: startTileX, y: startTileY },
+    { name: alice.characterName, x: startTileX, y: startTileY },
   );
 
   await alice.page.mouse.click(point.x, point.y);
@@ -206,7 +270,6 @@ test('two browser contexts see each other and movement reaches the other client 
 
   expect(clickedAt).toBeGreaterThan(0);
   expect(visibleAfterMs).toBeGreaterThanOrEqual(0);
-
   expect(visibleAfterMs).toBeLessThan(250);
   await expect(alice.page.getByTestId('command-count')).toHaveText('指令 1');
 
@@ -221,8 +284,8 @@ test('two browser contexts see each other and movement reaches the other client 
   await bob.page.screenshot({ path: join(ARTIFACT_DIR, 'two-players-bob.png') });
   writeFileSync(
     join(ARTIFACT_DIR, 'websocket.log'),
-    `# Colyseus websocket frames observed by the Alice browser context\n` +
-      `# room ${alice.roomId}; first move visible to Bob after ${String(visibleAfterMs)}ms\n` +
+    `# Colyseus websocket frames observed by browser contexts\n` +
+      `# room ${alice.roomId}; first move visible to the other client after ${String(visibleAfterMs)}ms\n` +
       websocketLog.join('\n') +
       '\n',
   );
@@ -233,30 +296,29 @@ test('two browser contexts see each other and movement reaches the other client 
   });
 });
 
-test('a page refresh reconnects to the living room without duplicating the player', async ({
+test('a page reload returns to the same character without duplicating the player', async ({
   browser,
 }) => {
-  const aliceName = uniqueName('Alice');
-  const alice = await openWorld(browser, aliceName, { fresh: true });
-  const bob = await openWorld(browser, uniqueName('Bob'), { joinId: alice.roomId });
-
+  const alice = await registerWorld(browser, { prefix: 'Alice', query: '?fresh=1' });
+  const bob = await joinWorld(browser, alice.roomId, 'Bob');
   await expectPlayers(alice.page, 2);
   await expectPlayers(bob.page, 2);
 
-  await alice.page.reload();
+  await alice.page.goto(`/?join=${alice.roomId}`);
+  await expect(
+    alice.page.locator(
+      `[data-testid="character-card"][data-character-name="${alice.characterName}"]`,
+    ),
+  ).toHaveCount(1, { timeout: 20_000 });
+  await enterWorld(alice.page, alice.characterName);
 
-  await expect(alice.page.getByTestId('connection-status')).toHaveAttribute(
-    'data-status',
-    'connected',
-    { timeout: 20_000 },
+  await expectPlayers(alice.page, 2);
+  await expectPlayers(bob.page, 2);
+  const bobSeesAlice = bob.page.locator(
+    `[data-testid="player-row"][data-name="${alice.characterName}"]`,
   );
-  await expectPlayers(alice.page, 2);
-  await expectPlayers(bob.page, 2);
-  const bobSeesAlice = bob.page.locator(`[data-testid="player-row"][data-name="${aliceName}"]`);
   await expect(bobSeesAlice).toHaveCount(1);
 
-  // The refreshed client restarts its command sequence at zero; the first
-  // move after reconnection must still be accepted by the server.
   const aliceSelf = alice.page.locator('[data-testid="player-row"][data-self="true"]');
   const startTileX = Number(await aliceSelf.getAttribute('data-tile-x'));
   const target = { x: startTileX >= 18 ? 14 : 18, y: 10 };
@@ -267,13 +329,42 @@ test('a page refresh reconnects to the living room without duplicating the playe
   });
   await expect(alice.page.getByTestId('command-count')).toHaveText('指令 1');
 
-  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'after-refresh.png') });
+  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'after-reload.png') });
+});
+
+test('a second client cannot control a character that is already in the world', async ({
+  browser,
+}) => {
+  const username = uniqueUsername('lease');
+  const characterName = uniqueCharacterName('Lease');
+  const { page: ownerPage } = await openPage(browser);
+  await registerAndCreateCharacter(ownerPage, username, characterName, '?fresh=1');
+  const roomId = await enterWorld(ownerPage, characterName);
+
+  const { page: intruderPage } = await openPage(browser);
+  await loginAndSelectCharacter(intruderPage, username, characterName, `?join=${roomId}`);
+  await intruderPage
+    .locator(`[data-testid="character-card"][data-character-name="${characterName}"]`)
+    .getByTestId('enter-world')
+    .click();
+
+  await expect(intruderPage.getByTestId('connection-status')).toHaveAttribute(
+    'data-status',
+    'failed',
+    { timeout: 20_000 },
+  );
+  await expect(intruderPage.locator('.connection-detail')).toContainText('另一台设备');
+
+  await expect(ownerPage.getByTestId('connection-status')).toHaveAttribute(
+    'data-status',
+    'connected',
+  );
+  await expectPlayers(ownerPage, 1);
 });
 
 test('a dropped socket shows the reconnecting state and recovers', async ({ browser }) => {
-  const alice = await openWorld(browser, uniqueName('Alice'), { fresh: true });
-  const bob = await openWorld(browser, uniqueName('Bob'), { joinId: alice.roomId });
-
+  const alice = await registerWorld(browser, { prefix: 'Alice', query: '?fresh=1' });
+  const bob = await joinWorld(browser, alice.roomId, 'Bob');
   await expectPlayers(alice.page, 2);
   await expectPlayers(bob.page, 2);
 
@@ -296,10 +387,8 @@ test('a dropped socket shows the reconnecting state and recovers', async ({ brow
 });
 
 test('restarting the Phaser scene does not duplicate input listeners', async ({ browser }) => {
-  const aliceName = uniqueName('Alice');
-  const alice = await openWorld(browser, aliceName, { fresh: true });
-  const bob = await openWorld(browser, uniqueName('Bob'), { joinId: alice.roomId });
-
+  const alice = await registerWorld(browser, { prefix: 'Alice', query: '?fresh=1' });
+  const bob = await joinWorld(browser, alice.roomId, 'Bob');
   await expectPlayers(alice.page, 2);
   await expectPlayers(bob.page, 2);
 
@@ -308,7 +397,11 @@ test('restarting the Phaser scene does not duplicate input listeners', async ({ 
     () => window.__webLegendDebug?.restartScene() ?? false,
   );
   expect(restarted).toBe(true);
-  await waitForSceneGeneration(alice.page, before + 1);
+  await expect
+    .poll(async () => alice.page.evaluate(() => window.__webLegendDebug?.sceneGeneration() ?? 0), {
+      timeout: 10_000,
+    })
+    .toBe(before + 1);
 
   const aliceSelf = alice.page.locator('[data-testid="player-row"][data-self="true"]');
   const startTileX = Number(await aliceSelf.getAttribute('data-tile-x'));
@@ -321,42 +414,65 @@ test('restarting the Phaser scene does not duplicate input listeners', async ({ 
   });
 
   await expect(
-    bob.page.locator(`[data-testid="player-row"][data-name="${aliceName}"]`),
+    bob.page.locator(`[data-testid="player-row"][data-name="${alice.characterName}"]`),
   ).toHaveAttribute('data-tile-x', String(target.x), { timeout: 5_000 });
 });
 
-test('works on a plain-HTTP LAN origin without secure-context crypto', async ({ browser }) => {
+test('logging out clears the session and returns to the account screen', async ({ browser }) => {
+  const { page } = await openPage(browser);
+  const username = uniqueUsername('logout');
+  const characterName = uniqueCharacterName('Out');
+  await registerAndCreateCharacter(page, username, characterName);
+
+  await page.getByTestId('logout').click();
+  await expect(page.getByTestId('auth-submit')).toBeVisible({ timeout: 10_000 });
+
+  await page.goto('/');
+  await expect(page.getByTestId('auth-submit')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('account-name')).toHaveCount(0);
+});
+
+test('registration and the world work on a plain-HTTP LAN origin', async ({ browser }) => {
   const address = lanAddress();
   if (address === null) {
     test.skip(true, 'No non-internal IPv4 address available');
     return;
   }
 
-  // Regression: crypto.randomUUID is undefined outside secure contexts. The
-  // client must still generate its identity and command ids over plain HTTP.
+  const port = process.env.GAME_WEB_PORT ?? '5173';
+  const origin = `http://${address}:${port}`;
   const context = await browser.newContext();
   const page = await context.newPage();
-  const port = process.env.GAME_WEB_PORT ?? '5173';
-  const params = new URLSearchParams({
-    name: uniqueName('Lan'),
-    key: `e2e-lan-${crypto.randomUUID()}`,
-    fresh: '1',
-  });
+  opened.push({ context, page });
 
+  const username = uniqueUsername('lan');
+  const characterName = uniqueCharacterName('Lan');
   try {
-    await page.goto(`http://${address}:${port}/?${params.toString()}`);
+    await page.goto(`${origin}/?fresh=1`);
     expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
-    await expect(page.getByTestId('connection-status')).toHaveAttribute(
-      'data-status',
-      'connected',
-      { timeout: 20_000 },
-    );
-    await expect(page.locator('[data-testid="player-row"][data-self="true"]')).toHaveCount(1);
+    await page.getByRole('tab', { name: '注册' }).click();
+    await page.getByTestId('auth-username').fill(username);
+    await page.getByTestId('auth-password').fill(PASSWORD);
+    await page.getByTestId('auth-submit').click();
+    await expect(page.getByTestId('account-name')).toHaveText(username, { timeout: 20_000 });
 
+    await page.getByTestId('character-name').fill(characterName);
+    await page.getByTestId('character-create').click();
+    await expect(
+      page.locator(`[data-testid="character-card"][data-character-name="${characterName}"]`),
+    ).toHaveCount(1, { timeout: 10_000 });
+
+    await enterWorld(page, characterName);
     const point = await screenPointForTile(page, 18, 10);
     await page.mouse.click(point.x, point.y);
     await expect(page.getByTestId('command-count')).toHaveText('指令 1', { timeout: 5_000 });
   } finally {
+    try {
+      await page.evaluate(() => window.__webLegendDebug?.leaveWorld());
+    } catch {
+      // Already navigated away.
+    }
     await context.close();
+    opened.pop();
   }
 });

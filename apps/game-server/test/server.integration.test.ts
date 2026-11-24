@@ -3,6 +3,7 @@ import { createServer as createNetServer } from 'node:net';
 import { Client, type Room as SdkRoom } from '@colyseus/sdk';
 import { healthResponseSchema, readinessResponseSchema } from '@web-legend/contracts';
 import { createLogger } from '@web-legend/observability';
+import { createDatabase, type DatabaseHandle } from '@web-legend/persistence';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -62,16 +63,24 @@ async function ping(room: SdkRoom, sequence: number): Promise<z.infer<typeof pon
 
 describe('game server runtime', () => {
   let runtime: GameServerRuntime;
+  let database: DatabaseHandle;
   let client: Client;
   let baseUrl: string;
 
   beforeAll(async () => {
     const port = await reservePort();
+    const databaseUrl = process.env.DATABASE_URL;
+    if (databaseUrl === undefined) {
+      throw new Error('DATABASE_URL is required for game server integration tests');
+    }
+    database = createDatabase(databaseUrl, { max: 2 });
     const env: GameServerEnv = {
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
       GAME_SERVER_HOST: '127.0.0.1',
       GAME_SERVER_PORT: port,
+      DATABASE_URL: databaseUrl,
+      GAME_SERVER_ID: 'game-server-test',
     };
 
     runtime = createGameServer({
@@ -81,6 +90,7 @@ describe('game server runtime', () => {
         level: 'silent',
         destination: { write: () => undefined },
       }),
+      database: database.db,
     });
 
     await runtime.listen();
@@ -90,6 +100,7 @@ describe('game server runtime', () => {
 
   afterAll(async () => {
     await runtime?.shutdown();
+    await database?.close();
   });
 
   it('serves liveness and readiness over HTTP', async () => {
@@ -106,10 +117,14 @@ describe('game server runtime', () => {
     const readyBody: unknown = await readyResponse.json();
 
     expect(readyResponse.status).toBe(200);
-    expect(readinessResponseSchema.parse(readyBody)).toMatchObject({
-      status: 'ok',
-      checks: [{ name: 'room-runtime', status: 'ok' }],
-    });
+    const readiness = readinessResponseSchema.parse(readyBody);
+    expect(readiness.status).toBe('ok');
+    expect(readiness.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'room-runtime', status: 'ok' }),
+        expect.objectContaining({ name: 'database', status: 'ok' }),
+      ]),
+    );
   });
 
   it('accepts a real websocket client and validates messages', async () => {

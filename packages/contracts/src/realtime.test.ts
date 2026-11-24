@@ -44,43 +44,32 @@ describe('moveToCommandSchema', () => {
 });
 
 describe('worldJoinOptionsSchema', () => {
-  it('accepts a development identity with CJK display name', () => {
-    const parsed = worldJoinOptionsSchema.parse({
-      protocolVersion: 1,
-      displayName: '游侠 Alice',
-      playerKey: '8f1d2c4a-9b3e-4f00-9a11-123456789abc',
-    });
+  const ticket = 'A'.repeat(43);
 
-    expect(parsed.displayName).toBe('游侠 Alice');
+  it('accepts the protocol version and an opaque ticket', () => {
+    const parsed = worldJoinOptionsSchema.parse({ protocolVersion: 1, ticket });
+    expect(parsed.ticket).toBe(ticket);
   });
 
-  it('rejects extra identity fields such as a self-reported account id', () => {
-    expect(
-      worldJoinOptionsSchema.safeParse({
-        protocolVersion: 1,
-        displayName: 'Alice',
-        playerKey: '8f1d2c4a-9b3e-4f00-9a11-123456789abc',
-        accountId: 'admin',
-      }).success,
-    ).toBe(false);
+  it('rejects self-reported identity fields such as account or character ids', () => {
+    for (const extra of [
+      { accountId: '0192f0a0-0000-7000-8000-000000000001' },
+      { characterId: '0192f0a0-0000-7000-8000-000000000002' },
+      { displayName: 'Alice' },
+      { playerKey: '8f1d2c4a-9b3e-4f00-9a11-123456789abc' },
+    ]) {
+      expect(
+        worldJoinOptionsSchema.safeParse({ protocolVersion: 1, ticket, ...extra }).success,
+      ).toBe(false);
+    }
   });
 
-  it('rejects blank and oversized display names', () => {
-    expect(
-      worldJoinOptionsSchema.safeParse({
-        protocolVersion: 1,
-        displayName: '   ',
-        playerKey: '8f1d2c4a-9b3e-4f00-9a11-123456789abc',
-      }).success,
-    ).toBe(false);
-
-    expect(
-      worldJoinOptionsSchema.safeParse({
-        protocolVersion: 1,
-        displayName: 'x'.repeat(17),
-        playerKey: '8f1d2c4a-9b3e-4f00-9a11-123456789abc',
-      }).success,
-    ).toBe(false);
+  it('rejects blank, oversized and non-URL-safe tickets', () => {
+    for (const badTicket of ['', 'short', ticket + 'A'.repeat(600), `${ticket}!`]) {
+      expect(
+        worldJoinOptionsSchema.safeParse({ protocolVersion: 1, ticket: badTicket }).success,
+      ).toBe(false);
+    }
   });
 });
 

@@ -72,7 +72,8 @@ web-mir/
 │  ├─ control-api/    Fastify REST + 未来 Outbox dispatcher
 │  └─ game-server/    Colyseus Room 与实时适配
 ├─ packages/
-│  ├─ contracts/      API/协议/健康/错误码，客户端与服务端共享
+│  ├─ contracts/      API/协议/角色 DTO/健康/错误码，客户端与服务端共享
+│  ├─ auth/           Argon2id 密码、会话令牌与一次性票据令牌（阶段 2 创建）
 │  ├─ game-simulation/ 固定 tick、移动推进、路径与边界（阶段 1 创建）
 │  ├─ config/         Zod 环境变量校验与 .env 加载
 │  ├─ observability/  Pino 结构化日志与脱敏
@@ -85,19 +86,24 @@ web-mir/
 ```
 
 `game-simulation` 已在阶段 1 创建，承载固定 tick、路径与移动推进，不依赖
-Colyseus、Phaser、数据库或 HTTP。
+Colyseus、Phaser、数据库或 HTTP。`auth` 已在阶段 2 创建，承载 Argon2id 密码哈希、
+会话令牌与票据令牌，只使用 Node 内置 `crypto`，不依赖 contracts、数据库或 app。
 
 当前**尚未创建**的包及创建时机（ADR-013）：`content-schema`（阶段 7 内容发布）、
 `game-domain`（阶段 3 移动/阶段 4 战斗）、`game-application`（阶段 5 事务用例）、
-`auth`（阶段 2）、`map-runtime`（阶段 3）。不要提前创建空壳包。
+`map-runtime`（阶段 3）。不要提前创建空壳包。
 
 强制依赖方向：
 
 - `contracts`、`config` 不依赖任何 app。
+- `auth` 只依赖 Node 内置模块；不得依赖 contracts、数据库、HTTP 框架或 app。
 - `persistence` 只依赖 `config` 和数据库库，不依赖 app。
 - `game-simulation` 只依赖 `contracts`；不得依赖 Colyseus、Phaser、数据库或 HTTP。
+- `control-api` 依赖 `auth`、`persistence`、`contracts`；不得导入 game-server。
+- `game-server` 依赖 `auth`、`persistence`、`game-simulation`、`contracts`；
+  不得导入 control-api。
 - `game-web` 只能导入 `contracts`、自身表现层与资源 manifest；不能导入服务端包
-  （含 `game-simulation`）、数据库、Fastify、Colyseus 服务端或 Pino。
+  （含 `game-simulation`、`auth`）、数据库、Fastify、Colyseus 服务端或 Pino。
 - `admin-web` 只能通过 Control API 访问数据；只能导入 `contracts`，不得导入
   Phaser、服务端包或数据库。
 - `control-api` 与 `game-server` 不得互相导入。

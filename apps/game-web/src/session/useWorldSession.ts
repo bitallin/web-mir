@@ -1,10 +1,10 @@
-import type { TilePoint } from '@web-legend/contracts';
+import type { CharacterView, TilePoint } from '@web-legend/contracts';
 import type Phaser from 'phaser';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
 import { createWorldGame } from '../game/createWorldGame';
 import { WorldBridge } from '../game/worldBridge';
-import { loadDevIdentity, loadRoomPreference, type DevIdentity } from '../lib/identity';
+import { loadRoomPreference } from '../lib/identity';
 import { WorldClient, type ConnectionStatus, type PlayerView } from '../net/worldClient';
 
 export type SessionNotice = {
@@ -17,27 +17,32 @@ export type SessionState = {
   status: ConnectionStatus;
   detail: string;
   players: PlayerView[];
-  selfId: string | null;
+  selfId: string;
   latencyMs: number | null;
   commandCount: number;
   serverTick: number;
   roomId: string | null;
   notice: SessionNotice | null;
-  identity: DevIdentity | null;
 };
 
-const INITIAL_STATE: SessionState = {
-  status: 'connecting',
-  detail: '正在准备世界',
-  players: [],
-  selfId: null,
-  latencyMs: null,
-  commandCount: 0,
-  serverTick: 0,
-  roomId: null,
-  notice: null,
-  identity: null,
+export type WorldSessionOptions = {
+  character: CharacterView;
+  requestTicket: () => Promise<string>;
 };
+
+function initialState(characterId: string): SessionState {
+  return {
+    status: 'connecting',
+    detail: '正在准备世界',
+    players: [],
+    selfId: characterId,
+    latencyMs: null,
+    commandCount: 0,
+    serverTick: 0,
+    roomId: null,
+    notice: null,
+  };
+}
 
 function resolveGameServerUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -52,8 +57,8 @@ function resolveGameServerUrl(): string {
 class WorldSession {
   private readonly bridge: WorldBridge;
   private readonly container: HTMLElement;
+  private readonly options: WorldSessionOptions;
   private readonly updateState: (updater: (previous: SessionState) => SessionState) => void;
-  private readonly identity: DevIdentity;
   private client: WorldClient | null = null;
   private game: Phaser.Game | null = null;
   private commandCount = 0;
@@ -62,12 +67,12 @@ class WorldSession {
   constructor(
     container: HTMLElement,
     bridge: WorldBridge,
-    identity: DevIdentity,
+    options: WorldSessionOptions,
     updateState: (updater: (previous: SessionState) => SessionState) => void,
   ) {
     this.container = container;
     this.bridge = bridge;
-    this.identity = identity;
+    this.options = options;
     this.updateState = updateState;
     this.bridge.onMoveRequest = (tile) => {
       this.moveTo(tile);
@@ -78,18 +83,20 @@ class WorldSession {
     this.game = createWorldGame(this.container, this.bridge);
     this.installDebugHooks();
 
+    const characterId = this.options.character.id;
     this.client = new WorldClient({
       url: resolveGameServerUrl(),
-      identity: this.identity,
+      characterId,
+      requestTicket: this.options.requestTicket,
       roomPreference: loadRoomPreference(),
       callbacks: {
         onSnapshot: (snapshot) => {
-          this.bridge.pushSnapshot({ snapshot, selfId: this.identity.playerKey });
+          this.bridge.pushSnapshot({ snapshot, selfId: characterId });
           this.updateState((previous) => ({
             ...previous,
             players: snapshot.players,
             serverTick: snapshot.tick,
-            selfId: this.identity.playerKey,
+            selfId: characterId,
           }));
         },
         onStatus: (status, detail) => {
@@ -148,7 +155,6 @@ class WorldSession {
       status: 'disconnected',
       detail: '已离开世界',
       players: [],
-      selfId: null,
     }));
   }
 
@@ -192,14 +198,19 @@ export type WorldSessionControls = {
   rejoin: () => void;
 };
 
+/**
+ * Owns one Phaser game and one world connection for the selected character.
+ * The ticket callback is kept in a ref so a re-render never restarts the world.
+ */
 export function useWorldSession(
   containerRef: RefObject<HTMLDivElement | null>,
+  options: WorldSessionOptions,
 ): WorldSessionControls {
-  const [state, setState] = useState<SessionState>(() => ({
-    ...INITIAL_STATE,
-    identity: loadDevIdentity(),
-  }));
+  const characterId = options.character.id;
+  const [state, setState] = useState<SessionState>(() => initialState(characterId));
   const sessionRef = useRef<WorldSession | null>(null);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -208,8 +219,7 @@ export function useWorldSession(
     }
 
     const bridge = new WorldBridge();
-    const identity = loadDevIdentity();
-    const session = new WorldSession(container, bridge, identity, (updater) => {
+    const session = new WorldSession(container, bridge, optionsRef.current, (updater) => {
       setState(updater);
     });
     sessionRef.current = session;
@@ -225,7 +235,7 @@ export function useWorldSession(
       sessionRef.current = null;
       void session.dispose();
     };
-  }, [containerRef]);
+  }, [containerRef, characterId]);
 
   const rejoin = useCallback(() => {
     sessionRef.current?.rejoin();

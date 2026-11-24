@@ -8,6 +8,7 @@ if (existsSync('.env')) {
 
 const gameWebPort = process.env.GAME_WEB_PORT ?? '5173';
 const adminWebPort = process.env.ADMIN_WEB_PORT ?? '5174';
+const controlApiPort = process.env.CONTROL_API_PORT ?? '3000';
 const gameServerPort = process.env.GAME_SERVER_PORT ?? '2567';
 const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === 'true';
 const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
@@ -49,6 +50,14 @@ export default defineConfig({
             url: `http://127.0.0.1:${adminWebPort}`,
             reuseExistingServer: process.env.CI !== 'true',
             timeout: 120_000,
+          },
+          {
+            // Migrations and the default realm are idempotent prerequisites for
+            // real registration and character creation.
+            command: 'pnpm db:migrate && pnpm db:seed && pnpm --filter @web-legend/control-api dev',
+            url: `http://127.0.0.1:${controlApiPort}/health/live`,
+            reuseExistingServer: process.env.CI !== 'true',
+            timeout: 180_000,
           },
           {
             command: 'pnpm --filter @web-legend/game-server dev',

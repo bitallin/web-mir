@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fastify/cors": "11.4.3",
+    "@web-legend/auth": "workspace:*",
     "@web-legend/config": "workspace:*",
     "@web-legend/contracts": "workspace:*",
     "@web-legend/observability": "workspace:*",

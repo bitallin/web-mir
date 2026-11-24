@@ -1095,6 +1095,11 @@ AI Ops 不属于 MVP 核心门禁，放到后续版本。初始只读：调用 a
 | ADR-010 | 不做完整 Event Sourcing | Accepted |
 | ADR-011 | 后台 Effect DSL 白名单，不执行任意脚本 | Accepted |
 | ADR-012 | AI Ops 后置，先只读 | Accepted |
+| ADR-013 | 按真实消费者创建包，不预建空壳 | Accepted |
+| ADR-014 | Node 26 / TypeScript 5.9.3 / 精确依赖 | Accepted |
+| ADR-015 | 阶段 1 临时开发身份与重连凭据 | Superseded by ADR-017 |
+| ADR-016 | 阶段 1 权威移动模型与技术测试地图 | Accepted |
+| ADR-017 | 账号会话、一次性游戏票据与角色租约 | Accepted |
 
 ---
 

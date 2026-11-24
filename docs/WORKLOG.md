@@ -316,3 +316,136 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 GAME_SERVER_PORT=8847 \
 1. 等待 Tech Lead 审阅阶段 1 报告与证据。
 2. 批准后执行阶段 2：账号、角色、Argon2id、刷新令牌、一次性 game ticket、
    单角色会话租约、角色持久化与角色列表 API。
+
+---
+
+## 2026-11-24 · 阶段 2：账号、角色和连接票据
+
+### 本次任务目标
+
+用真实账号与角色身份替换阶段 1 的开发身份，完成注册/登录/刷新/登出、Argon2id、
+角色创建与区服内唯一名称、一次性 game ticket、单角色会话租约、角色位置持久化，
+并保持阶段 1 的双人移动与重连能力。只执行阶段 2，不进入阶段 3。
+
+### 开工前检查
+
+- 阅读 AGENTS、PROJECT_STATUS、WORKLOG、架构 v2、MVP 计划 v2、阶段 1 报告、
+  ADR-013/015/016。
+- `git status` 干净；HEAD `f4b74ff`。
+- 数据库已有 `realms` 与 1 条迁移；84–87 被用户已有开发栈占用，阶段 2 的 E2E
+  使用 8844–8847（同一套代码，仅端口覆盖）。
+- 当前实现与架构一致：阶段 1 仅开发身份；账号/角色/票据/租约均未实现。
+
+### 实施内容
+
+1. **contracts**
+   - `auth.ts`：账号/密码/登录/注册 schema、`normalizeUsername`、认证响应；
+   - `character.ts`：职业目录、角色名 NFKC + 小写归一、角色视图、创建/列表、
+     ticket 请求/响应、60 秒 TTL；
+   - `realtime.ts`：join 改为严格 `{protocolVersion, ticket}`；
+   - `phase1Map.ts`：Control API 与 Game Server 共享地图/出生点；
+   - 扩展 API 错误码。
+2. **auth（新包，ADR-013 阶段 2）**
+   - Node 26 内置 Argon2id（m=19456,t=2,p=1），PHC 编码与常量时间校验；
+   - 256 bit 不透明 access/refresh 令牌与 SHA-256 摘要。
+3. **persistence**
+   - 新表 accounts、account_sessions、characters、character_sessions、
+     game_tickets；迁移 `0001_peaceful_rachel_grey.sql`；
+   - 角色名 `(realm_id, name_normalized)` 唯一；
+   - 仓储：会话轮换/撤销、角色归属、位置 checkpoint、票据原子消费、租约；
+   - `db:seed` 幂等写入 `classic-01`。
+4. **control-api**
+   - `/auth/register|login|refresh|logout`、`/me`、`/realms`、`/characters*`、
+     `/game/ticket`；
+   - HttpOnly/SameSite=Lax Cookie，生产 Secure；access 15m / refresh 30d；
+   - 旧 refresh token 轮换后立即失效；未知账号占位 Argon2 校验；
+   - CSRF Origin 校验、16KB body、认证限频；统一错误 envelope。
+5. **game-server**
+   - `DATABASE_URL`、`GAME_SERVER_ID`；就绪探针增加数据库；
+   - `onAuth` 条件 UPDATE 原子消费票据、读取角色/区服、获取租约；
+   - 删除开发身份；入图恢复持久化坐标/朝向；
+   - 离开/宽限期/dispose checkpoint 并释放租约；租约 30s、10s 续租。
+6. **game-web**
+   - 登录/注册、角色选择/创建、世界三段式页面；
+   - API 自动 refresh 重试；每次入图取新 ticket；重连 token 绑定角色；
+   - 移除 `?name/?key`，保留 DEV-only `?fresh/?join`。
+7. **测试**
+   - 新增 auth/contracts/cookie/rate-limit origin 单元测试；
+   - control-api 认证、轮换、登出、CSRF、限频、角色重名、所有权、ticket、
+     API 重启集成测试；
+   - game-server 票据/租约/位置恢复/checkpoint/重连/指标集成测试；
+   - E2E：注册→建角→双人可见→刷新→重复登录拒绝→断线恢复→Scene 重启→登出→
+     局域网 HTTP。
+8. **文档**
+   - ADR-017；ADR-015 Superseded；ADR-013 实施记录；
+   - README、PROJECT_STATUS、阶段 2 报告、数据库证据。
+
+### 关键技术决策
+
+- 采用数据库不透明令牌 + HttpOnly Cookie，而非 JWT；支持即时撤销与轮换。
+- Argon2id 使用 Node 26 内置实现，避免原生扩展依赖。
+- 票据只存 SHA-256，由 Game Server 用条件 UPDATE 消费，数据库是唯一并发边界。
+- 单角色租约采用 `(character_id)` 主键 + 原子插入/条件接管；重复登录拒绝。
+- 角色位置在离开时 checkpoint，入图恢复；tick 内无 IO。
+- 开发代理保留 Host，Origin 校验允许同 hostname 的端口变化（反向代理）。
+
+### 执行的命令与结果
+
+```bash
+pnpm install
+pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
+pnpm format
+pnpm verify
+pnpm test
+GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=8847 \
+  PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
+```
+
+结果：
+
+- 迁移 2 条在真实 PostgreSQL 18.3 执行；默认区服写入成功。
+- format / lint / typecheck 通过。
+- 单元与集成：31 个文件、146 个测试通过（约 4.5s）。
+- 构建：4 个应用成功。
+- E2E：9/9 通过（约 44s）；双人可见 141ms（完整套件）与 184ms（单独运行）。
+- 数据库证据：110 张票据（101 消费/9 过期/0 开放），测试结束 0 活跃租约，
+  90 个角色 version > 0。
+- 生产门禁：伪造票据与自报身份字段均 525；diagnostics 520。
+
+### 遇到的问题及解决方法
+
+1. **Argon2id 依赖**：Node 26 内置 `crypto.argon2` 可用，避免新增原生包；
+   单元测试覆盖 PHC 格式、错误密码与篡改哈希。
+2. **Drizzle 唯一冲突被包装**：`isUniqueViolation` 沿 `cause` 链查找 SQLSTATE
+   23505，修复重名账号/角色返回 500 的问题。
+3. **Vite 代理改写 Host 导致局域网注册 403**：`/api`、`/health`、`/ws` 显式
+   `changeOrigin: false`；Origin 校验同 hostname 允许端口变化（反向代理）。
+4. **路由注册函数 async 无 await**：改为同步注册，满足 lint。
+5. **刷新后不再自动入图**：阶段 2 刷新回到角色选择；E2E 改为再次点击“进入世界”，
+   验证 reconnection token 在宽限期内恢复原座位且不重复玩家。
+6. **Fastify 泛型与 pino Logger**：路由模块使用显式 `AppServer` 类型，解决
+   `exactOptionalPropertyTypes` 下的实例类型不兼容。
+7. **共享开发库中的数据冲突**：集成/E2E 使用随机账号与角色名，避免历史数据冲突。
+
+### 尚未解决的问题
+
+- 进程崩溃后租约最长 30 秒仍有效，期间用户会看到“另一台设备”。
+- 位置仅在正常离开/dispose 时保存；阶段 3 做节流 checkpoint。
+- 票据/会话不自动清理；限频为单进程内存。
+- 无密码找回、邮箱验证、MFA。
+- 共享开发数据库仍用于集成测试；阶段 5 前建立独立测试库。
+- 后台仍无账号/角色管理页面（阶段 7）。
+- 前端 bundle 仍较大（Phaser 约 2.1MB）。
+
+### 阶段提交
+
+- 阶段 2 主提交：`feat(phase-2): deliver accounts, characters and one-time game tickets`
+  （哈希见随后 `docs(phase-2)` 提交）。
+
+### 下一步计划
+
+1. 等待 Tech Lead 审阅阶段 2 报告与证据。
+2. 批准后执行阶段 3：Tiled 地图、map-runtime、MapTemplate/Instance、主城 ↔ 野外
+   传送、AOI、节流 checkpoint、同图聊天与 30 人 tick 指标。

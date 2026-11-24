@@ -24,7 +24,8 @@
     "db:down": "docker compose -f infra/docker/compose.yml down",
     "db:logs": "docker compose -f infra/docker/compose.yml logs -f postgres",
     "db:generate": "pnpm --filter @web-legend/persistence db:generate",
-    "db:migrate": "pnpm --filter @web-legend/persistence db:migrate"
+    "db:migrate": "pnpm --filter @web-legend/persistence db:migrate",
+    "db:seed": "pnpm --filter @web-legend/persistence db:seed"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

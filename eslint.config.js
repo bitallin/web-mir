@@ -12,6 +12,8 @@ const apps = [
 ];
 
 const serverPackages = [
+  '@web-legend/auth',
+  '@web-legend/auth/*',
   '@web-legend/persistence',
   '@web-legend/persistence/*',
   '@web-legend/config',

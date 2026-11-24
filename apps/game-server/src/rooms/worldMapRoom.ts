@@ -1,9 +1,11 @@
 import { CloseCode, ErrorCode, Room, ServerError, type Client } from '@colyseus/core';
+import { hashToken } from '@web-legend/auth';
 import {
   CLIENT_MESSAGES,
   COMMAND_REJECTION_MESSAGES,
   DEFAULT_PATCH_RATE_MS,
   DEFAULT_TICK_HZ,
+  FACING,
   isTileInsideMap,
   isTileWalkable,
   moveToCommandSchema,
@@ -17,6 +19,7 @@ import {
   type CommandAck,
   type CommandRejected,
   type CommandRejectionCode,
+  type Facing,
   type TilePoint,
 } from '@web-legend/contracts';
 import {
@@ -34,6 +37,16 @@ import {
   type FixedStepRunner,
   type MovementGrid,
 } from '@web-legend/game-simulation';
+import {
+  acquireCharacterLease,
+  consumeGameTicket,
+  findCharacterById,
+  findRealmById,
+  refreshCharacterLeases,
+  releaseCharacterLease,
+  saveCharacterCheckpoint,
+  type Database,
+} from '@web-legend/persistence';
 import type { Logger } from 'pino';
 import { z } from 'zod';
 
@@ -42,8 +55,8 @@ import { PHASE1_TEST_MAP } from '../world/mapLoader';
 import { createTokenBucket, type TokenBucket } from '../world/rateLimiter';
 
 export type WorldMapRoomOptions = {
-  /** False in production until phase 2 game tickets exist. */
-  allowDevIdentity: boolean;
+  database: Database;
+  serverId: string;
   logger: Logger;
   metrics: MetricsRegistry;
   tickHz?: number;
@@ -59,24 +72,58 @@ const DEFAULT_COMMAND_RATE_REFILL_PER_SECOND = 10;
 const RECENT_COMMAND_WINDOW = 32;
 const COLOR_COUNT = 6;
 
+/**
+ * Leases outlive a single tick and are refreshed in the background. A crashed
+ * process releases control automatically once its lease expires.
+ */
+const LEASE_DURATION_MS = 30_000;
+const LEASE_REFRESH_INTERVAL_MS = 10_000;
+
 const authDataSchema = z.object({
-  playerId: z.string().min(1),
-  displayName: z.string().min(1),
+  accountId: z.uuid(),
+  characterId: z.uuid(),
+  realmId: z.uuid(),
+  displayName: z.string().min(1).max(32),
+  mapId: z.string().min(1),
+  x: z.number().int().nonnegative(),
+  y: z.number().int().nonnegative(),
+  facing: z.number().int().min(0).max(3),
+  hp: z.number().int().nonnegative(),
+  maxHp: z.number().int().positive(),
+  mp: z.number().int().nonnegative(),
+  maxMp: z.number().int().nonnegative(),
 });
+
+type WorldAuthData = z.infer<typeof authDataSchema>;
 
 type SessionRecord = {
   playerId: string;
   lastSequence: number;
   recentAcks: Map<string, CommandAck>;
   rateBucket: TokenBucket;
+  hp: number;
+  mp: number;
 };
 
-function colorIndexFor(playerId: string): number {
+function colorIndexFor(characterId: string): number {
   let hash = 0;
-  for (const char of playerId) {
+  for (const char of characterId) {
     hash = (hash * 31 + char.charCodeAt(0)) % 1_000_003;
   }
   return hash % COLOR_COUNT;
+}
+
+function toFacing(value: number): Facing {
+  switch (value) {
+    case FACING.north:
+      return FACING.north;
+    case FACING.east:
+      return FACING.east;
+    case FACING.west:
+      return FACING.west;
+    default:
+      return FACING.south;
+  }
 }
 
 function extractCommandMeta(raw: unknown): { commandId?: string; clientSequence?: number } {
@@ -97,8 +144,8 @@ function extractCommandMeta(raw: unknown): { commandId?: string; clientSequence?
 
 /**
  * One Colyseus room per map instance (ADR-003). The room performs connection
- * adaptation only: identity, rate limiting, routing and state synchronization.
- * Movement rules live in `@web-legend/game-simulation`.
+ * adaptation only: ticket validation, lease acquisition, rate limiting, routing
+ * and state synchronization. Movement rules live in `@web-legend/game-simulation`.
  */
 export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   override maxClients = 50;
@@ -144,23 +191,26 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       this.handleMove(client, message);
     });
 
+    this.clock.setInterval(() => {
+      void this.refreshLeases();
+    }, LEASE_REFRESH_INTERVAL_MS);
+
     options.logger.info(
-      { roomId: this.roomId, mapId: PHASE1_TEST_MAP.id, tickHz, patchRateMs },
+      {
+        roomId: this.roomId,
+        mapId: PHASE1_TEST_MAP.id,
+        tickHz,
+        patchRateMs,
+        serverId: options.serverId,
+      },
       'world map room created',
     );
   }
 
-  override onAuth(_client: Client, rawOptions: unknown): { playerId: string; displayName: string } {
-    if (!this.options.allowDevIdentity) {
-      throw new ServerError(
-        ErrorCode.AUTH_FAILED,
-        'Game tickets are required; the development identity is disabled in production',
-      );
-    }
-
+  override async onAuth(client: Client, rawOptions: unknown): Promise<WorldAuthData> {
     const parsed = worldJoinOptionsSchema.safeParse(rawOptions);
     if (!parsed.success) {
-      throw new ServerError(ErrorCode.AUTH_FAILED, 'Invalid join options');
+      throw new ServerError(ErrorCode.AUTH_FAILED, '进入世界的凭证格式不正确');
     }
     if (parsed.data.protocolVersion !== PROTOCOL_VERSION) {
       throw new ServerError(
@@ -168,43 +218,50 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         `Protocol version ${String(PROTOCOL_VERSION)} required`,
       );
     }
-    if (
-      this.sessionByPlayer.has(parsed.data.playerKey) ||
-      this.state.players.has(parsed.data.playerKey)
-    ) {
-      throw new ServerError(ErrorCode.AUTH_FAILED, 'This player is already connected');
-    }
 
-    return { playerId: parsed.data.playerKey, displayName: parsed.data.displayName };
+    try {
+      return await this.authenticateTicket(client, parsed.data.ticket);
+    } catch (error) {
+      if (error instanceof ServerError) {
+        throw error;
+      }
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, sessionId: client.sessionId },
+        'game ticket validation failed',
+      );
+      throw new ServerError(ErrorCode.AUTH_FAILED, '身份校验服务暂不可用，请稍后重试');
+    }
   }
 
   override onJoin(client: Client): void {
     const auth = authDataSchema.parse(client.auth);
-    if (this.sessionByPlayer.has(auth.playerId)) {
-      throw new ServerError(ErrorCode.AUTH_FAILED, 'This player is already connected');
+    if (this.sessionByPlayer.has(auth.characterId)) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '该角色正在另一台设备上游戏');
     }
 
-    const spawn = this.pickSpawnPoint();
+    const spawn = this.resolveSpawn(auth);
     this.simulation.addPlayer({
-      id: auth.playerId,
+      id: auth.characterId,
       displayName: auth.displayName,
-      spawn,
-      colorIndex: colorIndexFor(auth.playerId),
+      spawn: spawn.tile,
+      colorIndex: colorIndexFor(auth.characterId),
+      ...(spawn.position === undefined ? {} : { position: spawn.position }),
+      facing: toFacing(auth.facing),
     });
 
     const player = new PlayerState();
-    player.playerId = auth.playerId;
+    player.playerId = auth.characterId;
     player.displayName = auth.displayName;
-    player.colorIndex = colorIndexFor(auth.playerId);
-    const position = this.simulation.getPlayer(auth.playerId);
+    player.colorIndex = colorIndexFor(auth.characterId);
+    const position = this.simulation.getPlayer(auth.characterId);
     player.x = position?.x ?? 0;
     player.y = position?.y ?? 0;
     player.facing = position?.facing ?? 0;
-    this.state.players.set(auth.playerId, player);
+    this.state.players.set(auth.characterId, player);
     this.state.playerCount = this.state.players.size;
 
     this.sessions.set(client.sessionId, {
-      playerId: auth.playerId,
+      playerId: auth.characterId,
       lastSequence: -1,
       recentAcks: new Map(),
       rateBucket: createTokenBucket({
@@ -213,12 +270,20 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           this.options.commandRateRefillPerSecond ?? DEFAULT_COMMAND_RATE_REFILL_PER_SECOND,
         startMs: Date.now(),
       }),
+      hp: auth.hp,
+      mp: auth.mp,
     });
-    this.sessionByPlayer.set(auth.playerId, client.sessionId);
+    this.sessionByPlayer.set(auth.characterId, client.sessionId);
     this.metrics.setPlayers(this.state.players.size);
 
     this.options.logger.info(
-      { roomId: this.roomId, playerId: auth.playerId, spawn, clients: this.state.players.size },
+      {
+        roomId: this.roomId,
+        characterId: auth.characterId,
+        accountId: auth.accountId,
+        spawn: spawn.tile,
+        clients: this.state.players.size,
+      },
       'player joined world',
     );
   }
@@ -234,7 +299,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     session.recentAcks.clear();
     this.setConnected(session.playerId, true);
     this.options.logger.info(
-      { roomId: this.roomId, playerId: session.playerId },
+      { roomId: this.roomId, characterId: session.playerId },
       'player reconnected',
     );
   }
@@ -246,7 +311,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     if (code === CloseCode.CONSENTED) {
-      this.removeSession(client.sessionId);
+      await this.removeSession(client.sessionId);
       return;
     }
 
@@ -260,13 +325,114 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       );
       this.setConnected(session.playerId, true);
     } catch {
-      this.removeSession(client.sessionId);
+      await this.removeSession(client.sessionId);
     }
   }
 
-  override onDispose(): void {
+  override async onDispose(): Promise<void> {
+    const sessionIds = [...this.sessions.keys()];
+    await Promise.allSettled(sessionIds.map(async (sessionId) => this.removeSession(sessionId)));
     this.options.metrics.unregister(this.roomId);
     this.options.logger.info({ roomId: this.roomId }, 'world map room disposed');
+  }
+
+  private async authenticateTicket(client: Client, ticket: string): Promise<WorldAuthData> {
+    const now = new Date();
+    const consumed = await consumeGameTicket(
+      this.options.database,
+      hashToken(ticket),
+      `${this.options.serverId}:${client.sessionId}`,
+      now,
+    );
+    if (consumed === undefined) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '进入世界的票据无效或已过期，请重新进入');
+    }
+
+    const character = await findCharacterById(this.options.database, consumed.characterId);
+    if (
+      character === undefined ||
+      character.accountId !== consumed.accountId ||
+      character.realmId !== consumed.realmId
+    ) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '角色信息无效，请重新登录');
+    }
+
+    const realm = await findRealmById(this.options.database, character.realmId);
+    if (realm === undefined || realm.status !== 'active') {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '该区服当前不可进入');
+    }
+
+    const leaseAcquired = await acquireCharacterLease(this.options.database, {
+      characterId: character.id,
+      sessionId: client.sessionId,
+      gameServerId: this.options.serverId,
+      leaseExpiresAt: new Date(now.getTime() + LEASE_DURATION_MS),
+      now,
+    });
+    if (!leaseAcquired) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '该角色正在另一台设备上游戏');
+    }
+
+    return {
+      accountId: character.accountId,
+      characterId: character.id,
+      realmId: character.realmId,
+      displayName: character.name,
+      mapId: character.mapId,
+      x: character.x,
+      y: character.y,
+      facing: character.facing,
+      hp: character.hp,
+      maxHp: character.maxHp,
+      mp: character.mp,
+      maxMp: character.maxMp,
+    };
+  }
+
+  private resolveSpawn(auth: WorldAuthData): {
+    tile: TilePoint;
+    position?: { x: number; y: number };
+  } {
+    if (auth.mapId === PHASE1_TEST_MAP.id) {
+      const tile = tileOfUnits({ x: auth.x, y: auth.y });
+      if (
+        isTileInsideMap(PHASE1_TEST_MAP, tile.x, tile.y) &&
+        isTileWalkable(PHASE1_TEST_MAP, tile.x, tile.y)
+      ) {
+        return { tile, position: { x: auth.x, y: auth.y } };
+      }
+      this.options.logger.warn(
+        { roomId: this.roomId, characterId: auth.characterId, x: auth.x, y: auth.y },
+        'stored character position is not walkable; using a spawn point',
+      );
+    } else {
+      this.options.logger.warn(
+        { roomId: this.roomId, characterId: auth.characterId, mapId: auth.mapId },
+        'character is on a map this server does not run yet; using a spawn point',
+      );
+    }
+    return { tile: this.pickSpawnPoint() };
+  }
+
+  private async refreshLeases(): Promise<void> {
+    const sessionIds = [...this.sessions.keys()];
+    if (sessionIds.length === 0) {
+      return;
+    }
+    const now = new Date();
+    try {
+      await refreshCharacterLeases(
+        this.options.database,
+        sessionIds,
+        new Date(now.getTime() + LEASE_DURATION_MS),
+        now,
+      );
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId },
+        'failed to refresh character leases',
+      );
+    }
   }
 
   private simulateTick(): void {
@@ -449,12 +615,13 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     return PHASE1_TEST_MAP.spawnPoints[fallbackIndex] ?? tilePointSchema.parse({ x: 1, y: 1 });
   }
 
-  private removeSession(sessionId: string): void {
+  private async removeSession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session === undefined) {
       return;
     }
 
+    const player = this.simulation.getPlayer(session.playerId);
     this.sessions.delete(sessionId);
     this.sessionByPlayer.delete(session.playerId);
     this.simulation.removePlayer(session.playerId);
@@ -462,8 +629,35 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.state.playerCount = this.state.players.size;
     this.metrics.setPlayers(this.state.players.size);
 
+    if (player !== undefined) {
+      try {
+        await saveCharacterCheckpoint(this.options.database, {
+          characterId: session.playerId,
+          x: player.x,
+          y: player.y,
+          facing: player.facing,
+          hp: session.hp,
+          mp: session.mp,
+        });
+      } catch (error) {
+        this.options.logger.error(
+          { err: error, roomId: this.roomId, characterId: session.playerId },
+          'failed to checkpoint character position',
+        );
+      }
+    }
+
+    try {
+      await releaseCharacterLease(this.options.database, session.playerId, sessionId);
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, characterId: session.playerId },
+        'failed to release character lease',
+      );
+    }
+
     this.options.logger.info(
-      { roomId: this.roomId, playerId: session.playerId, clients: this.state.players.size },
+      { roomId: this.roomId, characterId: session.playerId, clients: this.state.players.size },
       'player left world',
     );
   }

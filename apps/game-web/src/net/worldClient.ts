@@ -12,12 +12,12 @@ import {
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
 
+import { ApiError } from '../api/client';
 import { createUuid } from '../lib/uuid';
 import {
   clearReconnectToken,
   readReconnectToken,
   storeReconnectToken,
-  type DevIdentity,
   type RoomPreference,
 } from '../lib/identity';
 
@@ -53,7 +53,9 @@ export type WorldClientCallbacks = {
 
 export type WorldClientOptions = {
   url: string;
-  identity: DevIdentity;
+  characterId: string;
+  /** Fetches a fresh one-time ticket from the Control API for every new join. */
+  requestTicket: () => Promise<string>;
   roomPreference?: RoomPreference;
   callbacks: WorldClientCallbacks;
 };
@@ -62,15 +64,30 @@ type WorldRoom = Room<unknown, WorldStateInstance>;
 
 const PING_INTERVAL_MS = 3_000;
 
+function readStringField(value: unknown, field: string): string | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const candidate: unknown = Object.getOwnPropertyDescriptor(value, field)?.value;
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+}
+
 function joinErrorMessage(error: unknown): string {
-  if (typeof error === 'object' && error !== null && 'code' in error) {
-    const code = (error as { code?: unknown }).code;
-    if (code === 525) {
-      return '无法进入世界：身份被拒绝，或该角色已在其他窗口';
-    }
-    if (code === 520 || code === 524) {
-      return '无法进入世界：服务器尚未准备好';
-    }
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+
+  const serverMessage = readStringField(error, 'message');
+  if (serverMessage !== null) {
+    return `无法进入世界：${serverMessage}`;
+  }
+
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : null;
+  if (code === 525) {
+    return '无法进入世界：登录凭证无效，或该角色已在其他窗口游戏';
+  }
+  if (code === 520 || code === 524) {
+    return '无法进入世界：服务器尚未准备好';
   }
   return '连接失败，请稍后重新加入';
 }
@@ -92,16 +109,16 @@ export class WorldClient {
     this.options = options;
   }
 
-  get identity(): DevIdentity {
-    return this.options.identity;
+  get characterId(): string {
+    return this.options.characterId;
   }
 
   async start(): Promise<void> {
     this.stopped = false;
-    this.options.callbacks.onStatus('connecting', '正在连接世界');
+    this.options.callbacks.onStatus('connecting', '正在验证身份');
     const client = new Client(this.options.url);
 
-    const token = readReconnectToken();
+    const token = readReconnectToken(this.options.characterId);
     if (token !== null) {
       try {
         const room = (await client.reconnect(token, WorldState)) as WorldRoom;
@@ -116,14 +133,16 @@ export class WorldClient {
       }
     }
 
-    const joinOptions = {
-      protocolVersion: PROTOCOL_VERSION,
-      displayName: this.options.identity.displayName,
-      playerKey: this.options.identity.playerKey,
-    };
-    const preference = this.options.roomPreference ?? { mode: 'joinOrCreate' };
-
     try {
+      const ticket = await this.options.requestTicket();
+      if (this.stopped) {
+        return;
+      }
+
+      this.options.callbacks.onStatus('connecting', '正在连接世界');
+      const joinOptions = { protocolVersion: PROTOCOL_VERSION, ticket };
+      const preference = this.options.roomPreference ?? { mode: 'joinOrCreate' };
+
       const joined =
         preference.mode === 'create'
           ? client.create(WORLD_ROOM_NAME, joinOptions, WorldState)
@@ -205,7 +224,7 @@ export class WorldClient {
     room.reconnection.minUptime = 0;
     this.options.callbacks.onRoom(room.roomId);
     this.options.callbacks.onStatus('connected', `房间 ${room.roomId}`);
-    storeReconnectToken(room.reconnectionToken);
+    storeReconnectToken(this.options.characterId, room.reconnectionToken);
 
     const handleStateChange = (state: WorldStateInstance): void => {
       this.emitSnapshot(state);
@@ -242,7 +261,7 @@ export class WorldClient {
     });
 
     const handleReconnect = (): void => {
-      storeReconnectToken(room.reconnectionToken);
+      storeReconnectToken(this.options.characterId, room.reconnectionToken);
       this.options.callbacks.onStatus('connected', `房间 ${room.roomId}`);
     };
     room.onReconnect(handleReconnect);

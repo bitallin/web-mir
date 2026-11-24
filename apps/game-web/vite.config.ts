@@ -23,14 +23,18 @@ export default defineConfig(({ mode }) => {
         interval: 500,
       },
       proxy: {
-        '/api': controlApiUrl,
-        '/health': controlApiUrl,
+        // Preserve the browser's Host header: the Control API validates the
+        // Origin of cookie-authenticated writes against it, and a rewritten
+        // Host would reject LAN origins that differ from 127.0.0.1.
+        '/api': { target: controlApiUrl, changeOrigin: false },
+        '/health': { target: controlApiUrl, changeOrigin: false },
         // Same-origin realtime endpoint: matchmaking HTTP and the WebSocket
         // upgrade both go through Vite in development and a reverse proxy in
         // production, so the browser never needs the game server's port.
         '/ws': {
           target: gameServerUrl,
           ws: true,
+          changeOrigin: false,
           rewrite: (path) => path.replace(/^\/ws/, ''),
         },
       },

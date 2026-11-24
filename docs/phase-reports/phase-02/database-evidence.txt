@@ -1,0 +1,33 @@
+# 阶段 2 数据库证据（sanitized）
+
+采集时间：2026-11-24 06:58 UTC
+数据库：本地开发 PostgreSQL 18.3（DATABASE_URL 指向宿主机网关 192.51.0.1:5432）
+采集命令：只读 SELECT；未输出任何密码哈希、令牌或票据明文。
+
+## 迁移
+
+- migrations applied: 2
+- 0001_peaceful_rachel_grey.sql（阶段 2：accounts、account_sessions、
+  characters、character_sessions、game_tickets）
+
+## 表
+
+account_sessions, accounts, character_sessions, characters, game_tickets, realms
+
+## 阶段 2 端到端运行后的状态
+
+accounts:     132
+characters:   108（其中 version > 0 的 checkpoint 记录 90）
+sessions:      75（其中 revoked 8）
+game_tickets: 110（consumed 101，expired 9，open 0）
+character_sessions 未过期租约: 0
+
+说明：
+
+- 101 张已消费票据与 9 张过期票据均无法再次用于加入 Room；测试结束时没有
+  未过期且未消费的遗留票据。
+- 所有 E2E / 集成测试结束后没有残留的活跃角色租约，说明正常离开与宽限期移除
+  都会释放租约。
+- 90 个角色记录 version > 0，来自离开时的位置 checkpoint。
+- 账号、角色和票据记录来自阶段 2 的集成与 E2E 测试（真实注册、建角与入图），
+  不是手工伪造数据。

@@ -33,6 +33,9 @@ export type AddPlayerInput = {
   spawn: TilePoint;
   colorIndex: number;
   speedUnitsPerSecond?: number;
+  /** Restores an exact persisted position; must stand on a walkable tile. */
+  position?: UnitPoint;
+  facing?: Facing;
 };
 
 export function tileCenter(point: TilePoint): UnitPoint {
@@ -71,14 +74,32 @@ export class WorldSimulation {
       throw new RangeError(`spawn tile (${input.spawn.x}, ${input.spawn.y}) is not walkable`);
     }
 
-    const center = tileCenter(input.spawn);
+    let position = tileCenter(input.spawn);
+    if (input.position !== undefined) {
+      if (
+        !Number.isSafeInteger(input.position.x) ||
+        !Number.isSafeInteger(input.position.y) ||
+        input.position.x < 0 ||
+        input.position.y < 0
+      ) {
+        throw new RangeError('restored position must be non-negative integer unit coordinates');
+      }
+      const restoredTile = tileOfUnits(input.position);
+      if (!isStandable(this.grid, restoredTile)) {
+        throw new RangeError(
+          `restored position tile (${restoredTile.x}, ${restoredTile.y}) is not walkable`,
+        );
+      }
+      position = { x: input.position.x, y: input.position.y };
+    }
+
     const player: SimulationPlayer = {
       id: input.id,
       displayName: input.displayName,
       colorIndex: input.colorIndex,
-      x: center.x,
-      y: center.y,
-      facing: FACING.south,
+      x: position.x,
+      y: position.y,
+      facing: input.facing ?? FACING.south,
       moving: false,
       speedUnitsPerSecond: input.speedUnitsPerSecond ?? PLAYER_SPEED_UNITS_PER_SECOND,
       waypoints: [],

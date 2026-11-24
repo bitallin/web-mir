@@ -30,20 +30,18 @@ export const FACING = {
 export type Facing = (typeof FACING)[keyof typeof FACING];
 
 /**
- * Temporary development-only identity. There is no account system yet, so the
- * client presents a per-tab key and display name. Servers running in
- * production reject this shape until phase 2 issues signed game tickets.
+ * Realtime join carries only a one-time ticket issued by the Control API.
+ * Account, character and realm identity come from the server-side ticket row,
+ * never from client-supplied fields (ADR-017).
  */
 export const worldJoinOptionsSchema = z
   .object({
     protocolVersion: z.number().int().positive(),
-    displayName: z
+    ticket: z
       .string()
-      .trim()
-      .min(1)
-      .max(16)
-      .regex(/^[\p{L}\p{N}_\- ]+$/u, 'unsupported characters'),
-    playerKey: z.string().regex(/^[A-Za-z0-9-]{8,64}$/, 'invalid player key'),
+      .min(32)
+      .max(512)
+      .regex(/^[A-Za-z0-9_-]+$/u, 'invalid ticket'),
   })
   .strict();
 

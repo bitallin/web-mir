@@ -1,5 +1,6 @@
 import { apiErrorSchema, healthResponseSchema, type ReadinessCheck } from '@web-legend/contracts';
 import { createLogger } from '@web-legend/observability';
+import { createDatabase, type DatabaseHandle } from '@web-legend/persistence';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ControlApiEnv } from '../src/env';
@@ -21,22 +22,28 @@ const logger = createLogger({
 });
 
 const openServers: Awaited<ReturnType<typeof buildServer>>[] = [];
+// Health tests never query the database; the pool connects lazily.
+const openDatabases: DatabaseHandle[] = [];
 
 async function createServer(
   checks: ReadinessCheck[] = [{ name: 'database', status: 'ok' }],
 ): Promise<Awaited<ReturnType<typeof buildServer>>> {
+  const database = createDatabase(env.DATABASE_URL, { max: 1 });
   const app = await buildServer({
     env,
     logger,
     readiness: () => Promise.resolve(checks),
+    database: database.db,
     startedAt: Date.now() - 1_000,
   });
   openServers.push(app);
+  openDatabases.push(database);
   return app;
 }
 
 afterEach(async () => {
   await Promise.all(openServers.splice(0).map(async (app) => app.close()));
+  await Promise.all(openDatabases.splice(0).map(async (database) => database.close()));
 });
 
 describe('control API health routes', () => {

@@ -8,6 +8,11 @@ export const apiErrorCodeSchema = z.enum([
   'FORBIDDEN',
   'RATE_LIMITED',
   'SERVICE_UNAVAILABLE',
+  'ACCOUNT_EXISTS',
+  'INVALID_CREDENTIALS',
+  'CHARACTER_NAME_TAKEN',
+  'CHARACTER_LIMIT_REACHED',
+  'REALM_NOT_FOUND',
 ]);
 
 export type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;

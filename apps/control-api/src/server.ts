@@ -3,28 +3,44 @@ import { randomUUID } from 'node:crypto';
 import cors from '@fastify/cors';
 import {
   API_PREFIX,
-  apiErrorSchema,
   healthResponseSchema,
   PROTOCOL_VERSION,
   readinessResponseSchema,
-  type ApiError,
-  type ApiErrorCode,
 } from '@web-legend/contracts';
+import type { Database } from '@web-legend/persistence';
 import Fastify, { type FastifyError } from 'fastify';
 import type { Logger } from 'pino';
 
 import type { ControlApiEnv } from './env';
+import { AppError, codeForStatus, errorEnvelope } from './http/errors';
+import { createOriginGuard } from './http/origin';
+import { createRateLimiter } from './http/rateLimit';
 import type { ReadinessProbe } from './readiness';
+import { registerAuthRoutes } from './routes/authRoutes';
+import { registerCharacterRoutes } from './routes/characterRoutes';
+import type { RouteDependencies } from './routes/context';
+import { registerGameRoutes } from './routes/gameRoutes';
+import { AuthService } from './services/auth';
+import { CharacterService } from './services/characters';
+import { TicketService } from './services/tickets';
 import { SERVICE_VERSION } from './version';
+
+export type AuthRateLimitConfig = {
+  capacity: number;
+  refillPerSecond: number;
+};
 
 export type BuildServerOptions = {
   env: ControlApiEnv;
   logger: Logger;
   readiness: ReadinessProbe;
+  database: Database;
   startedAt?: number;
+  authRateLimit?: AuthRateLimitConfig;
 };
 
 const MAX_REQUEST_ID_LENGTH = 128;
+const DEFAULT_AUTH_RATE_LIMIT: AuthRateLimitConfig = { capacity: 30, refillPerSecond: 1 };
 
 function resolveRequestId(headerValue: string | string[] | undefined): string {
   const candidate = Array.isArray(headerValue) ? headerValue[0] : headerValue;
@@ -38,41 +54,30 @@ function resolveRequestId(headerValue: string | string[] | undefined): string {
   return randomUUID();
 }
 
-function codeForStatus(statusCode: number): ApiErrorCode {
-  switch (statusCode) {
-    case 400:
-    case 422:
-      return 'VALIDATION_ERROR';
-    case 401:
-      return 'UNAUTHORIZED';
-    case 403:
-      return 'FORBIDDEN';
-    case 404:
-      return 'NOT_FOUND';
-    case 429:
-      return 'RATE_LIMITED';
-    case 503:
-      return 'SERVICE_UNAVAILABLE';
-    default:
-      return statusCode >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR';
-  }
-}
-
-function errorEnvelope(code: ApiErrorCode, message: string, requestId: string): ApiError {
-  return apiErrorSchema.parse({ error: { code, message, requestId } });
-}
-
 export async function buildServer(options: BuildServerOptions) {
   const startedAt = options.startedAt ?? Date.now();
 
   const app = Fastify({
     loggerInstance: options.logger,
     genReqId: (request) => resolveRequestId(request.headers['x-request-id']),
+    // Authentication payloads are tiny; reject oversized bodies early.
+    bodyLimit: 16_384,
   });
 
   await app.register(cors, {
     origin: options.env.CORS_ORIGINS,
   });
+
+  const rateLimitConfig = options.authRateLimit ?? DEFAULT_AUTH_RATE_LIMIT;
+  const dependencies: RouteDependencies = {
+    auth: new AuthService(options.database),
+    characters: new CharacterService(options.database),
+    tickets: new TicketService(options.database),
+    rateLimit: createRateLimiter(rateLimitConfig),
+    secureCookies: options.env.NODE_ENV === 'production',
+  };
+
+  app.addHook('onRequest', createOriginGuard(options.env.CORS_ORIGINS));
 
   app.get(API_PREFIX, () => ({
     service: 'control-api',
@@ -105,11 +110,21 @@ export async function buildServer(options: BuildServerOptions) {
     return reply.status(healthy ? 200 : 503).send(body);
   });
 
+  registerAuthRoutes(app, dependencies);
+  registerCharacterRoutes(app, dependencies);
+  registerGameRoutes(app, dependencies);
+
   app.setNotFoundHandler((request, reply) =>
     reply.status(404).send(errorEnvelope('NOT_FOUND', 'Route not found', request.id)),
   );
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
+    if (error instanceof AppError) {
+      return reply
+        .status(error.statusCode)
+        .send(errorEnvelope(error.code, error.message, request.id));
+    }
+
     const statusCode = error.statusCode ?? 500;
     const code = codeForStatus(statusCode);
 

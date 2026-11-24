@@ -18,6 +18,7 @@ async function main(): Promise<void> {
     env,
     logger,
     readiness: createDatabaseProbe(database.db),
+    database: database.db,
   });
 
   let shuttingDown = false;

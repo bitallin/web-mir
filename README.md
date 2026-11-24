@@ -6,33 +6,34 @@ Fastify Control API 和 Colyseus 实时服务器。
 
 ## 当前状态
 
-**阶段 1：浏览器双人联网垂直切片，已完成，等待 Tech Lead 审阅。**
+**阶段 2：账号、角色和连接票据，已完成，等待 Tech Lead 审阅。**
 
 - 阶段 0 的工程底座已通过审阅并保留。
-- 阶段 1 交付：一张服务端权威的测试地图、`world_map` Room、20Hz 固定模拟、
-  10Hz 状态同步、意图式 `move.to`、服务端寻路与边界校验、双浏览器互相可见、
-  断线重连、Phaser 伪等距世界与 React HUD。
-- 尚未实现：正式账号与 game ticket（阶段 2）、Tiled 正式地图（阶段 3）、怪物、
-  战斗、掉落、背包、金币、聊天、PK 和运营后台业务。
+- 阶段 1 交付：服务端权威测试地图、`world_map` Room、20Hz 模拟、意图式
+  `move.to`、双浏览器互相可见、断线重连、Phaser 伪等距世界与 React HUD。
+- 阶段 2 交付：账号注册/登录/刷新/登出、Argon2id 密码、HttpOnly 会话 Cookie、
+  角色创建与区服内唯一名称、一次性 game ticket、单角色会话租约、角色位置持久化、
+  游戏服票据校验与离开时 checkpoint。
+- 尚未实现：Tiled 正式地图与 AOI（阶段 3）、怪物、战斗、掉落、背包、金币、
+  聊天、PK 和运营后台业务。
 - 详细状态见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)，工作记录见
-  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 1 验收报告见
-  [docs/phase-reports/PHASE_01_REPORT.md](docs/phase-reports/PHASE_01_REPORT.md)。
+  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 2 验收报告见
+  [docs/phase-reports/PHASE_02_REPORT.md](docs/phase-reports/PHASE_02_REPORT.md)。
 
-## 阶段 1：如何体验双人联机
+## 阶段 2：如何体验
 
-1. 按“从零启动”启动 `pnpm dev`。
+1. 按“从零启动”启动 PostgreSQL、执行迁移与 `pnpm db:seed`，再运行 `pnpm dev`。
 2. 打开两个独立浏览器窗口（或一个普通窗口 + 一个无痕窗口）访问
    <http://localhost:8584/>。
-3. 两个窗口会使用各自的开发身份进入同一个 `world_map` 房间，右侧列表显示彼此。
-4. 点击地面移动；服务端寻路并推进，另一端在约 100–150ms 内看到移动。
-5. 刷新任一窗口会优先使用 sessionStorage 中的重连 token 恢复原座位；网络断开会
-   显示“重连中”，恢复后自动继续。
-6. 通过 `http://<局域网IP>:<端口>/` 直接访问即可，不要求 HTTPS 或 localhost；
-   身份和命令 ID 在非安全上下文使用 `crypto.getRandomValues` 生成。
+3. 每个窗口注册独立账号，选择职业并创建角色，点击“进入世界”。
+4. 两个角色进入同一地图后互相可见；点击地面移动，服务端寻路并推进。
+5. 刷新页面会回到角色选择；再次“进入世界”会在重连宽限期内恢复原座位。
+6. 同一角色在另一浏览器登录并进入世界会被服务端拒绝（单角色租约）。
+7. 通过 `http://<局域网IP>:<端口>/` 直接访问即可，不要求 HTTPS 或 localhost。
 
-开发身份只存在于 `NODE_ENV=development|test`；生产服务器拒绝无票据的连接
-（ADR-015）。开发环境可用 `?name=Alice&key=<8-64位>` 固定身份，`?fresh=1`
-新建房间，`?join=<roomId>` 加入指定房间；这些参数在生产构建中被忽略。
+账号身份只来自服务端签发的会话 Cookie 与一次性票据（ADR-017）。浏览器不再能
+自报角色 ID、位置或身份。开发环境保留 `?fresh=1`（新建房间）与
+`?join=<roomId>`（加入指定房间）用于测试隔离，生产构建忽略。
 
 ## 技术架构
 
@@ -94,10 +95,14 @@ pnpm install
 pnpm db:up
 ```
 
-4. 在空数据库上执行迁移：
+4. 在空数据库上执行迁移并写入默认区服：
 
 ```bash
 pnpm db:migrate
+```
+
+```bash
+pnpm db:seed
 ```
 
 5. 启动全部应用：
@@ -164,16 +169,22 @@ pnpm exec playwright install chromium
 | `pnpm db:up` / `db:down` | 启动 / 停止 PostgreSQL                   |
 | `pnpm db:generate`       | 根据 Drizzle schema 生成迁移             |
 | `pnpm db:migrate`        | 对 `DATABASE_URL` 执行迁移               |
+| `pnpm db:seed`           | 幂等写入默认区服 `classic-01`            |
 
-E2E 会启动 game-web、admin-web 和 game-server 三个开发服务；如果开发栈已运行，
-可复用现有服务：
+E2E 会执行迁移与区服 seed，并启动 game-web、admin-web、control-api 和
+game-server 四个开发服务；如果开发栈已运行，可复用现有服务：
 
 ```bash
 PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
 ```
 
-E2E 使用开发专用参数为每个场景创建独立 Room，证据（双人截图、WebSocket 帧日志、
-可见延迟）写入 `docs/phase-reports/phase-01/`。
+E2E 使用真实账号、角色与票据，通过开发专用参数为每个场景创建独立 Room；证据
+（认证页、角色页、双人截图、WebSocket 帧日志、可见延迟）写入
+`docs/phase-reports/phase-02/`。若默认端口被其他开发栈占用，可在运行时覆盖端口：
+
+```bash
+GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=8847 pnpm test:e2e
+```
 
 ## 目录结构
 
@@ -184,11 +195,12 @@ apps/
   control-api/    Fastify REST、健康检查、未来 Outbox
   game-server/    Colyseus 运行时与实时适配
 packages/
-  contracts/      协议、实时消息、world-state schema、健康检查、错误 envelope
+  contracts/      协议、账号/角色 DTO、world-state schema、健康检查、错误 envelope
+  auth/           Argon2id 密码、会话令牌、一次性票据令牌
   game-simulation/ 固定 tick、路径搜索、移动推进（纯逻辑）
   config/         Zod 环境变量与 .env 加载
   observability/  Pino 日志与脱敏
-  persistence/    Drizzle schema、客户端、迁移
+  persistence/    Drizzle schema、账号/角色/票据仓储、迁移
   testkit/        可控 RNG、手动时钟
 docs/
   ADR/            架构决策记录
@@ -199,9 +211,9 @@ infra/docker/     PostgreSQL，Redis 为 scale profile
 tests/e2e/        Playwright
 ```
 
-`game-simulation` 在阶段 1 创建。未创建的包（`game-domain`、`game-application`、
-`auth`、`map-runtime`、`content-schema`）在出现真实消费者时创建，原因见
-[ADR-013](docs/ADR/ADR-013-package-realization.md)。
+`game-simulation` 在阶段 1 创建，`auth` 在阶段 2 创建。未创建的包
+（`game-domain`、`game-application`、`map-runtime`、`content-schema`）在出现
+真实消费者时创建，原因见 [ADR-013](docs/ADR/ADR-013-package-realization.md)。
 
 浏览器通过同源 `/ws` 访问实时服务器：开发环境由 Vite 代理到 `GAME_SERVER_PORT`，
 `/matchmake` HTTP 和 WebSocket upgrade 共用该路径；生产部署需要在反向代理配置
@@ -264,3 +276,5 @@ pnpm test:e2e
 - [WORKLOG.md](docs/WORKLOG.md)：追加式研发日志
 - [ADR](docs/ADR/README.md)：架构决策记录
 - [PHASE_00_REPORT.md](docs/phase-reports/PHASE_00_REPORT.md)：阶段 0 验收报告
+- [PHASE_01_REPORT.md](docs/phase-reports/PHASE_01_REPORT.md)：阶段 1 验收报告
+- [PHASE_02_REPORT.md](docs/phase-reports/PHASE_02_REPORT.md)：阶段 2 验收报告

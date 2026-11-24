@@ -18,6 +18,49 @@ export { apiErrorCodeSchema, apiErrorSchema } from './errors';
 export type { ApiError, ApiErrorCode } from './errors';
 
 export {
+  accountViewSchema,
+  authResponseSchema,
+  loginRequestSchema,
+  normalizeUsername,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  passwordSchema,
+  registerRequestSchema,
+  USERNAME_PATTERN,
+  usernameSchema,
+} from './auth';
+export type { AccountView, AuthResponse, LoginRequest, RegisterRequest } from './auth';
+
+export {
+  CHARACTER_CLASSES,
+  CHARACTER_CLASS_CATALOG,
+  characterClassSchema,
+  characterNameSchema,
+  charactersResponseSchema,
+  characterResponseSchema,
+  characterViewSchema,
+  createCharacterRequestSchema,
+  GAME_TICKET_TTL_SECONDS,
+  gameTicketRequestSchema,
+  gameTicketResponseSchema,
+  normalizeCharacterName,
+  realmViewSchema,
+  realmsResponseSchema,
+} from './character';
+export type {
+  CharacterClass,
+  CharacterClassDefinition,
+  CharacterResponse,
+  CharactersResponse,
+  CharacterView,
+  CreateCharacterRequest,
+  GameTicketRequest,
+  GameTicketResponse,
+  RealmView,
+  RealmsResponse,
+} from './character';
+
+export {
   isTileInsideMap,
   isTileWalkable,
   MAP_SCHEMA_VERSION,

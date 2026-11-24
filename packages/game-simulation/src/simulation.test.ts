@@ -36,6 +36,57 @@ describe('WorldSimulation', () => {
     expect(player.moving).toBe(false);
   });
 
+  it('restores an exact persisted position and facing', () => {
+    const simulation = new WorldSimulation(openGrid());
+    const player = simulation.addPlayer({
+      id: 'p1',
+      displayName: 'Alice',
+      spawn: { x: 1, y: 1 },
+      colorIndex: 0,
+      position: { x: 3_700, y: 2_300 },
+      facing: 1,
+    });
+
+    expect(player.x).toBe(3_700);
+    expect(player.y).toBe(2_300);
+    expect(player.facing).toBe(1);
+    expect(tileOfUnits(player)).toEqual({ x: 3, y: 2 });
+  });
+
+  it('rejects a restored position that is not on a walkable tile', () => {
+    const simulation = new WorldSimulation(openGrid());
+
+    expect(() =>
+      simulation.addPlayer({
+        id: 'p1',
+        displayName: 'Alice',
+        spawn: { x: 1, y: 1 },
+        colorIndex: 0,
+        position: { x: -100, y: 1_500 },
+      }),
+    ).toThrow(RangeError);
+
+    expect(() =>
+      simulation.addPlayer({
+        id: 'p2',
+        displayName: 'Bob',
+        spawn: { x: 1, y: 1 },
+        colorIndex: 0,
+        position: { x: 500, y: 500 },
+      }),
+    ).toThrow(/not walkable/u);
+
+    expect(() =>
+      simulation.addPlayer({
+        id: 'p3',
+        displayName: 'Cara',
+        spawn: { x: 1, y: 1 },
+        colorIndex: 0,
+        position: { x: 1_500.5, y: 1_500 },
+      }),
+    ).toThrow(RangeError);
+  });
+
   it('moves at the configured speed and stops exactly at the target', () => {
     const simulation = new WorldSimulation(openGrid());
     simulation.addPlayer({ id: 'p1', displayName: 'Alice', spawn: { x: 1, y: 1 }, colorIndex: 0 });

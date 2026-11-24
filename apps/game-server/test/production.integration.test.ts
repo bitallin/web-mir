@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
 
 import { Client } from '@colyseus/sdk';
 import { PROTOCOL_VERSION, WORLD_ROOM_NAME } from '@web-legend/contracts';
 import { createLogger } from '@web-legend/observability';
+import { createDatabase, type DatabaseHandle } from '@web-legend/persistence';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { GameServerEnv } from '../src/env';
@@ -39,15 +39,23 @@ async function reservePort(): Promise<number> {
  */
 describe('production game server', () => {
   let runtime: GameServerRuntime;
+  let database: DatabaseHandle;
   let baseUrl: string;
 
   beforeAll(async () => {
     const port = await reservePort();
+    const databaseUrl = process.env.DATABASE_URL;
+    if (databaseUrl === undefined) {
+      throw new Error('DATABASE_URL is required for production gate integration tests');
+    }
+    database = createDatabase(databaseUrl, { max: 2 });
     const env: GameServerEnv = {
       NODE_ENV: 'production',
       LOG_LEVEL: 'silent',
       GAME_SERVER_HOST: '127.0.0.1',
       GAME_SERVER_PORT: port,
+      DATABASE_URL: databaseUrl,
+      GAME_SERVER_ID: 'game-server-production-test',
     };
     runtime = createGameServer({
       env,
@@ -56,6 +64,7 @@ describe('production game server', () => {
         level: 'silent',
         destination: { write: () => undefined },
       }),
+      database: database.db,
     });
     await runtime.listen();
     baseUrl = `http://127.0.0.1:${port}`;
@@ -63,16 +72,29 @@ describe('production game server', () => {
 
   afterAll(async () => {
     await runtime?.shutdown();
+    await database?.close();
   });
 
-  it('refuses the development identity without a game ticket', async () => {
+  it('refuses a forged ticket even in production', async () => {
     const client = new Client(baseUrl);
 
     await expect(
       client.create(WORLD_ROOM_NAME, {
         protocolVersion: PROTOCOL_VERSION,
-        displayName: 'Alice',
-        playerKey: randomUUID(),
+        ticket: 'A'.repeat(43),
+      }),
+    ).rejects.toMatchObject({ code: 525 });
+  });
+
+  it('refuses self-reported identity fields instead of a ticket', async () => {
+    const client = new Client(baseUrl);
+
+    await expect(
+      client.create(WORLD_ROOM_NAME, {
+        protocolVersion: PROTOCOL_VERSION,
+        ticket: 'A'.repeat(43),
+        accountId: 'admin',
+        characterId: 'admin',
       }),
     ).rejects.toMatchObject({ code: 525 });
   });

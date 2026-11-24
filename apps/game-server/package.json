@@ -14,10 +14,12 @@
     "@colyseus/core": "0.18.28",
     "@colyseus/schema": "5.0.50",
     "@colyseus/ws-transport": "0.18.5",
+    "@web-legend/auth": "workspace:*",
     "@web-legend/config": "workspace:*",
     "@web-legend/contracts": "workspace:*",
     "@web-legend/game-simulation": "workspace:*",
     "@web-legend/observability": "workspace:*",
+    "@web-legend/persistence": "workspace:*",
     "express": "5.3.0",
     "pino": "10.4.0",
     "zod": "4.6.7"

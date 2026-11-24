@@ -6,6 +6,7 @@ import {
   commandAckSchema,
   commandRejectedSchema,
   PROTOCOL_VERSION,
+  TILE_UNITS,
   WORLD_ROOM_NAME,
   type CommandAck,
   type CommandRejected,
@@ -16,10 +17,27 @@ import {
   type WorldStateInstance,
 } from '@web-legend/contracts/world-state';
 import { createLogger } from '@web-legend/observability';
+import {
+  createDatabase,
+  findCharacterById,
+  findCharacterLease,
+  type Database,
+  type DatabaseHandle,
+} from '@web-legend/persistence';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { GameServerEnv } from '../src/env';
 import { createGameServer, type GameServerRuntime } from '../src/server';
+import { createActor, issueTicket, type TestActor } from './worldTestHelpers';
+
+const databaseUrl = process.env.DATABASE_URL;
+
+function requireDatabaseUrl(): string {
+  if (databaseUrl === undefined || databaseUrl.length === 0) {
+    throw new Error('DATABASE_URL is required for game server integration tests');
+  }
+  return databaseUrl;
+}
 
 const logger = () =>
   createLogger({
@@ -72,6 +90,23 @@ function waitUntil(
   });
 }
 
+async function waitUntilAsync(
+  predicate: () => Promise<boolean>,
+  timeoutMs = 5_000,
+  label = 'condition',
+): Promise<void> {
+  const startedAt = Date.now();
+  for (;;) {
+    if (await predicate()) {
+      return;
+    }
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Timed out waiting for ${label}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 function waitForMessage<T>(
   room: SdkRoom,
   type: string,
@@ -99,8 +134,8 @@ function waitForMessage<T>(
 
 type WorldRoom = SdkRoom<unknown, WorldStateInstance>;
 
-function joinOptions(displayName: string, playerKey = randomUUID()): Record<string, unknown> {
-  return { protocolVersion: PROTOCOL_VERSION, displayName, playerKey };
+function joinOptions(ticket: string): Record<string, unknown> {
+  return { protocolVersion: PROTOCOL_VERSION, ticket };
 }
 
 function playerTile(room: WorldRoom, playerId: string): { x: number; y: number } | undefined {
@@ -108,24 +143,26 @@ function playerTile(room: WorldRoom, playerId: string): { x: number; y: number }
   if (player === undefined) {
     return undefined;
   }
-  return { x: Math.floor(player.x / 1_000), y: Math.floor(player.y / 1_000) };
+  return { x: Math.floor(player.x / TILE_UNITS), y: Math.floor(player.y / TILE_UNITS) };
 }
 
 function playerCount(room: WorldRoom): number {
   return room.state.players.size;
 }
 
-async function firstPlayer(room: WorldRoom): Promise<PlayerStateInstance> {
-  await waitUntil(() => room.state.players.size > 0, 5_000, 'self player');
-  const player = [...room.state.players.values()][0];
+async function waitForPlayer(room: WorldRoom, playerId: string): Promise<PlayerStateInstance> {
+  await waitUntil(() => room.state.players.get(playerId) !== undefined, 5_000, 'self player');
+  const player = room.state.players.get(playerId);
   if (player === undefined) {
-    throw new Error('Player list was unexpectedly empty');
+    throw new Error('Player was unexpectedly absent');
   }
   return player;
 }
 
-describe('world_map room', () => {
+describe.runIf(databaseUrl !== undefined)('world_map room', () => {
+  let database: DatabaseHandle;
   let runtime: GameServerRuntime;
+  let db: Database;
   let baseUrl: string;
   const cleanups: (() => Promise<void>)[] = [];
   const clients: Client[] = [];
@@ -136,10 +173,10 @@ describe('world_map room', () => {
     return instance;
   }
 
-  async function createWorld(displayName: string, playerKey = randomUUID()): Promise<WorldRoom> {
+  async function createWorld(ticket: string): Promise<WorldRoom> {
     const room = (await client().create(
       WORLD_ROOM_NAME,
-      joinOptions(displayName, playerKey),
+      joinOptions(ticket),
       WorldState,
     )) as WorldRoom;
     cleanups.push(async () => {
@@ -148,16 +185,8 @@ describe('world_map room', () => {
     return room;
   }
 
-  async function joinWorld(
-    roomId: string,
-    displayName: string,
-    playerKey = randomUUID(),
-  ): Promise<WorldRoom> {
-    const room = (await client().joinById(
-      roomId,
-      joinOptions(displayName, playerKey),
-      WorldState,
-    )) as WorldRoom;
+  async function joinWorld(roomId: string, ticket: string): Promise<WorldRoom> {
+    const room = (await client().joinById(roomId, joinOptions(ticket), WorldState)) as WorldRoom;
     cleanups.push(async () => {
       await room.leave();
     });
@@ -166,16 +195,22 @@ describe('world_map room', () => {
 
   beforeAll(async () => {
     const port = await reservePort();
+    database = createDatabase(requireDatabaseUrl(), { max: 5 });
+    db = database.db;
+
     const env: GameServerEnv = {
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
       GAME_SERVER_HOST: '127.0.0.1',
       GAME_SERVER_PORT: port,
+      DATABASE_URL: requireDatabaseUrl(),
+      GAME_SERVER_ID: 'game-server-test',
     };
 
     runtime = createGameServer({
       env,
       logger: logger(),
+      database: db,
       world: { reconnectGraceSeconds: 1 },
     });
 
@@ -190,62 +225,57 @@ describe('world_map room', () => {
 
   afterAll(async () => {
     await runtime?.shutdown();
+    await database?.close();
   });
 
-  it('lets two clients see each other with distinct authoritative spawns', async () => {
-    const alice = await createWorld('Alice');
-    const bob = await joinWorld(alice.roomId, 'Bob');
+  it('lets two clients see each other as their persisted characters', async () => {
+    const alice = await createActor(db, 'Alice', { position: { x: 16_500, y: 10_500 } });
+    const bob = await createActor(db, 'Bob', { position: { x: 17_500, y: 10_500 } });
+    const aliceRoom = await createWorld(alice.ticket);
+    const bobRoom = await joinWorld(aliceRoom.roomId, bob.ticket);
 
     await waitUntil(
-      () => playerCount(alice) === 2 && playerCount(bob) === 2,
+      () => playerCount(aliceRoom) === 2 && playerCount(bobRoom) === 2,
       5_000,
       'both players visible',
     );
 
-    expect(alice.state.mapId).toBe('phase1_test_map');
-    expect(alice.state.tickHz).toBe(20);
+    expect(aliceRoom.state.mapId).toBe('phase1_test_map');
+    expect(aliceRoom.state.tickHz).toBe(20);
 
-    const names = [...bob.state.players.values()].map((player) => player.displayName).sort();
-    expect(names).toEqual(['Alice', 'Bob']);
+    const names = [...bobRoom.state.players.values()].map((player) => player.displayName).sort();
+    expect(names).toEqual([alice.character.name, bob.character.name].sort());
 
-    const aliceView = [...bob.state.players.values()].find(
-      (player) => player.displayName === 'Alice',
-    );
-    const bobView = [...alice.state.players.values()].find(
-      (player) => player.displayName === 'Bob',
-    );
-    expect(aliceView?.connected).toBe(true);
-    expect(bobView).toBeDefined();
-    expect(aliceView?.x).not.toBe(bobView?.x ?? aliceView?.x);
+    expect(aliceRoom.state.players.get(alice.character.id)?.displayName).toBe(alice.character.name);
+    expect(bobRoom.state.players.get(bob.character.id)?.displayName).toBe(bob.character.name);
+    expect(aliceRoom.state.players.has(alice.character.id)).toBe(true);
+    expect(bobRoom.state.players.has(bob.character.id)).toBe(true);
+    expect(aliceRoom.state.players.get(alice.character.id)?.x).toBe(16_500);
+    expect(bobRoom.state.players.get(bob.character.id)?.y).toBe(10_500);
   });
 
   it('applies an intent server-side and shows it to the other client within 250ms', async () => {
-    const alice = await createWorld('Alice');
-    const bob = await joinWorld(alice.roomId, 'Bob');
-    await waitUntil(() => playerCount(bob) === 2, 5_000, 'both players visible');
+    const alice = await createActor(db, 'Alice');
+    const bob = await createActor(db, 'Bob', { position: { x: 17_500, y: 10_500 } });
+    const aliceRoom = await createWorld(alice.ticket);
+    const bobRoom = await joinWorld(aliceRoom.roomId, bob.ticket);
+    await waitUntil(() => playerCount(bobRoom) === 2, 5_000, 'both players visible');
 
-    const alicePlayer = [...alice.state.players.values()].find(
-      (player) => player.displayName === 'Alice',
-    );
-    expect(alicePlayer).toBeDefined();
-    if (alicePlayer === undefined) {
-      return;
-    }
-
+    const alicePlayer = await waitForPlayer(aliceRoom, alice.character.id);
     const start = { x: alicePlayer.x, y: alicePlayer.y };
-    const startTile = playerTile(alice, alicePlayer.playerId);
+    const startTile = playerTile(aliceRoom, alice.character.id);
     expect(startTile).toBeDefined();
     if (startTile === undefined) {
       return;
     }
 
     const target = { x: startTile.x + 2, y: startTile.y };
-    const ackPromise = waitForMessage<CommandAck>(alice, 'command.ack', (payload) =>
+    const ackPromise = waitForMessage<CommandAck>(aliceRoom, 'command.ack', (payload) =>
       commandAckSchema.parse(payload),
     );
 
     const clickedAt = performance.now();
-    alice.send('move.to', {
+    aliceRoom.send('move.to', {
       protocolVersion: PROTOCOL_VERSION,
       commandId: randomUUID(),
       clientSequence: 0,
@@ -259,7 +289,7 @@ describe('world_map room', () => {
 
     await waitUntil(
       () => {
-        const view = bob.state.players.get(alicePlayer.playerId);
+        const view = bobRoom.state.players.get(alice.character.id);
         return view !== undefined && view.x !== start.x;
       },
       2_000,
@@ -270,18 +300,19 @@ describe('world_map room', () => {
     expect(visibleAfterMs).toBeLessThan(250);
 
     await waitUntil(
-      () => playerTile(bob, alicePlayer.playerId)?.x === target.x,
+      () => playerTile(bobRoom, alice.character.id)?.x === target.x,
       2_000,
       'movement to finish',
     );
-    expect(playerTile(alice, alicePlayer.playerId)).toEqual(target);
+    expect(playerTile(aliceRoom, alice.character.id)).toEqual(target);
   });
 
   it('rejects forged payloads, wrong protocols and illegal or unreachable targets', async () => {
-    const room = await createWorld('Alice');
-    const self = await firstPlayer(room);
+    const alice = await createActor(db, 'Alice');
+    const room = await createWorld(alice.ticket);
+    const self = await waitForPlayer(room, alice.character.id);
     const start = { x: self.x, y: self.y };
-    const tile = playerTile(room, self.playerId);
+    const tile = playerTile(room, alice.character.id);
     expect(tile).toBeDefined();
     if (tile === undefined) {
       return;
@@ -333,14 +364,15 @@ describe('world_map room', () => {
     });
     expect(sealed.code).toBe('UNREACHABLE');
 
-    expect(room.state.players.get(self.playerId)?.x).toBe(start.x);
-    expect(room.state.players.get(self.playerId)?.y).toBe(start.y);
+    expect(room.state.players.get(alice.character.id)?.x).toBe(start.x);
+    expect(room.state.players.get(alice.character.id)?.y).toBe(start.y);
   });
 
   it('deduplicates command ids and rejects stale sequences', async () => {
-    const room = await createWorld('Alice');
-    const self = await firstPlayer(room);
-    const tile = playerTile(room, self.playerId);
+    const alice = await createActor(db, 'Alice');
+    const room = await createWorld(alice.ticket);
+    await waitForPlayer(room, alice.character.id);
+    const tile = playerTile(room, alice.character.id);
     expect(tile).toBeDefined();
     if (tile === undefined) {
       return;
@@ -376,9 +408,10 @@ describe('world_map room', () => {
   });
 
   it('rate limits command bursts', async () => {
-    const room = await createWorld('Alice');
-    const self = await firstPlayer(room);
-    const tile = playerTile(room, self.playerId);
+    const alice = await createActor(db, 'Alice');
+    const room = await createWorld(alice.ticket);
+    await waitForPlayer(room, alice.character.id);
+    const tile = playerTile(room, alice.character.id);
     expect(tile).toBeDefined();
     if (tile === undefined) {
       return;
@@ -415,8 +448,9 @@ describe('world_map room', () => {
   });
 
   it('reconnects a dropped client within the grace period', async () => {
-    const room = await createWorld('Alice');
-    const self = await firstPlayer(room);
+    const alice = await createActor(db, 'Alice');
+    const room = await createWorld(alice.ticket);
+    const self = await waitForPlayer(room, alice.character.id);
     const playerId = self.playerId;
     const sessionId = room.sessionId;
     room.reconnection.minUptime = 0;
@@ -459,7 +493,7 @@ describe('world_map room', () => {
     );
     expect(playerCount(room)).toBe(1);
 
-    // A fresh page after reconnection starts its sequence at 0 again.
+    // A refreshed page after reconnection starts its sequence at 0 again.
     const ack = waitForMessage<CommandAck>(room, 'command.ack', (body) =>
       commandAckSchema.parse(body),
     );
@@ -481,33 +515,33 @@ describe('world_map room', () => {
   });
 
   it('removes the player after the reconnect grace period expires', async () => {
-    const room = await createWorld('Alice');
-    const observer = await joinWorld(room.roomId, 'Bob');
+    const alice = await createActor(db, 'Alice');
+    const bob = await createActor(db, 'Bob', { position: { x: 17_500, y: 10_500 } });
+    const room = await createWorld(alice.ticket);
+    const observer = await joinWorld(room.roomId, bob.ticket);
     await waitUntil(() => playerCount(observer) === 2, 5_000, 'both players visible');
-
-    const aliceId = [...room.state.players.values()].find(
-      (player) => player.displayName === 'Alice',
-    )?.playerId;
-    expect(aliceId).toBeDefined();
-    if (aliceId === undefined) {
-      return;
-    }
 
     room.reconnection.enabled = false;
     room.connection.close();
 
     await waitUntil(
-      () => observer.state.players.get(aliceId) === undefined,
+      () => observer.state.players.get(alice.character.id) === undefined,
       5_000,
       'dropped player cleanup',
     );
     expect(playerCount(observer)).toBe(1);
+    await waitUntilAsync(
+      async () => (await findCharacterLease(db, alice.character.id)) === undefined,
+      5_000,
+      'lease release',
+    );
   });
 
   it('exposes tick, player and command metrics', async () => {
-    const room = await createWorld('Alice');
-    const self = await firstPlayer(room);
-    const tile = playerTile(room, self.playerId);
+    const alice = await createActor(db, 'Alice');
+    const room = await createWorld(alice.ticket);
+    await waitForPlayer(room, alice.character.id);
+    const tile = playerTile(room, alice.character.id);
     expect(tile).toBeDefined();
     if (tile === undefined) {
       return;
@@ -543,5 +577,101 @@ describe('world_map room', () => {
     expect(roomMetrics?.acceptedCommands).toBeGreaterThanOrEqual(1);
     expect(roomMetrics?.tick.samples).toBeGreaterThan(0);
     expect(roomMetrics?.tick.p95Ms).toBeLessThan(25);
+  });
+
+  it('rejects missing, forged, expired and already consumed tickets', async () => {
+    const alice = await createActor(db, 'Alice');
+
+    await expect(createWorld('A'.repeat(43))).rejects.toMatchObject({ code: 525 });
+
+    const expiredTicket = await issueTicket(db, alice, -1);
+    await expect(createWorld(expiredTicket)).rejects.toMatchObject({ code: 525 });
+
+    const room = await createWorld(alice.ticket);
+    await waitForPlayer(room, alice.character.id);
+    await room.leave();
+
+    await expect(createWorld(alice.ticket)).rejects.toMatchObject({ code: 525 });
+  });
+
+  it('lets only one client control a character at a time', async () => {
+    const alice = await createActor(db, 'Alice');
+    const firstRoom = await createWorld(alice.ticket);
+    await waitForPlayer(firstRoom, alice.character.id);
+
+    const secondTicket = await issueTicket(db, alice);
+    await expect(createWorld(secondTicket)).rejects.toMatchObject({ code: 525 });
+
+    await firstRoom.leave();
+    await waitUntilAsync(
+      async () => (await findCharacterLease(db, alice.character.id)) === undefined,
+      5_000,
+      'lease release after leave',
+    );
+
+    const thirdTicket = await issueTicket(db, alice);
+    const secondRoom = await createWorld(thirdTicket);
+    await waitForPlayer(secondRoom, alice.character.id);
+    expect(secondRoom.state.players.get(alice.character.id)?.displayName).toBe(
+      alice.character.name,
+    );
+  });
+
+  it('restores the persisted position and facing on join', async () => {
+    const alice = await createActor(db, 'Alice', {
+      position: { x: 16_700, y: 10_300 },
+      facing: 1,
+    });
+    const room = await createWorld(alice.ticket);
+    const player = await waitForPlayer(room, alice.character.id);
+
+    expect(player.x).toBe(16_700);
+    expect(player.y).toBe(10_300);
+    expect(player.facing).toBe(1);
+  });
+
+  it('checkpoints the authoritative position when the player leaves', async () => {
+    const alice: TestActor = await createActor(db, 'Alice');
+    const room = await createWorld(alice.ticket);
+    await waitForPlayer(room, alice.character.id);
+
+    const tile = playerTile(room, alice.character.id);
+    expect(tile).toBeDefined();
+    if (tile === undefined) {
+      return;
+    }
+    const target = { x: tile.x + 2, y: tile.y };
+    const targetX = target.x * TILE_UNITS + TILE_UNITS / 2;
+
+    const ack = waitForMessage<CommandAck>(room, 'command.ack', (body) =>
+      commandAckSchema.parse(body),
+    );
+    room.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetTileX: target.x,
+      targetTileY: target.y,
+    });
+    await ack;
+    await waitUntil(
+      () => room.state.players.get(alice.character.id)?.x === targetX,
+      5_000,
+      'movement to finish at tile center',
+    );
+
+    await room.leave();
+
+    await waitUntilAsync(
+      async () => {
+        const stored = await findCharacterById(db, alice.character.id);
+        return stored?.x === targetX;
+      },
+      5_000,
+      'position checkpoint',
+    );
+    const stored = await findCharacterById(db, alice.character.id);
+    expect(stored?.y).toBe(target.y * TILE_UNITS + TILE_UNITS / 2);
+    expect(stored?.version).toBeGreaterThan(alice.character.version);
   });
 });

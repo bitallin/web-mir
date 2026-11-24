@@ -37,6 +37,7 @@ describe.runIf(process.env.DATABASE_URL !== undefined)('control API database rea
         destination: { write: () => undefined },
       }),
       readiness: createDatabaseProbe(database.db),
+      database: database.db,
     });
   });
 

@@ -1,25 +1,11 @@
-import { worldJoinOptionsSchema } from '@web-legend/contracts';
-
-import { createUuid } from './uuid';
-
-const PLAYER_KEY_STORAGE = 'web-legend.dev.player-key';
-const DISPLAY_NAME_STORAGE = 'web-legend.dev.display-name';
-const RECONNECT_TOKEN_STORAGE = 'web-legend.reconnect-token';
-
-const displayNameSchema = worldJoinOptionsSchema.shape.displayName;
-const playerKeySchema = worldJoinOptionsSchema.shape.playerKey;
-
-export type DevIdentity = {
-  playerKey: string;
-  displayName: string;
-};
-
 export type RoomPreference =
   { mode: 'joinOrCreate' } | { mode: 'create' } | { mode: 'joinById'; roomId: string };
 
 /**
  * Development-only room selection used by the E2E suite so each scenario gets
  * an isolated room: `?fresh=1` creates a new room, `?join=<id>` joins one.
+ * Identity no longer comes from query parameters; it always comes from a
+ * server-issued game ticket.
  */
 export function loadRoomPreference(search = window.location.search): RoomPreference {
   if (!import.meta.env.DEV) {
@@ -36,6 +22,13 @@ export function loadRoomPreference(search = window.location.search): RoomPrefere
   return { mode: 'joinOrCreate' };
 }
 
+const RECONNECT_STORAGE = 'web-legend.reconnect-token';
+
+type StoredReconnect = {
+  characterId: string;
+  token: string;
+};
+
 function readStorage(key: string): string | null {
   try {
     return window.sessionStorage.getItem(key);
@@ -48,62 +41,56 @@ function writeStorage(key: string, value: string): void {
   try {
     window.sessionStorage.setItem(key, value);
   } catch {
-    // Storage can be unavailable in hardened browsers; identity stays per page.
+    // Storage can be unavailable in hardened browsers; reconnection then
+    // falls back to a fresh ticket.
   }
 }
 
-function validName(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) {
+function parseStoredReconnect(raw: string | null): StoredReconnect | null {
+  if (raw === null) {
     return null;
   }
-  const parsed = displayNameSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-}
-
-function validKey(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) {
-    return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'characterId' in value &&
+      'token' in value &&
+      typeof value.characterId === 'string' &&
+      typeof value.token === 'string'
+    ) {
+      return { characterId: value.characterId, token: value.token };
+    }
+  } catch {
+    // Legacy or corrupt value; treat as absent.
   }
-  const parsed = playerKeySchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  return null;
 }
 
 /**
- * Temporary development identity (ADR-015). In development the `name` and
- * `key` query parameters let two browser contexts pick deterministic names;
- * otherwise a per-tab key and display name live in sessionStorage so a page
- * refresh keeps the same player.
+ * Reconnection tokens are scoped to one character so signing out and selecting
+ * another character can never reattach the browser to the previous one.
  */
-export function loadDevIdentity(search = window.location.search): DevIdentity {
-  const params = new URLSearchParams(search);
-  const allowOverrides = import.meta.env.DEV;
-
-  const queryName = allowOverrides ? validName(params.get('name')?.trim()) : null;
-  const queryKey = allowOverrides ? validKey(params.get('key')?.trim()) : null;
-
-  const storedKey = validKey(readStorage(PLAYER_KEY_STORAGE));
-  const playerKey = queryKey ?? storedKey ?? createUuid();
-  writeStorage(PLAYER_KEY_STORAGE, playerKey);
-
-  const storedName = validName(readStorage(DISPLAY_NAME_STORAGE));
-  const displayName =
-    queryName ?? storedName ?? `游侠${String(Math.floor(Math.random() * 9_000) + 1_000)}`;
-  writeStorage(DISPLAY_NAME_STORAGE, displayName);
-
-  return { playerKey, displayName };
+export function readReconnectToken(characterId: string): string | null {
+  const stored = parseStoredReconnect(readStorage(RECONNECT_STORAGE));
+  if (stored === null) {
+    return null;
+  }
+  if (stored.characterId !== characterId) {
+    clearReconnectToken();
+    return null;
+  }
+  return stored.token;
 }
 
-export function readReconnectToken(): string | null {
-  return readStorage(RECONNECT_TOKEN_STORAGE);
-}
-
-export function storeReconnectToken(token: string): void {
-  writeStorage(RECONNECT_TOKEN_STORAGE, token);
+export function storeReconnectToken(characterId: string, token: string): void {
+  writeStorage(RECONNECT_STORAGE, JSON.stringify({ characterId, token }));
 }
 
 export function clearReconnectToken(): void {
   try {
-    window.sessionStorage.removeItem(RECONNECT_TOKEN_STORAGE);
+    window.sessionStorage.removeItem(RECONNECT_STORAGE);
   } catch {
     // Ignore unavailable storage.
   }

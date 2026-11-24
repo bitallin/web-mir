@@ -7,13 +7,15 @@ test.afterEach(async ({ page }) => {
   await page.evaluate(() => window.__webLegendDebug?.leaveWorld()).catch(() => undefined);
 });
 
-test('game client boots Phaser and joins the realtime world', async ({ page }) => {
+test('game client boots into the account gate', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByRole('heading', { name: 'Web Legend' })).toBeVisible();
-  await expect(page.getByText('双人联机切片')).toBeVisible();
-  await expect(page.locator('canvas')).toBeVisible();
-  await expect(page.getByTestId('connection-status')).toBeVisible();
+  await expect(page.getByTestId('auth-username')).toBeVisible();
+  await expect(page.getByTestId('auth-password')).toBeVisible();
+  await expect(page.getByTestId('auth-submit')).toBeVisible();
+  // No world connection may be attempted before a server-issued ticket.
+  await expect(page.locator('canvas')).toHaveCount(0);
 });
 
 test('admin console renders its custom shell', async ({ page }) => {
