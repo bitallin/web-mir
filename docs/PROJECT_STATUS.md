@@ -188,8 +188,8 @@
 - 阶段 0 主提交：`69df6c387eff5ae143f84f79e6c7a4cf96e57721`
 - 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
 - 阶段 1 修复提交：`954155f`、`5f2dbbf`、`f4b74ff`
-- 阶段 2 主提交：本次提交 `feat(phase-2): deliver accounts, characters and one-time game tickets`
-  的哈希随后续 `docs(phase-2)` 提交记录。
+- 阶段 2 主提交：`df45db7feb83f973129626c51c013d9fecc98d69`
+  主题：`feat(phase-2): deliver accounts, characters and one-time game tickets`
 
 ## 11. 当前环境事实
 

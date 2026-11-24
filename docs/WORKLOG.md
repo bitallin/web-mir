@@ -441,8 +441,8 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=88
 
 ### 阶段提交
 
-- 阶段 2 主提交：`feat(phase-2): deliver accounts, characters and one-time game tickets`
-  （哈希见随后 `docs(phase-2)` 提交）。
+- 阶段 2 主提交：`df45db7feb83f973129626c51c013d9fecc98d69`
+  主题：`feat(phase-2): deliver accounts, characters and one-time game tickets`。
 
 ### 下一步计划
 

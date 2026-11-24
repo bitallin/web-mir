@@ -295,6 +295,6 @@ E2E 证据（`docs/phase-reports/phase-02/`）：
 
 ## 12. Git 提交
 
-- 阶段 2 主提交：见 `git log` 中
-  `feat(phase-2): deliver accounts, characters and one-time game tickets`。
-- 本报告与状态文档随主提交或紧随其后的 `docs(phase-2)` 提交归档。
+- 阶段 2 主提交：`df45db7feb83f973129626c51c013d9fecc98d69`
+  主题：`feat(phase-2): deliver accounts, characters and one-time game tickets`。
+- 本报告与状态文档随主提交归档；提交哈希由紧随其后的 `docs(phase-2)` 提交记录。
