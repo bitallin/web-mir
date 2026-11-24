@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 
-import { BootScene } from './BootScene';
+import { WorldScene } from './WorldScene';
+import type { WorldBridge } from './worldBridge';
 
-export function createBootGame(parent: HTMLElement): Phaser.Game {
+export function createWorldGame(parent: HTMLElement, bridge: WorldBridge): Phaser.Game {
   return new Phaser.Game({
     type: Phaser.AUTO,
     parent,
@@ -20,6 +21,6 @@ export function createBootGame(parent: HTMLElement): Phaser.Game {
     audio: {
       noAudio: true,
     },
-    scene: [BootScene],
+    scene: [new WorldScene(bridge)],
   });
 }

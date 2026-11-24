@@ -16,6 +16,7 @@
     "@colyseus/ws-transport": "0.18.5",
     "@web-legend/config": "workspace:*",
     "@web-legend/contracts": "workspace:*",
+    "@web-legend/game-simulation": "workspace:*",
     "@web-legend/observability": "workspace:*",
     "express": "5.3.0",
     "pino": "10.4.0",

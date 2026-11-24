@@ -73,6 +73,7 @@ web-mir/
 │  └─ game-server/    Colyseus Room 与实时适配
 ├─ packages/
 │  ├─ contracts/      API/协议/健康/错误码，客户端与服务端共享
+│  ├─ game-simulation/ 固定 tick、移动推进、路径与边界（阶段 1 创建）
 │  ├─ config/         Zod 环境变量校验与 .env 加载
 │  ├─ observability/  Pino 结构化日志与脱敏
 │  ├─ persistence/    Drizzle schema、数据库客户端、migrations
@@ -83,17 +84,20 @@ web-mir/
 └─ AGENTS.md
 ```
 
+`game-simulation` 已在阶段 1 创建，承载固定 tick、路径与移动推进，不依赖
+Colyseus、Phaser、数据库或 HTTP。
+
 当前**尚未创建**的包及创建时机（ADR-013）：`content-schema`（阶段 7 内容发布）、
-`game-domain`（阶段 3 移动/阶段 4 战斗）、`game-simulation`（阶段 1 固定 tick）、
-`game-application`（阶段 5 事务用例）、`auth`（阶段 2）、`map-runtime`（阶段 3）。
-不要提前创建空壳包。
+`game-domain`（阶段 3 移动/阶段 4 战斗）、`game-application`（阶段 5 事务用例）、
+`auth`（阶段 2）、`map-runtime`（阶段 3）。不要提前创建空壳包。
 
 强制依赖方向：
 
 - `contracts`、`config` 不依赖任何 app。
 - `persistence` 只依赖 `config` 和数据库库，不依赖 app。
-- `game-web` 只能导入 `contracts`、自身表现层与资源 manifest；不能导入服务端包、
-  数据库、Fastify、Colyseus 服务端或 Pino。
+- `game-simulation` 只依赖 `contracts`；不得依赖 Colyseus、Phaser、数据库或 HTTP。
+- `game-web` 只能导入 `contracts`、自身表现层与资源 manifest；不能导入服务端包
+  （含 `game-simulation`）、数据库、Fastify、Colyseus 服务端或 Pino。
 - `admin-web` 只能通过 Control API 访问数据；只能导入 `contracts`，不得导入
   Phaser、服务端包或数据库。
 - `control-api` 与 `game-server` 不得互相导入。

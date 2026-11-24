@@ -20,6 +20,8 @@ const serverPackages = [
   '@web-legend/observability/*',
   '@web-legend/testkit',
   '@web-legend/testkit/*',
+  '@web-legend/game-simulation',
+  '@web-legend/game-simulation/*',
 ];
 
 const serverFrameworks = [

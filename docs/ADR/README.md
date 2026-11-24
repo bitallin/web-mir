@@ -19,5 +19,7 @@
 | [ADR-012](ADR-012-ai-ops-deferred.md)          | AI Ops 后置，先只读                    | Accepted |
 | [ADR-013](ADR-013-package-realization.md)      | 按真实消费者创建包，不预建空壳         | Accepted |
 | [ADR-014](ADR-014-toolchain-pinning.md)        | Node 26 / TypeScript 5.9.3 / 精确依赖  | Accepted |
+| [ADR-015](ADR-015-developer-identity.md)       | 阶段 1 临时开发身份与重连凭据          | Accepted |
+| [ADR-016](ADR-016-phase1-movement-model.md)    | 阶段 1 权威移动模型与技术测试地图      | Accepted |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

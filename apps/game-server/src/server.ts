@@ -1,19 +1,35 @@
 import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { healthResponseSchema, readinessResponseSchema } from '@web-legend/contracts';
+import {
+  healthResponseSchema,
+  readinessResponseSchema,
+  WORLD_ROOM_NAME,
+} from '@web-legend/contracts';
 import type { Logger } from 'pino';
 
 import type { GameServerEnv } from './env';
+import { MetricsRegistry } from './metrics';
 import { DiagnosticsRoom } from './rooms/diagnosticsRoom';
+import { WorldMapRoom } from './rooms/worldMapRoom';
 import { SERVICE_VERSION } from './version';
+
+export type WorldRoomTuning = {
+  tickHz?: number;
+  patchRateMs?: number;
+  reconnectGraceSeconds?: number;
+  commandRateCapacity?: number;
+  commandRateRefillPerSecond?: number;
+};
 
 export type CreateGameServerOptions = {
   env: GameServerEnv;
   logger: Logger;
+  world?: WorldRoomTuning;
 };
 
 export type GameServerRuntime = {
   server: Server;
+  metrics: MetricsRegistry;
   listen: () => Promise<void>;
   shutdown: () => Promise<void>;
 };
@@ -21,11 +37,14 @@ export type GameServerRuntime = {
 export function createGameServer(options: CreateGameServerOptions): GameServerRuntime {
   const startedAt = Date.now();
   const { env, logger } = options;
+  const metrics = new MetricsRegistry();
 
   const server = new Server({
     transport: new WebSocketTransport({
       pingInterval: 10_000,
       pingMaxRetries: 3,
+      // Realtime commands are small; reject oversized frames before decoding.
+      maxPayload: 4_096,
     }),
     greet: false,
     logger,
@@ -53,7 +72,19 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
           }),
         );
       });
+
+      app.get('/metrics', (_request, response) => {
+        response.status(200).json(metrics.snapshot());
+      });
     },
+  });
+
+  server.define(WORLD_ROOM_NAME, WorldMapRoom, {
+    // Phase 2 replaces this with one-time game tickets (ADR-015).
+    allowDevIdentity: env.NODE_ENV !== 'production',
+    logger,
+    metrics,
+    ...options.world,
   });
 
   if (env.NODE_ENV !== 'production') {
@@ -62,6 +93,7 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
 
   return {
     server,
+    metrics,
     listen: async () => {
       await server.listen(env.GAME_SERVER_PORT, env.GAME_SERVER_HOST);
     },

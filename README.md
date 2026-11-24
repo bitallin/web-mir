@@ -6,14 +6,31 @@ Fastify Control API 和 Colyseus 实时服务器。
 
 ## 当前状态
 
-**阶段 0：工程底座与规则冻结，已完成，等待 Tech Lead 审阅。** 尚未开始阶段 1 的
-双浏览器联机切片。
+**阶段 1：浏览器双人联网垂直切片，已完成，等待 Tech Lead 审阅。**
 
-- 已完成工程、依赖、lint、类型检查、测试、构建、数据库迁移和健康检查底座。
-- 游戏世界、账号、战斗、背包、PK 和运营后台业务尚未实现。
+- 阶段 0 的工程底座已通过审阅并保留。
+- 阶段 1 交付：一张服务端权威的测试地图、`world_map` Room、20Hz 固定模拟、
+  10Hz 状态同步、意图式 `move.to`、服务端寻路与边界校验、双浏览器互相可见、
+  断线重连、Phaser 伪等距世界与 React HUD。
+- 尚未实现：正式账号与 game ticket（阶段 2）、Tiled 正式地图（阶段 3）、怪物、
+  战斗、掉落、背包、金币、聊天、PK 和运营后台业务。
 - 详细状态见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)，工作记录见
-  [docs/WORKLOG.md](docs/WORKLOG.md)，验收报告见
-  [docs/phase-reports/PHASE_00_REPORT.md](docs/phase-reports/PHASE_00_REPORT.md)。
+  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 1 验收报告见
+  [docs/phase-reports/PHASE_01_REPORT.md](docs/phase-reports/PHASE_01_REPORT.md)。
+
+## 阶段 1：如何体验双人联机
+
+1. 按“从零启动”启动 `pnpm dev`。
+2. 打开两个独立浏览器窗口（或一个普通窗口 + 一个无痕窗口）访问
+   <http://localhost:8584/>。
+3. 两个窗口会使用各自的开发身份进入同一个 `world_map` 房间，右侧列表显示彼此。
+4. 点击地面移动；服务端寻路并推进，另一端在约 100–150ms 内看到移动。
+5. 刷新任一窗口会优先使用 sessionStorage 中的重连 token 恢复原座位；网络断开会
+   显示“重连中”，恢复后自动继续。
+
+开发身份只存在于 `NODE_ENV=development|test`；生产服务器拒绝无票据的连接
+（ADR-015）。开发环境可用 `?name=Alice&key=<8-64位>` 固定身份，`?fresh=1`
+新建房间，`?join=<roomId>` 加入指定房间；这些参数在生产构建中被忽略。
 
 ## 技术架构
 
@@ -146,11 +163,15 @@ pnpm exec playwright install chromium
 | `pnpm db:generate`       | 根据 Drizzle schema 生成迁移             |
 | `pnpm db:migrate`        | 对 `DATABASE_URL` 执行迁移               |
 
-如果开发栈已在运行，E2E 可复用现有服务：
+E2E 会启动 game-web、admin-web 和 game-server 三个开发服务；如果开发栈已运行，
+可复用现有服务：
 
 ```bash
 PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
 ```
+
+E2E 使用开发专用参数为每个场景创建独立 Room，证据（双人截图、WebSocket 帧日志、
+可见延迟）写入 `docs/phase-reports/phase-01/`。
 
 ## 目录结构
 
@@ -161,7 +182,8 @@ apps/
   control-api/    Fastify REST、健康检查、未来 Outbox
   game-server/    Colyseus 运行时与实时适配
 packages/
-  contracts/      协议版本、健康检查、错误 envelope
+  contracts/      协议、实时消息、world-state schema、健康检查、错误 envelope
+  game-simulation/ 固定 tick、路径搜索、移动推进（纯逻辑）
   config/         Zod 环境变量与 .env 加载
   observability/  Pino 日志与脱敏
   persistence/    Drizzle schema、客户端、迁移
@@ -175,9 +197,13 @@ infra/docker/     PostgreSQL，Redis 为 scale profile
 tests/e2e/        Playwright
 ```
 
-未创建的包（`game-domain`、`game-simulation`、`game-application`、`auth`、
-`map-runtime`、`content-schema`）在出现真实消费者时创建，原因见
+`game-simulation` 在阶段 1 创建。未创建的包（`game-domain`、`game-application`、
+`auth`、`map-runtime`、`content-schema`）在出现真实消费者时创建，原因见
 [ADR-013](docs/ADR/ADR-013-package-realization.md)。
+
+浏览器通过同源 `/ws` 访问实时服务器：开发环境由 Vite 代理到 `GAME_SERVER_PORT`，
+`/matchmake` HTTP 和 WebSocket upgrade 共用该路径；生产部署需要在反向代理配置
+同样的路由，或通过 `VITE_GAME_SERVER_URL` 指向独立地址。
 
 ## 健康检查与错误格式
 

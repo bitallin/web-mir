@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, envDir, '');
   const port = Number(env.GAME_WEB_PORT ?? 5173);
   const controlApiUrl = `http://127.0.0.1:${env.CONTROL_API_PORT ?? '3000'}`;
+  const gameServerUrl = `http://127.0.0.1:${env.GAME_SERVER_PORT ?? '2567'}`;
 
   return {
     envDir,
@@ -24,6 +25,14 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': controlApiUrl,
         '/health': controlApiUrl,
+        // Same-origin realtime endpoint: matchmaking HTTP and the WebSocket
+        // upgrade both go through Vite in development and a reverse proxy in
+        // production, so the browser never needs the game server's port.
+        '/ws': {
+          target: gameServerUrl,
+          ws: true,
+          rewrite: (path) => path.replace(/^\/ws/, ''),
+        },
       },
     },
     preview: {

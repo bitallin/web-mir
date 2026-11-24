@@ -8,6 +8,7 @@ if (existsSync('.env')) {
 
 const gameWebPort = process.env.GAME_WEB_PORT ?? '5173';
 const adminWebPort = process.env.ADMIN_WEB_PORT ?? '5174';
+const gameServerPort = process.env.GAME_SERVER_PORT ?? '2567';
 const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === 'true';
 const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
 
@@ -43,6 +44,12 @@ export default defineConfig({
           {
             command: 'pnpm --filter @web-legend/admin-web dev',
             url: `http://127.0.0.1:${adminWebPort}`,
+            reuseExistingServer: process.env.CI !== 'true',
+            timeout: 120_000,
+          },
+          {
+            command: 'pnpm --filter @web-legend/game-server dev',
+            url: `http://127.0.0.1:${gameServerPort}/health/live`,
             reuseExistingServer: process.env.CI !== 'true',
             timeout: 120_000,
           },

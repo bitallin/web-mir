@@ -167,3 +167,138 @@ PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
 1. 等待 Tech Lead 审阅阶段 0 报告。
 2. 批准后执行阶段 1：`game-simulation` 固定 tick、world_map Room、双浏览器
    实时可见和服务端权威移动，详见阶段报告第 11 节。
+
+---
+
+## 2026-11-24 · 阶段 1：浏览器双人联网垂直切片
+
+### 本次任务目标
+
+在阶段 0 基础上交付第一条真实多人纵向切片：两个独立浏览器进入同一 Colyseus
+`world_map` Room，互相可见，点击移动由服务端权威裁定；不做正式账号、数据库资产、
+战斗或背包。只执行阶段 1，不进入阶段 2。
+
+### 开工前检查
+
+- 阅读 AGENTS、PROJECT_STATUS、WORKLOG、技术架构 v2、MVP 计划 v2、阶段 0 报告。
+- `git status` 干净；最近提交为阶段 0 文档补记 `0aa3798`。
+- 当前实现与架构一致性：阶段 0 只有工程底座；`contracts` 只有协议/健康/错误；
+  game-server 只有 diagnostics Room；game-web 只有启动场景。阶段 1 所需内容均未实现。
+- 当前主机 84–87 已被上一阶段遗留的 `pnpm dev` 占用；本次验证在 8844–8847
+  启动同一套新代码，端口仅本地测试用途。
+
+### 实施内容
+
+1. **contracts**
+   - `map.ts`：`mapManifestSchema`、tile 字符、可走性/边界 helper；
+   - `realtime.ts`：`move.to`、ack/rejected/notice、拒绝码、20Hz/100ms/4000 units/s、
+     `worldJoinOptionsSchema`；
+   - `worldState.ts`：`WorldState` / `PlayerState` Colyseus schema，通过
+     `@web-legend/contracts/world-state` 子路径导出，根入口不打包 schema；
+   - 新增 contract 测试（地图、实时消息、状态 schema）。
+2. **game-simulation（新包）**
+   - `FixedStepRunner`、四方向 BFS、`WorldSimulation`；
+   - 移动使用整数子格（1000/格），路径推进、朝向、速度、出生点与路径校验；
+   - 单元测试覆盖直路、绕墙、封闭区域、越界、确定性、速度、重定向、移除。
+3. **content/maps/phase1_test_map.json**
+   - 30×20 技术测试地图；边界墙、柱体、草地、封闭房间；客户端服务端同一份数据。
+4. **game-server**
+   - `WorldMapRoom`：20Hz 固定步进、100ms patch、50 人上限；服务端权威移动；
+   - 开发身份门禁：生产无条件拒绝；同 playerKey 单连接；
+   - commandId 幂等、clientSequence 过期拒绝、token bucket 限频；
+   - 4KB payload 上限；断线 15s 宽限与恢复；`/metrics` 指标；
+   - 新增 room/identity/metrics/rate-limit/生产门禁集成与单元测试。
+5. **game-web**
+   - 伪等距投影、脚底锚点 Y 排序、墙体、摄像机、resize；
+   - 点击移动、服务端 ack 路径、本地预测 + 吸附校正、远端插值；
+   - HUD 在线列表/连接/延迟/指令计数/拒绝提示/重新加入；
+   - 同源 `/ws`（Vite 代理 matchmake + WebSocket）、sessionStorage 重连 token、
+     早期重连、StrictMode 延迟启动、Scene 重启清理监听；
+   - 开发调试参数 `?name/?key/?fresh/?join`（仅 DEV）。
+6. **配置与测试**
+   - Playwright 启动 game-web、admin-web、game-server；
+   - 双 Browser Context、250ms 可见性（浏览器内计时）、刷新重连、断线恢复、
+     Scene 重启无重复输入监听；
+   - 截图、WebSocket 帧日志、指标证据。
+7. **文档**
+   - ADR-015（临时开发身份与重连凭据）、ADR-016（阶段 1 移动模型与技术地图）；
+   - 更新 AGENTS 包边界、README、PROJECT_STATUS、阶段 1 报告。
+
+### 关键技术决策
+
+- 整数子格坐标 + 服务端 BFS + ack 返回权威路径（ADR-016）；客户端只提交目标 tile。
+- 固定 20Hz 模拟、10Hz patch；追赶上限 5 步，防止事件循环卡顿雪崩。
+- 状态 schema 放入 contracts 子路径，避免 Control API/管理后台打包 Colyseus schema。
+- 技术地图 JSON 由客户端和服务端共同加载并 Zod 校验，阶段 3 换 map-runtime。
+- 临时开发身份严格隔离到 development/test，生产拒绝（ADR-015）。
+- 浏览器实时连接使用同源 `/ws`，开发代理、生产反代，不把游戏服端口暴露给浏览器。
+- 测试隔离使用开发参数 `?fresh=1`/`?join=<roomId>`，避免 `joinOrCreate` 带来的
+  跨测试房间污染。
+
+### 执行的命令与结果
+
+```bash
+pnpm install
+pnpm format
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 GAME_SERVER_PORT=8847 \
+  PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
+```
+
+结果：
+
+- format / lint / typecheck 通过。
+- 单元与集成：21 个文件、94 个测试通过（world_map 集成测试连续 3 次 8/8）。
+- 构建：4 个应用成功。
+- E2E：6/6 通过；移动可见延迟 136–204ms（5 次单独运行 136/145/152/179/180ms）。
+- 指标：tick p95 0.03ms、p99 0.07ms（2 玩家、52 样本）。
+- 生产门禁：开发身份 join 被拒绝（525）；diagnostics Room 不存在（520）。
+
+### 遇到的问题及解决方法
+
+1. **Colyseus Room 注册是进程级全局**：生产门禁测试与开发服务器同进程时，
+   `diagnostics` 仍可见。将生产门禁拆到独立测试文件（独立 worker）后通过。
+2. **客户端状态异步到达**：集成测试在创建房间后立即读取 `state.players` 为空；
+   改为等待可观察条件（玩家数/服务端 tick）后再断言。
+3. **Phaser 4 多边形 API**：`fillPoints` 需要 `Phaser.Math.Vector2[]`；增加
+   `toVector2` 转换。
+4. **Vite 代理 WebSocket**：浏览器不应直连游戏服端口；使用同源 `/ws`，Vite
+   同时代理 matchmake HTTP 与 WS upgrade，并移除 `.env` 中过期
+   `VITE_GAME_SERVER_URL` 用法。
+5. **StrictMode 双连接风险**：effect 内延迟 0ms 启动，cleanup 取消定时器，避免
+   开发模式重复建连/重复 Phaser 实例。
+6. **SDK 早期重连限制**：默认入房前 5 秒不自动重连；客户端设置
+   `room.reconnection.minUptime = 0`，让早期断线也走恢复流程。
+7. **E2E 计时受 Playwright IPC 干扰**：改为浏览器内 `pointerdown` 时间戳和对方
+   DOM MutationObserver 时间戳，Node 侧只做差值；测得 136–204ms。
+8. **跨测试房间污染**：`joinOrCreate` 会加入遗留 Room；增加 DEV 参数
+   `?fresh=1` / `?join=<roomId>` 并为每个 E2E 场景创建独立房间。
+9. **Control API 打包体积**：共享 schema 进入根入口使 bundle 从 183KB 增至 449KB；
+   改为 `contracts/world-state` 子路径后回到约 188KB。
+10. **旧开发栈占用 84–87**：无法在本会话重启用户进程；新栈运行在 8844–8847
+    完成验证，默认端口配置未改。
+
+### 尚未解决的问题
+
+- 位置只在 Room 内存；Room 崩溃后角色回到出生点（阶段 3/5）。
+- 单图 30/50 人容量尚未实测（阶段 8）。
+- 正式账号/票据、角色名唯一、单角色租约（阶段 2）。
+- Tiled、导航网格、AOI、地图切换（阶段 3）。
+- 独立测试数据库仍未建立（阶段 5 前）。
+- 生产反向代理的 `/ws` 路由尚未配置（阶段 8 部署）。
+- 当前主机有一个旧开发栈占用 84–87，需要用户自行重启才能看到阶段 1 页面。
+
+### 阶段提交
+
+- 提交信息：`feat(phase-1): deliver browser two-player realtime slice`
+- 提交哈希：提交后由 `git log --oneline` 查看。
+
+### 下一步计划
+
+1. 等待 Tech Lead 审阅阶段 1 报告与证据。
+2. 批准后执行阶段 2：账号、角色、Argon2id、刷新令牌、一次性 game ticket、
+   单角色会话租约、角色持久化与角色列表 API。

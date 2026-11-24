@@ -133,6 +133,9 @@ importers:
       '@web-legend/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@web-legend/game-simulation':
+        specifier: workspace:*
+        version: link:../../packages/game-simulation
       '@web-legend/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -161,6 +164,9 @@ importers:
 
   apps/game-web:
     dependencies:
+      '@colyseus/sdk':
+        specifier: 0.18.10
+        version: 0.18.10(@colyseus/core@0.18.28)(typescript@5.9.3)(zod@4.6.7)
       '@web-legend/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -195,9 +201,18 @@ importers:
 
   packages/contracts:
     dependencies:
+      '@colyseus/schema':
+        specifier: 5.0.50
+        version: 5.0.50(typescript@5.9.3)
       zod:
         specifier: 4.6.7
         version: 4.6.7
+
+  packages/game-simulation:
+    dependencies:
+      '@web-legend/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/observability:
     dependencies:
