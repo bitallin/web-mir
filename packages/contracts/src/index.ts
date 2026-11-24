@@ -64,6 +64,32 @@ export { tilePointSchema } from './map';
 export type { TilePoint } from './map';
 
 export {
+  COMBAT_CONTENT_VERSION,
+  MONSTER_STATE_CODES,
+  MONSTER_STATE_LABELS,
+  MONSTER_STATES,
+  combatBasicAttackSchema,
+  combatEntityTypeSchema,
+  combatEventSchema,
+  combatProfileSchema,
+  monsterStateKindFromCode,
+  monsterStateKindSchema,
+  skillCastSchema,
+  skillViewSchema,
+} from './combat';
+export type {
+  CombatBasicAttack,
+  CombatEntityType,
+  CombatEvent,
+  CombatEventKind,
+  CombatEventPayload,
+  CombatProfile,
+  MonsterStateKind,
+  SkillCast,
+  SkillView,
+} from './combat';
+
+export {
   CHAT_MESSAGE_MAX_LENGTH,
   CLIENT_MESSAGES,
   COMMAND_REJECTION_CODES,

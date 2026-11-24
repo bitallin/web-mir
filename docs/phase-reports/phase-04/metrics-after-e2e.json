@@ -1,0 +1,17 @@
+{
+  "service": "game-server",
+  "rooms": [],
+  "totals": {
+    "activeRooms": 0,
+    "roomsCreated": 14,
+    "acceptedCommands": 14,
+    "rejectedCommands": 2,
+    "chatMessages": 1,
+    "transfers": 4,
+    "combatCommands": 4,
+    "combatEvents": 18,
+    "monsterKills": 1,
+    "playerDeaths": 0
+  },
+  "timestamp": "2026-11-24T10:56:29.032Z"
+}

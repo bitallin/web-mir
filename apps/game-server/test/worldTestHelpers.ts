@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
 import { createOpaqueToken, hashToken } from '@web-legend/auth';
-import { GAME_TICKET_TTL_SECONDS, TILE_UNITS } from '@web-legend/contracts';
+import {
+  CHARACTER_CLASS_CATALOG,
+  GAME_TICKET_TTL_SECONDS,
+  TILE_UNITS,
+} from '@web-legend/contracts';
 import { STARTER_TOWN_MAP, findMapManifest } from '@web-legend/contracts/maps';
 import {
   insertAccount,
@@ -80,6 +84,10 @@ export type CreateActorOptions = {
   position?: { x: number; y: number };
   facing?: number;
   mapId?: string;
+  classId?: 'warrior' | 'mage' | 'taoist';
+  level?: number;
+  hp?: number;
+  mp?: number;
 };
 
 /**
@@ -102,18 +110,20 @@ export async function createActor(
   });
 
   const position = options.position ?? spawnPosition(mapId);
+  const classId = options.classId ?? 'warrior';
+  const base = CHARACTER_CLASS_CATALOG[classId];
   const character = await insertCharacter(db, {
     accountId: account.id,
     realmId,
     name: `${namePrefix.slice(0, 4)}${suffix}`.slice(0, 12),
     nameNormalized: `${namePrefix.slice(0, 4)}${suffix}`.slice(0, 12).toLowerCase(),
-    classId: 'warrior',
-    level: 1,
+    classId,
+    level: options.level ?? 1,
     exp: 0,
-    hp: 120,
-    maxHp: 120,
-    mp: 30,
-    maxMp: 30,
+    hp: options.hp ?? base.baseMaxHp,
+    maxHp: base.baseMaxHp,
+    mp: options.mp ?? base.baseMaxMp,
+    maxMp: base.baseMaxMp,
     mapId,
     x: position.x,
     y: position.y,

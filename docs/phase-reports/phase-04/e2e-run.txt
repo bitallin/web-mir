@@ -1,0 +1,19 @@
+$ playwright test
+
+Running 13 tests using 4 workers
+
+  ✓   1 [chromium] › tests/e2e/foundation.spec.ts:10:1 › game client boots into the account gate (1.3s)
+  ✓   2 [chromium] › tests/e2e/foundation.spec.ts:21:1 › admin console renders its custom shell (2.1s)
+  ✓   4 [chromium] › tests/e2e/multiplayer.spec.ts:175:1 › two accounts create characters and see each other within 250ms (10.0s)
+  ✓   5 [chromium] › tests/e2e/multiplayer.spec.ts:352:1 › a page reload returns to the same character without duplicating the player (9.2s)
+  ✓   6 [chromium] › tests/e2e/multiplayer.spec.ts:388:1 › a second client cannot control a character that is already in the world (5.9s)
+  ✓   3 [chromium] › tests/e2e/combat.spec.ts:126:1 › two players fight one wilds monster with authoritative hp, skills and respawn (29.5s)
+  ✓   7 [chromium] › tests/e2e/multiplayer.spec.ts:418:1 › a dropped socket shows the reconnecting state and recovers (7.6s)
+  ✓   8 [chromium] › tests/e2e/multiplayer.spec.ts:442:1 › restarting the Phaser scene does not duplicate input listeners (7.1s)
+  ✓   9 [chromium] › tests/e2e/multiplayer.spec.ts:474:1 › logging out clears the session and returns to the account screen (2.3s)
+  ✓  10 [chromium] › tests/e2e/multiplayer.spec.ts:488:1 › registration and the world work on a plain-HTTP LAN origin (2.2s)
+  ✓  11 [chromium] › tests/e2e/multiplayer.spec.ts:533:1 › clicking a blocked tile sends no move command (3.2s)
+  ✓  12 [chromium] › tests/e2e/multiplayer.spec.ts:549:1 › a character crosses the town wilds portal and returns without duplicates (11.7s)
+  ✓  13 [chromium] › tests/e2e/multiplayer.spec.ts:590:1 › chat reaches the other player on the same map (7.2s)
+
+  13 passed (1.1m)

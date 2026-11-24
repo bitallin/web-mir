@@ -118,6 +118,30 @@ export class WorldSimulation {
     return this.players.get(id);
   }
 
+  /** Server-side teleport used by combat respawn; the destination must be walkable. */
+  setPosition(id: string, position: UnitPoint): void {
+    const player = this.players.get(id);
+    if (player === undefined) {
+      throw new RangeError(`player "${id}" is not in the simulation`);
+    }
+    if (
+      !Number.isSafeInteger(position.x) ||
+      !Number.isSafeInteger(position.y) ||
+      position.x < 0 ||
+      position.y < 0
+    ) {
+      throw new RangeError('teleport position must be non-negative integer unit coordinates');
+    }
+    if (!isStandable(this.grid, tileOfUnits(position))) {
+      throw new RangeError('teleport destination must be walkable');
+    }
+    player.x = position.x;
+    player.y = position.y;
+    player.waypoints = [];
+    player.moving = false;
+    player.moveCredit = 0;
+  }
+
   listPlayers(): SimulationPlayer[] {
     return [...this.players.values()];
   }

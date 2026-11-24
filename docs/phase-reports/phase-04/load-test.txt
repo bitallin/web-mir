@@ -1,0 +1,4 @@
+$ tsx scripts/worldLoad.ts
+load: 30 players, 10s, room world_map:starter_town, client ws://127.0.0.1:84/ws, metrics http://127.0.0.1:87
+joined 30/30 clients accepted=750 rejected=0
+room DfgW3ci2x: players=30 tick p50=0.12ms p95=0.96ms p99=1.37ms max=1.77ms samples=230

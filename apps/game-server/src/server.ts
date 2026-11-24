@@ -23,6 +23,9 @@ export type WorldRoomTuning = {
   checkpointIntervalMs?: number;
   interestCellSize?: number;
   interestRadiusCells?: number;
+  combatRng?: () => number;
+  monsterRespawnMs?: number;
+  playerRespawnMs?: number;
 };
 
 export type CreateGameServerOptions = {

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import {
   PLAYER_SPEED_UNITS_PER_SECOND,
   TILE_UNITS,
+  type CombatEvent,
   type CommandAck,
   type TilePoint,
 } from '@web-legend/contracts';
@@ -9,6 +10,7 @@ import {
 import type { PlayerView } from '../net/worldClient';
 import { createProjection, TILE_HEIGHT, TILE_WIDTH, type ScreenPoint } from './projection';
 import type { MapBundle } from './mapCatalog';
+import { MonsterVisual } from './MonsterVisual';
 import type { SceneSnapshot, WorldBridge, WorldSceneHandle } from './worldBridge';
 
 const DISPLAY_FONT = '"Noto Serif SC", "Songti SC", "SimSun", Georgia, serif';
@@ -17,6 +19,8 @@ const MAX_FRAME_MS = 100;
 const SNAP_DISTANCE_UNITS = 900;
 const GROUND_DEPTH = -10_000;
 const WALK_ANIMATION_MS = 150;
+/** Keeps the player and adjacent monsters above the bottom combat HUD. */
+const CAMERA_LIFT_PX = 200;
 
 const PLAYER_COLORS = [0x9fc4e0, 0xe0b087, 0xa8d6a1, 0xcf9fe0, 0xe0d18f, 0x8fd0d0];
 
@@ -122,6 +126,38 @@ class PlayerVisual {
     this.sprite.setFrame(`${framePrefix}d${String(this.facing)}f${String(this.frameIndex)}`);
   }
 
+  playAttack(): void {
+    this.container.scene.tweens.add({
+      targets: this.container,
+      scaleX: 1.12,
+      scaleY: 0.92,
+      duration: 70,
+      yoyo: true,
+    });
+  }
+
+  playHit(): void {
+    this.container.scene.tweens.add({
+      targets: this.container,
+      alpha: 0.45,
+      duration: 70,
+      yoyo: true,
+    });
+  }
+
+  playDeath(): void {
+    this.container.setAlpha(0.28);
+  }
+
+  playRespawn(): void {
+    this.container.setAlpha(1);
+    this.container.scene.tweens.add({
+      targets: this.container,
+      alpha: { from: 0.2, to: 1 },
+      duration: 260,
+    });
+  }
+
   destroy(): void {
     this.container.destroy(true);
   }
@@ -137,8 +173,11 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private readonly bundle: MapBundle;
   private readonly projection: ReturnType<typeof createProjection>;
   private readonly visuals = new Map<string, PlayerVisual>();
+  private readonly monsterVisuals = new Map<string, MonsterVisual>();
   private pathGraphics!: Phaser.GameObjects.Graphics;
+  private targetRing!: Phaser.GameObjects.Graphics;
   private selfId: string | null = null;
+  private selectedTargetId: string | null = null;
   private predicted: UnitPoint | null = null;
   private path: UnitPoint[] = [];
   private speed: number = PLAYER_SPEED_UNITS_PER_SECOND;
@@ -166,7 +205,9 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     camera.centerOn(this.projection.mapWidth / 2, this.projection.mapHeight / 2);
 
     this.visuals.clear();
+    this.monsterVisuals.clear();
     this.selfId = null;
+    this.selectedTargetId = null;
     this.predicted = null;
     this.path = [];
 
@@ -174,6 +215,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     this.drawPortals();
     this.drawNpcs();
     this.pathGraphics = this.add.graphics().setDepth(1);
+    this.targetRing = this.add.graphics().setDepth(1_000_000);
 
     camera.fadeIn(280, 11, 13, 16);
 
@@ -205,9 +247,13 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         focus = visual.current;
       }
     }
+    for (const monster of this.monsterVisuals.values()) {
+      monster.update(delta);
+    }
+    this.updateTargetRing();
 
     if (focus !== null) {
-      this.cameras.main.centerOn(focus.x, focus.y);
+      this.cameras.main.centerOn(focus.x, focus.y + CAMERA_LIFT_PX);
     }
   }
 
@@ -230,8 +276,8 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         this.visuals.set(player.playerId, visual);
       }
       visual.setDisplayName(player.displayName);
-      visual.setConnected(player.connected);
-      visual.setMotion(player.moving, player.facing);
+      visual.setConnected(player.connected && player.alive);
+      visual.setMotion(player.moving && player.alive, player.facing);
 
       if (isSelf) {
         this.applySelfPosition(player);
@@ -244,6 +290,27 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       if (!seen.has(playerId)) {
         visual.destroy();
         this.visuals.delete(playerId);
+      }
+    }
+
+    const seenMonsters = new Set<string>();
+    for (const monster of data.snapshot.monsters) {
+      seenMonsters.add(monster.monsterId);
+      let visual = this.monsterVisuals.get(monster.monsterId);
+      if (visual === undefined) {
+        visual = new MonsterVisual(this, monster.templateId, monster);
+        this.monsterVisuals.set(monster.monsterId, visual);
+      }
+      visual.applyView(monster);
+      visual.setTarget(this.projection.toScreen(monster.x, monster.y), false);
+    }
+    for (const [monsterId, visual] of this.monsterVisuals) {
+      if (!seenMonsters.has(monsterId)) {
+        visual.destroy();
+        this.monsterVisuals.delete(monsterId);
+        if (this.selectedTargetId === monsterId) {
+          this.clearSelection();
+        }
       }
     }
   }
@@ -267,8 +334,192 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     };
   }
 
+  monsterScreenPoint(monsterId: string): ScreenPoint | null {
+    const visual = this.monsterVisuals.get(monsterId);
+    if (visual === undefined) {
+      return null;
+    }
+    const camera = this.cameras.main;
+    const canvas = this.game.canvas.getBoundingClientRect();
+    return {
+      x: visual.current.x - camera.scrollX + canvas.left,
+      y: visual.current.y - camera.scrollY + canvas.top,
+    };
+  }
+
+  applyCombatEvent(event: CombatEvent): void {
+    switch (event.kind) {
+      case 'attack': {
+        this.visualFor(event.sourceId)?.playAttack();
+        if (event.skillId !== undefined) {
+          this.showSkillEffect(event.sourceId, event.targetId);
+        }
+        break;
+      }
+      case 'hit': {
+        const target = this.visualFor(event.targetId);
+        target?.playHit();
+        const position = this.entityPosition(event.targetId);
+        if (position !== null) {
+          this.floatText(
+            position.x,
+            position.y - 34,
+            `${event.critical ? '暴击 ' : ''}-${String(event.damage)}`,
+            event.critical ? '#ffb347' : '#ff7a6b',
+            event.critical ? 20 : 16,
+          );
+        }
+        if (event.targetType === 'player' && event.targetId === this.selfId) {
+          this.cameras.main.shake(90, 0.0025);
+        }
+        break;
+      }
+      case 'miss': {
+        const position = this.entityPosition(event.targetId);
+        if (position !== null) {
+          this.floatText(position.x, position.y - 34, '闪避', '#9a958a', 15);
+        }
+        break;
+      }
+      case 'heal': {
+        const position = this.entityPosition(event.targetId);
+        if (position !== null) {
+          this.floatText(position.x, position.y - 34, `+${String(event.amount)}`, '#8fd08a', 17);
+        }
+        break;
+      }
+      case 'death': {
+        this.visualFor(event.entityId)?.playDeath();
+        break;
+      }
+      case 'spawn': {
+        this.monsterVisuals.get(event.entityId)?.playSpawn();
+        break;
+      }
+      case 'respawn': {
+        const visual = this.visuals.get(event.entityId);
+        visual?.playRespawn();
+        this.floatText(
+          this.projection.toScreen(event.x, event.y).x,
+          this.projection.toScreen(event.x, event.y).y - 40,
+          '复活',
+          '#e5c15a',
+          18,
+        );
+        break;
+      }
+    }
+  }
+
   restart(): void {
     this.scene.restart();
+  }
+
+  private visualFor(entityId: string): PlayerVisual | MonsterVisual | undefined {
+    return this.visuals.get(entityId) ?? this.monsterVisuals.get(entityId);
+  }
+
+  private entityPosition(entityId: string): ScreenPoint | null {
+    const visual = this.visualFor(entityId);
+    return visual === undefined ? null : visual.current;
+  }
+
+  private floatText(x: number, y: number, text: string, color: string, size: number): void {
+    const label = this.add
+      .text(x, y, text, {
+        fontFamily: DISPLAY_FONT,
+        fontSize: `${String(size)}px`,
+        color,
+        stroke: '#0b0d10',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(1_000_000);
+    this.tweens.add({
+      targets: label,
+      y: y - 36,
+      alpha: 0,
+      duration: 850,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        label.destroy();
+      },
+    });
+  }
+
+  private showSkillEffect(sourceId: string, targetId: string): void {
+    const from = this.entityPosition(sourceId);
+    const to = this.entityPosition(targetId);
+    if (from === null || to === null) {
+      return;
+    }
+    const effect = this.add.graphics().setDepth(999_999);
+    if (from.x === to.x && from.y === to.y) {
+      effect.lineStyle(2, 0x8fd08a, 0.9);
+      effect.strokeEllipse(to.x, to.y - 16, 46, 46);
+    } else {
+      effect.lineStyle(2, 0xffb347, 0.9);
+      effect.lineBetween(from.x, from.y - 18, to.x, to.y - 18);
+      effect.fillStyle(0xffb347, 0.9);
+      effect.fillCircle(to.x, to.y - 18, 4);
+    }
+    this.tweens.add({
+      targets: effect,
+      alpha: 0,
+      duration: 220,
+      onComplete: () => {
+        effect.destroy();
+      },
+    });
+  }
+
+  selectMonster(monsterId: string): void {
+    if (this.selectedTargetId === monsterId) {
+      return;
+    }
+    this.selectedTargetId = monsterId;
+    this.bridge.notifyTarget(monsterId);
+  }
+
+  private clearSelection(): void {
+    if (this.selectedTargetId === null) {
+      return;
+    }
+    this.selectedTargetId = null;
+    this.targetRing.clear();
+    this.bridge.notifyTarget(null);
+  }
+
+  private updateTargetRing(): void {
+    this.targetRing.clear();
+    if (this.selectedTargetId === null) {
+      return;
+    }
+    const visual = this.monsterVisuals.get(this.selectedTargetId);
+    if (visual === undefined || !visual.isAlive) {
+      return;
+    }
+    this.targetRing.lineStyle(2, 0xc9a227, 0.9);
+    this.targetRing.strokeEllipse(visual.current.x, visual.current.y, 38, 18);
+  }
+
+  private monsterAt(worldX: number, worldY: number): string | null {
+    let best: string | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const [monsterId, visual] of this.monsterVisuals) {
+      if (!visual.isAlive) {
+        continue;
+      }
+      const distance = Math.hypot(
+        worldX - visual.current.x,
+        (worldY - (visual.current.y - 18)) * 1.3,
+      );
+      if (distance < 30 && distance < bestDistance) {
+        best = monsterId;
+        bestDistance = distance;
+      }
+    }
+    return best;
   }
 
   private registerTilesetFrames(): void {
@@ -564,6 +815,14 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   }
 
   private readonly handlePointerDown = (pointer: Phaser.Input.Pointer): void => {
+    const monsterId = this.monsterAt(pointer.worldX, pointer.worldY);
+    if (monsterId !== null) {
+      this.selectMonster(monsterId);
+      this.bridge.requestAttack(monsterId);
+      return;
+    }
+
+    this.clearSelection();
     const tile = this.projection.toTile(pointer.worldX, pointer.worldY);
     if (!this.isTileWalkable(tile)) {
       this.showMarker(tile, 0xb04a3a);

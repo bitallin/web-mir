@@ -74,7 +74,12 @@ describe('Tiled map compilation', () => {
     expect(town?.portals[0]?.targetMapId).toBe('starter_wilds');
     expect(wilds?.portals[0]?.targetMapId).toBe('starter_town');
     expect(town?.npcPoints).toHaveLength(2);
-    expect(wilds?.monsterSpawns).toHaveLength(2);
+    expect(town?.monsterSpawns).toHaveLength(0);
+    expect(wilds?.monsterSpawns).toHaveLength(6);
+    expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.id)).size).toBe(6);
+    expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.monsterId))).toEqual(
+      new Set(['wild_slime', 'forest_wolf']),
+    );
     for (const map of compiled) {
       expect(verifyManifestChecksum(map)).toBe(true);
     }

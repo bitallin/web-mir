@@ -31,6 +31,20 @@ describe('RoomMetrics', () => {
       INVALID_TARGET: 1,
     });
   });
+
+  it('counts combat commands, events and outcomes', () => {
+    const metrics = new RoomMetrics('room-1');
+    metrics.recordCombatCommand();
+    metrics.recordCombatEvents(3);
+    metrics.recordMonsterKill();
+    metrics.recordPlayerDeath();
+
+    const snapshot = metrics.snapshot();
+    expect(snapshot.combatCommands).toBe(1);
+    expect(snapshot.combatEvents).toBe(3);
+    expect(snapshot.monsterKills).toBe(1);
+    expect(snapshot.playerDeaths).toBe(1);
+  });
 });
 
 describe('MetricsRegistry', () => {

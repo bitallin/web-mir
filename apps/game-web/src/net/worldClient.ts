@@ -5,13 +5,19 @@ import {
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
   chatMessageSchema,
+  combatEventSchema,
+  combatProfileSchema,
   commandAckSchema,
   commandRejectedSchema,
+  monsterStateKindFromCode,
   sessionTransferSchema,
   worldRoomNameFor,
   type ChatMessage,
+  type CombatEvent,
+  type CombatProfile,
   type CommandAck,
   type CommandRejected,
+  type MonsterStateKind,
   type TilePoint,
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
@@ -36,11 +42,28 @@ export type PlayerView = {
   facing: number;
   moving: boolean;
   connected: boolean;
+  alive: boolean;
+  classId: string;
+  level: number;
   colorIndex: number;
   hp: number;
   maxHp: number;
   mp: number;
   maxMp: number;
+};
+
+export type MonsterView = {
+  monsterId: string;
+  templateId: string;
+  displayName: string;
+  level: number;
+  x: number;
+  y: number;
+  facing: number;
+  moving: boolean;
+  hp: number;
+  maxHp: number;
+  state: MonsterStateKind;
 };
 
 export type WorldSnapshot = {
@@ -49,6 +72,7 @@ export type WorldSnapshot = {
   tick: number;
   playerCount: number;
   players: PlayerView[];
+  monsters: MonsterView[];
 };
 
 export type WorldClientCallbacks = {
@@ -58,6 +82,8 @@ export type WorldClientCallbacks = {
   onAck: (ack: CommandAck) => void;
   onRejected: (rejected: CommandRejected) => void;
   onChat: (message: ChatMessage) => void;
+  onCombatProfile: (profile: CombatProfile) => void;
+  onCombatEvent: (event: CombatEvent) => void;
   onTransfer: (mapId: string) => void;
   onLatency: (latencyMs: number) => void;
 };
@@ -170,6 +196,37 @@ export class WorldClient {
       clientSequence: this.sequence,
       targetTileX: target.x,
       targetTileY: target.y,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendBasicAttack(targetId: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.combatBasicAttack, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      targetId,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendSkill(skillId: string, targetId: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.skillCast, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      skillId,
+      targetId,
     });
     this.sequence += 1;
     return true;
@@ -346,6 +403,24 @@ export class WorldClient {
     );
 
     this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.combatProfile, (payload: unknown) => {
+        const parsed = combatProfileSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onCombatProfile(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.combatEvent, (payload: unknown) => {
+        const parsed = combatEventSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onCombatEvent(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
       room.onMessage(SERVER_MESSAGES.sessionTransfer, (payload: unknown) => {
         const parsed = sessionTransferSchema.safeParse(payload);
         if (!parsed.success || this.transferring) {
@@ -413,11 +488,31 @@ export class WorldClient {
         facing: player.facing,
         moving: player.moving,
         connected: player.connected,
+        alive: player.alive,
+        classId: player.classId,
+        level: player.level,
         colorIndex: player.colorIndex,
         hp: player.hp,
         maxHp: player.maxHp,
         mp: player.mp,
         maxMp: player.maxMp,
+      });
+    });
+
+    const monsters: MonsterView[] = [];
+    state.monsters.forEach((monster) => {
+      monsters.push({
+        monsterId: monster.monsterId,
+        templateId: monster.templateId,
+        displayName: monster.displayName,
+        level: monster.level,
+        x: monster.x,
+        y: monster.y,
+        facing: monster.facing,
+        moving: monster.moving,
+        hp: monster.hp,
+        maxHp: monster.maxHp,
+        state: monsterStateKindFromCode(monster.state),
       });
     });
 
@@ -427,6 +522,7 @@ export class WorldClient {
       tick: state.serverTick,
       playerCount: state.playerCount,
       players,
+      monsters,
     });
   }
 

@@ -1,0 +1,9 @@
+migrations 2
+tables account_sessions,accounts,character_sessions,characters,game_tickets,realms
+characters by map starter_town=784, starter_wilds=98
+characters version>0 824
+active leases 0
+tickets {"consumed":"951","expired":"41","open":"0","total":"992"}
+accounts 971
+character combat columns present 4/4
+phase 4 adds no migration or table; combat state is in-memory and checkpointed through existing character columns.

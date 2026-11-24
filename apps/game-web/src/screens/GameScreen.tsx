@@ -1,10 +1,12 @@
 import {
   CHAT_MESSAGE_MAX_LENGTH,
   CHARACTER_CLASS_CATALOG,
+  MONSTER_STATE_LABELS,
   TILE_UNITS,
   type CharacterView,
+  type SkillView,
 } from '@web-legend/contracts';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { issueGameTicket } from '../api/client';
 import { mapNameFor } from '../game/mapCatalog';
@@ -28,6 +30,13 @@ function tileOf(player: { x: number; y: number }): { x: number; y: number } {
   };
 }
 
+function hpPercent(hp: number, maxHp: number): number {
+  if (maxHp <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)));
+}
+
 export type GameScreenProps = {
   character: CharacterView;
   onExit: () => void;
@@ -36,16 +45,73 @@ export type GameScreenProps = {
 export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatDraft, setChatDraft] = useState('');
+  const [now, setNow] = useState(() => Date.now());
   const requestTicket = useCallback(async () => {
     const response = await issueGameTicket(character.id);
     return response.ticket;
   }, [character.id]);
-  const { state, rejoin, sendChat } = useWorldSession(containerRef, { character, requestTicket });
+  const { state, rejoin, sendChat, castSkill, selectTarget, attack } = useWorldSession(
+    containerRef,
+    {
+      character,
+      requestTicket,
+    },
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 200);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const classDefinition = CHARACTER_CLASS_CATALOG[character.classId];
   const self = state.players.find((player) => player.playerId === state.selfId);
   const selfName = self?.displayName;
   const mapName = mapNameFor(state.mapId);
+  const target =
+    state.selectedTargetId === null
+      ? undefined
+      : state.monsters.find((monster) => monster.monsterId === state.selectedTargetId);
+  const profileSkills = state.combatProfile?.skills;
+  const skills = useMemo(() => profileSkills ?? [], [profileSkills]);
+  const isDead = self?.alive === false;
+
+  const triggerSkill = useCallback(
+    (skill: SkillView) => {
+      const targetId = skill.target === 'self' ? state.selfId : state.selectedTargetId;
+      if (targetId === null) {
+        return;
+      }
+      castSkill(skill.id, targetId);
+    },
+    [castSkill, state.selectedTargetId, state.selfId],
+  );
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent): void => {
+      const targetElement = event.target;
+      if (
+        targetElement instanceof HTMLInputElement ||
+        targetElement instanceof HTMLTextAreaElement ||
+        targetElement instanceof HTMLButtonElement
+      ) {
+        return;
+      }
+      const skill = skills.find((candidate) => candidate.hotkey === event.key);
+      if (skill === undefined) {
+        return;
+      }
+      event.preventDefault();
+      triggerSkill(skill);
+    };
+    window.addEventListener('keydown', handler);
+    return () => {
+      window.removeEventListener('keydown', handler);
+    };
+  }, [skills, triggerSkill]);
 
   const submitChat = useCallback(() => {
     const draft = chatDraft;
@@ -66,8 +132,9 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <p className="eyebrow">浏览器原生 · 实时多人</p>
           <h1>Web Legend</h1>
           <p className="phase">
-            {character.name} · {classDefinition.name} Lv.{character.level}
-            <span>阶段 3</span>
+            {character.name} · {classDefinition.name} Lv.
+            {state.combatProfile?.level ?? character.level}
+            <span>阶段 4</span>
           </p>
           <p className="vitals" data-testid="vitals">
             HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
@@ -135,6 +202,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 data-tile-y={tile.y}
                 data-connected={player.connected ? 'true' : 'false'}
                 data-moving={player.moving ? 'true' : 'false'}
+                data-alive={player.alive ? 'true' : 'false'}
               >
                 <span
                   className="swatch"
@@ -149,14 +217,124 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 <span className="player-coords">
                   {tile.x},{tile.y}
                 </span>
-                <span className={`player-state ${player.connected ? '' : 'offline'}`}>
-                  {player.connected ? '在线' : '断线'}
+                <span className={`player-state ${player.alive ? '' : 'offline'}`}>
+                  {!player.alive ? '倒下' : player.connected ? '在线' : '断线'}
                 </span>
               </li>
             );
           })}
           {state.players.length === 0 ? <li className="empty">附近没有其他玩家</li> : null}
         </ul>
+      </aside>
+
+      <aside className="hud combat-panel" aria-label="战斗">
+        <section className="target-panel" data-testid="target-panel">
+          <div className="panel-heading">
+            <h2>当前目标</h2>
+            <span data-testid="monster-count">附近怪物 {state.monsters.length}</span>
+          </div>
+          {target === undefined ? (
+            <p className="target-empty">点击附近的怪物发起攻击</p>
+          ) : (
+            <>
+              <div className="target-heading">
+                <strong data-testid="target-name">{target.displayName}</strong>
+                <span>Lv.{target.level}</span>
+                <span data-testid="target-state">{MONSTER_STATE_LABELS[target.state] ?? ''}</span>
+              </div>
+              <div className="hp-track">
+                <span
+                  className="hp-fill"
+                  style={{ width: `${String(hpPercent(target.hp, target.maxHp))}%` }}
+                />
+              </div>
+              <p className="target-hp" data-testid="target-hp">
+                {target.hp}/{target.maxHp}
+              </p>
+            </>
+          )}
+        </section>
+
+        <section className="monster-list-panel" aria-label="附近怪物">
+          <ul data-testid="monster-list">
+            {state.monsters.map((monster) => (
+              <li key={monster.monsterId}>
+                <button
+                  type="button"
+                  className={`monster-row${monster.monsterId === state.selectedTargetId ? ' selected' : ''}`}
+                  data-testid="monster-row"
+                  data-monster-id={monster.monsterId}
+                  data-hp={monster.hp}
+                  data-max-hp={monster.maxHp}
+                  data-state={monster.state}
+                  onClick={() => {
+                    selectTarget(monster.monsterId);
+                    attack(monster.monsterId);
+                  }}
+                >
+                  <span>{monster.displayName}</span>
+                  <span>
+                    {monster.hp}/{monster.maxHp}
+                  </span>
+                  <span>{MONSTER_STATE_LABELS[monster.state] ?? monster.state}</span>
+                </button>
+              </li>
+            ))}
+            {state.monsters.length === 0 ? <li className="empty">附近没有怪物</li> : null}
+          </ul>
+        </section>
+
+        <section className="skill-bar" aria-label="技能">
+          <div className="panel-heading">
+            <h2>技能</h2>
+            <span>点击怪物攻击 · 快捷键</span>
+          </div>
+          <div className="skill-list">
+            {skills.map((skill, index) => {
+              const remaining = Math.max(0, (state.skillCooldowns[skill.id] ?? 0) - now);
+              const needsTarget = skill.target === 'enemy' && state.selectedTargetId === null;
+              const noMana = (self?.mp ?? 0) < skill.mpCost;
+              const disabled = remaining > 0 || needsTarget || noMana || isDead;
+              return (
+                <button
+                  key={skill.id}
+                  type="button"
+                  className={`skill-button${remaining > 0 ? ' cooling' : ''}`}
+                  data-testid={`skill-${String(index + 1)}`}
+                  data-skill-id={skill.id}
+                  data-cooldown-ms={Math.ceil(remaining)}
+                  disabled={disabled}
+                  title={skill.description}
+                  onClick={() => {
+                    triggerSkill(skill);
+                  }}
+                >
+                  <span className="skill-key">{skill.hotkey}</span>
+                  <span className="skill-name">{skill.name}</span>
+                  <span className="skill-cost">{skill.mpCost} MP</span>
+                  {remaining > 0 ? (
+                    <span className="skill-cooldown">{Math.ceil(remaining / 1_000)}s</span>
+                  ) : null}
+                </button>
+              );
+            })}
+            {skills.length === 0 ? <p className="target-empty">正在同步技能…</p> : null}
+          </div>
+        </section>
+
+        <section className="combat-log-panel" aria-label="战斗日志">
+          <div className="panel-heading">
+            <h2>战斗记录</h2>
+          </div>
+          <ul data-testid="combat-log">
+            {state.combatLog.length === 0 ? <li className="empty">尚未发生战斗</li> : null}
+            {state.combatLog.map((entry) => (
+              <li key={entry.id} data-testid="combat-log-entry" data-tone={entry.tone}>
+                {entry.text}
+              </li>
+            ))}
+          </ul>
+        </section>
       </aside>
 
       <aside className="hud chat-panel" aria-label="同图聊天">
@@ -202,11 +380,17 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         </form>
       </aside>
 
+      {isDead ? (
+        <div className="death-banner" data-testid="player-dead" role="status">
+          你已倒下，正在等待复活…
+        </div>
+      ) : null}
+
       <footer className="hud hud-bottom">
-        <p>点击地面移动 · 走到传送门切换地图 · 服务端 20Hz 权威模拟</p>
+        <p>点击怪物攻击 · 点击地面移动 · 技能由服务端结算</p>
         <p data-testid="command-count">指令 {state.commandCount}</p>
         <p>tick {state.serverTick}</p>
-        <p>协议 v1 · 一次性票据 · Colyseus 0.18</p>
+        <p>协议 v1 · 服务端 20Hz 权威战斗</p>
       </footer>
 
       {state.notice !== null ? (

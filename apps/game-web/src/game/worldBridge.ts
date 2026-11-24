@@ -1,4 +1,4 @@
-import type { CommandAck, TilePoint } from '@web-legend/contracts';
+import type { CombatEvent, CommandAck, TilePoint } from '@web-legend/contracts';
 
 import type { WorldSnapshot } from '../net/worldClient';
 import type { ScreenPoint } from './projection';
@@ -12,7 +12,10 @@ export type SceneSnapshot = {
 export type WorldSceneHandle = {
   applySnapshot: (data: SceneSnapshot) => void;
   applyAck: (ack: CommandAck) => void;
+  applyCombatEvent: (event: CombatEvent) => void;
   screenPointForTile: (tile: TilePoint) => ScreenPoint;
+  monsterScreenPoint: (monsterId: string) => ScreenPoint | null;
+  selectMonster: (monsterId: string) => void;
   restart: () => void;
 };
 
@@ -26,6 +29,9 @@ export class WorldBridge {
   private attachCount = 0;
 
   onMoveRequest: ((tile: TilePoint) => void) | null = null;
+  onAttackRequest: ((targetId: string) => void) | null = null;
+  onSkillRequest: ((skillId: string, targetId: string) => void) | null = null;
+  onTargetChange: ((targetId: string | null) => void) | null = null;
 
   attach(scene: WorldSceneHandle): void {
     this.scene = scene;
@@ -55,12 +61,36 @@ export class WorldBridge {
     this.scene?.applyAck(ack);
   }
 
+  pushCombatEvent(event: CombatEvent): void {
+    this.scene?.applyCombatEvent(event);
+  }
+
   requestMove(tile: TilePoint): void {
     this.onMoveRequest?.(tile);
   }
 
+  requestAttack(targetId: string): void {
+    this.onAttackRequest?.(targetId);
+  }
+
+  requestSkill(skillId: string, targetId: string): void {
+    this.onSkillRequest?.(skillId, targetId);
+  }
+
+  notifyTarget(targetId: string | null): void {
+    this.onTargetChange?.(targetId);
+  }
+
   screenPointForTile(tile: TilePoint): ScreenPoint | null {
     return this.scene?.screenPointForTile(tile) ?? null;
+  }
+
+  monsterScreenPoint(monsterId: string): ScreenPoint | null {
+    return this.scene?.monsterScreenPoint(monsterId) ?? null;
+  }
+
+  selectTarget(monsterId: string): void {
+    this.scene?.selectMonster(monsterId);
   }
 
   sceneGeneration(): number {

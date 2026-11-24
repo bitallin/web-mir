@@ -1,0 +1,69 @@
+{
+  "scenario": "phase4-replay: warrior + mage vs wild_slime for 12s at 20Hz",
+  "seed": "phase4-replay",
+  "durationMs": 12000,
+  "tickMs": 50,
+  "counts": {
+    "attack": 14,
+    "hit": 13,
+    "miss": 1,
+    "death": 2,
+    "spawn": 1
+  },
+  "events": [
+    "attack player:warrior-1 -> monster:wilds_slime_1",
+    "hit warrior-1 -> wilds_slime_1 10 hp=40/50",
+    "attack player:mage-1 -> monster:wilds_slime_1 [mage_fireball]",
+    "hit mage-1 -> wilds_slime_1 16 hp=24/50",
+    "attack monster:wilds_slime_1 -> player:warrior-1",
+    "hit wilds_slime_1 -> warrior-1 2 hp=118/120",
+    "attack player:warrior-1 -> monster:wilds_slime_1",
+    "hit warrior-1 -> wilds_slime_1 11 hp=13/50",
+    "attack monster:wilds_slime_1 -> player:warrior-1",
+    "miss wilds_slime_1 -> warrior-1",
+    "attack player:warrior-1 -> monster:wilds_slime_1",
+    "hit warrior-1 -> wilds_slime_1 10 hp=3/50",
+    "attack player:warrior-1 -> monster:wilds_slime_1",
+    "hit warrior-1 -> wilds_slime_1 11 hp=0/50",
+    "death monster:wilds_slime_1",
+    "spawn wilds_slime_1 hp=50",
+    "attack monster:wilds_slime_1 -> player:warrior-1",
+    "hit wilds_slime_1 -> warrior-1 2 hp=116/120",
+    "attack player:warrior-1 -> monster:wilds_slime_1",
+    "hit warrior-1 -> wilds_slime_1 10 hp=40/50",
+    "attack player:warrior-1 -> monster:wilds_slime_1",
+    "hit warrior-1 -> wilds_slime_1 11 hp=29/50",
+    "attack monster:wilds_slime_1 -> player:warrior-1",
+    "hit wilds_slime_1 -> warrior-1 2 hp=114/120",
+    "attack player:warrior-1 -> monster:wilds_slime_1",
+    "hit warrior-1 -> wilds_slime_1 12 hp=17/50",
+    "attack player:mage-1 -> monster:wilds_slime_1 [mage_fireball]",
+    "hit mage-1 -> wilds_slime_1 16 hp=1/50",
+    "attack player:warrior-1 -> monster:wilds_slime_1",
+    "hit warrior-1 -> wilds_slime_1 12 hp=0/50",
+    "death monster:wilds_slime_1"
+  ],
+  "players": [
+    {
+      "id": "warrior-1",
+      "hp": 114,
+      "mp": 30,
+      "alive": true
+    },
+    {
+      "id": "mage-1",
+      "hp": 80,
+      "mp": 60,
+      "alive": true
+    }
+  ],
+  "monsters": [
+    {
+      "id": "wilds_slime_1",
+      "state": "dead",
+      "hp": 0,
+      "x": 5500,
+      "y": 5500
+    }
+  ]
+}

@@ -657,3 +657,124 @@ pnpm load:world
 2. 先定义 `game-domain` 战斗纯函数、怪物/刷点内容 schema 与 CombatEvent 契约，
    再实现服务端 RNG、怪物 FSM、战士普攻/技能和死亡/刷新。
 3. 保持阶段 3 的 AOI、传送、租约、checkpoint、聊天测试为回归门禁。
+
+---
+
+## 2026-11-24 · 阶段 4：怪物、战斗和技能
+
+### 目标
+
+交付第一条服务端权威 PvE 链路：`game-domain` 战斗纯函数、两种怪物与刷点、
+怪物 FSM、服务端 RNG、三职业技能、CombatEvent、死亡/刷新、玩家复活与双浏览器
+一致性测试；不跨入经验/掉落/背包。
+
+### 开工前状态
+
+- HEAD `fa708d0`，工作区干净；阶段 3 已由用户验收。
+- 无 `game-domain`、无战斗命令/事件、无技能/冷却、无怪物实体；野外只有 2 个刷点。
+- 结论：阶段 4 目标全部未实现；先写 ADR-019 固定战斗边界。
+
+### 实际改动
+
+1. **ADR-019 + 边界**
+   - 新建 `@web-legend/game-domain`，只依赖 contracts；导航格、寻路、RNG、
+     复活点由 Room 注入。
+   - AGENTS、ESLint、README 同步包边界。
+2. **contracts**
+   - `combat.basicAttack`、`skill.cast`、`combat.event`、`combat.profile`；
+     7 种战斗事件；5 个战斗错误码与 `retryAfterMs`。
+   - 玩家 `classId`/`level`/`alive`；`.view()` 的 `monsters` 与 `MonsterState`。
+3. **game-domain**
+   - `combatStatsFor`、`rollAttack`（固定 3 次 RNG）、技能/怪物目录。
+   - `CombatWorld`：玩家 HP/MP/冷却、怪物 FSM、追击/脱战/巡逻、死亡/重生、
+     玩家死亡复活、断线不可被选中。
+   - 领域测试覆盖伤害/暴击/冷却/法力/距离/治疗/FSM/回放。
+4. **内容与地图**
+   - 野外刷点 2 → 6（3 史莱姆 + 3 森林狼），重新编译并格式化产物。
+5. **game-simulation**
+   - `WorldSimulation.setPosition`：复活传送并校验可走格。
+6. **game-server**
+   - Room 创建 `CombatWorld`，加入时移交职业/等级/HP/MP；HP 0 角色满状态复活。
+   - 战斗命令统一管线：会话/协议/命令 ID 去重/序号/限频/领域结果/事件广播。
+   - 重复 commandId 重发原事件；断线宽限期不可被选中。
+   - 每 tick 同步玩家 HP/MP/存活与怪物状态；怪物共用 AOI。
+   - 传送/checkpoint 读取战斗世界 HP/MP；指标增加战斗命令/事件/击杀/死亡。
+   - 7 个真实 PostgreSQL + Colyseus 战斗集成测试。
+7. **game-web**
+   - 怪物渲染、血条、点击选怪/普攻、选中环与摄像机上移 200px。
+   - 目标面板、附近怪物、技能栏（MP/冷却/快捷键 1）、战斗记录、死亡遮罩。
+   - 伤害/暴击/闪避/治疗浮字、技能弹道/治疗环、受击/死亡/重生表现。
+   - 战斗日志按 eventId 去重；冷却只由服务端攻击事件触发。
+8. **测试与证据**
+   - 契约/领域/集成/E2E；回放摘要、指标、数据库、负载、截图与阶段 3 回归证据。
+9. **文档**
+   - 阶段 4 报告、PROJECT_STATUS、WORKLOG、README、ADR 索引。
+
+### 关键技术决策
+
+- 战斗领域与怪物运行时归 `game-domain`，Room 只做适配（ADR-019）。
+- 每次攻击固定消耗 3 个 RNG，命中与否不改变后续序列，回放可复现。
+- 命令幂等按 commandId 重发原事件，客户端按 eventId 去重。
+- 怪物与玩家共用 `InterestManager` 和 `.view()`。
+- 玩家死亡 3 秒后在同地图首个出生点满状态复活；经验/掉落延后阶段 5。
+- 断线玩家保留状态但不可被怪物选中。
+- 摄像机上移 200px，避免底部战斗 HUD 遮挡近身目标。
+
+### 执行的命令与结果
+
+```bash
+pnpm install
+pnpm maps:compile
+pnpm format
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
+pnpm load:world
+```
+
+结果：
+
+- 格式 / lint / typecheck 通过；40 个文件、211 个测试通过（约 11.9s）。
+- 4 个应用构建成功；地图 2 张、野外 6 个刷点。
+- E2E 13/13 通过（约 1.1 分钟），新增双人战斗测试 29.5s。
+- 30 人主城负载：30/30、750 接受、0 拒绝、tick p50 0.12ms、p95 0.96ms、
+  p99 1.37ms、max 1.77ms、230 样本。
+- E2E 后指标：14 房间、4 战斗命令、18 战斗事件、1 击杀、0 玩家死亡。
+- 数据库：2 迁移、6 表、784 主城 + 98 野外角色、824 个 `version > 0`、
+  0 活跃租约；无新迁移。
+- 回放：14 攻击、13 命中、1 闪避、2 死亡、1 重生，seed 固定可复现。
+
+### 遇到的问题及解决方法
+
+1. **底部战斗 HUD 遮挡近身怪物**：E2E 点击落在 `.panel-heading`；摄像机焦点
+   上移 200px，使玩家与近身怪物位于 HUD 之上。
+2. **点击时角色尚未到达目标格**：等待自身权威 tile 与摄像机稳定后再点击。
+3. **两人站位过远**：怪物追击一人后另一人超出射程；两人都站到刷点上并用真实
+   攻击重试确认 HP 变化。
+4. **击杀未计入指标**：命令路径的死亡事件未经过 tick 统计；抽出
+   `recordCombatOutcomes` 供两条路径共用。
+5. **宽限期玩家被怪物击杀**：增加 `setPlayerTargetable`，断线取消被选资格。
+6. **编译产物格式化抖动**：`maps:compile` 后执行 `pnpm format`。
+7. **负载脚本 SDK 告警**：消费 `combat.profile`。
+
+### 尚未解决的问题
+
+- 经验、等级成长、击杀奖励、掉落、背包、装备、金币（阶段 5）。
+- PK、安全区、复活惩罚与聊天过滤（阶段 6）。
+- CombatEvent 全 Room 广播、无实体碰撞、无 Buff/范围伤害/投射物实体。
+- 战斗负载、patch bytes、50 人容量（阶段 8）。
+- 内容目录仍在代码中，后台不可编辑（阶段 7）。
+- 占位怪物/技能表现与无音效。
+
+### 阶段提交
+
+- 待本条目提交后记录：`feat(phase-4): deliver monsters, combat and skills`。
+
+### 下一步计划
+
+1. 用户在 8584 实测阶段 4：野外选怪、普攻、技能、冷却、双人同一 HP、死亡与
+   8 秒重生。
+2. 验收通过后启动阶段 5：物品/掉落/背包/装备/金币/经验事务与崩溃恢复。
+3. 保持阶段 3 与阶段 4 的测试为回归门禁。

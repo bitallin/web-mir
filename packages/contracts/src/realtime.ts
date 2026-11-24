@@ -16,12 +16,16 @@ export const PLAYER_SPEED_UNITS_PER_SECOND = 4_000 as const;
 export const CLIENT_MESSAGES = {
   moveTo: 'move.to',
   chatSend: 'chat.send',
+  combatBasicAttack: 'combat.basicAttack',
+  skillCast: 'skill.cast',
 } as const;
 
 export const SERVER_MESSAGES = {
   commandAck: 'command.ack',
   commandRejected: 'command.rejected',
   chatMessage: 'chat.message',
+  combatEvent: 'combat.event',
+  combatProfile: 'combat.profile',
   sessionTransfer: 'session.transfer',
   systemNotice: 'system.notice',
 } as const;
@@ -133,6 +137,11 @@ export const COMMAND_REJECTION_CODES = [
   'RATE_LIMITED',
   'INVALID_TARGET',
   'UNREACHABLE',
+  'OUT_OF_RANGE',
+  'COOLDOWN',
+  'INSUFFICIENT_RESOURCE',
+  'TARGET_DEAD',
+  'PLAYER_DEAD',
 ] as const;
 
 export const commandRejectionCodeSchema = z.enum(COMMAND_REJECTION_CODES);
@@ -144,8 +153,13 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   INVALID_SESSION: '会话无效，请重新连接',
   STALE_SEQUENCE: '指令序号过期',
   RATE_LIMITED: '操作过于频繁',
-  INVALID_TARGET: '目标位置不可到达',
+  INVALID_TARGET: '目标不可攻击',
   UNREACHABLE: '目标位置不可到达',
+  OUT_OF_RANGE: '目标距离太远',
+  COOLDOWN: '技能尚未就绪',
+  INSUFFICIENT_RESOURCE: '法力不足',
+  TARGET_DEAD: '目标已经死亡',
+  PLAYER_DEAD: '角色已经倒下',
 };
 
 export const commandAckSchema = z
@@ -171,6 +185,8 @@ export const commandRejectedSchema = z
     code: commandRejectionCodeSchema,
     message: z.string().min(1),
     serverTime: z.number().nonnegative(),
+    /** Present for COOLDOWN so the client can align its local countdown. */
+    retryAfterMs: z.number().int().nonnegative().optional(),
   })
   .strict();
 

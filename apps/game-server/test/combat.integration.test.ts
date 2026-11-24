@@ -1,0 +1,549 @@
+import { randomUUID } from 'node:crypto';
+import { createServer as createNetServer } from 'node:net';
+
+import { Client, type Room as SdkRoom } from '@colyseus/sdk';
+import {
+  MONSTER_STATE_CODES,
+  PROTOCOL_VERSION,
+  STARTER_WILDS_MAP_ID,
+  combatEventSchema,
+  combatProfileSchema,
+  commandRejectedSchema,
+  worldRoomNameFor,
+  type CombatEvent,
+  type CombatProfile,
+  type CommandRejected,
+} from '@web-legend/contracts';
+import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
+import { createLogger } from '@web-legend/observability';
+import { createDatabase, type Database, type DatabaseHandle } from '@web-legend/persistence';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+
+import type { GameServerEnv } from '../src/env';
+import { createGameServer, type GameServerRuntime } from '../src/server';
+import {
+  createActor,
+  tileUnits,
+  type CreateActorOptions,
+  type TestActor,
+} from './worldTestHelpers';
+
+const databaseUrl = process.env.DATABASE_URL;
+const SLIME = 'wilds_slime_2';
+const SLIME_TILE = { x: 7, y: 15 };
+
+function requireDatabaseUrl(): string {
+  if (databaseUrl === undefined || databaseUrl.length === 0) {
+    throw new Error('DATABASE_URL is required for game server integration tests');
+  }
+  return databaseUrl;
+}
+
+const logger = () =>
+  createLogger({
+    service: 'game-server',
+    level: 'silent',
+    destination: { write: () => undefined },
+  });
+
+async function reservePort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const probe = createNetServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      if (address === null || typeof address === 'string') {
+        probe.close();
+        reject(new Error('Failed to reserve a TCP port'));
+        return;
+      }
+      const port = address.port;
+      probe.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
+function waitUntil(
+  predicate: () => boolean,
+  timeoutMs = 5_000,
+  label = 'condition',
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (predicate()) {
+        clearInterval(timer);
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        clearInterval(timer);
+        reject(new Error(`Timed out waiting for ${label}`));
+      }
+    }, 10);
+  });
+}
+
+function waitForMessage<T>(
+  room: SdkRoom,
+  type: string,
+  parse: (payload: unknown) => T,
+  timeoutMs = 5_000,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let unsubscribe: () => void = () => undefined;
+    const timer = setTimeout(() => {
+      unsubscribe();
+      reject(new Error(`Timed out waiting for "${type}"`));
+    }, timeoutMs);
+
+    unsubscribe = room.onMessage(type, (payload: unknown) => {
+      clearTimeout(timer);
+      unsubscribe();
+      try {
+        resolve(parse(payload));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  });
+}
+
+type WorldRoom = SdkRoom<unknown, WorldStateInstance>;
+
+function joinOptions(ticket: string): Record<string, unknown> {
+  return { protocolVersion: PROTOCOL_VERSION, ticket };
+}
+
+function collectCombatEvents(room: WorldRoom): CombatEvent[] {
+  const events: CombatEvent[] = [];
+  room.onMessage('combat.event', (payload: unknown) => {
+    events.push(combatEventSchema.parse(payload));
+  });
+  return events;
+}
+
+function monsterState(room: WorldRoom, id: string) {
+  return room.state.monsters.get(id);
+}
+
+describe.runIf(databaseUrl !== undefined)('world_map combat', () => {
+  let database: DatabaseHandle;
+  let runtime: GameServerRuntime;
+  let db: Database;
+  let baseUrl: string;
+  const cleanups: (() => Promise<void>)[] = [];
+  const clients: Client[] = [];
+
+  function client(): Client {
+    const instance = new Client(baseUrl);
+    clients.push(instance);
+    return instance;
+  }
+
+  async function createWorld(ticket: string): Promise<WorldRoom> {
+    const room = (await client().create(
+      worldRoomNameFor(STARTER_WILDS_MAP_ID),
+      joinOptions(ticket),
+      WorldState,
+    )) as WorldRoom;
+    cleanups.push(async () => {
+      await room.leave();
+    });
+    return room;
+  }
+
+  async function joinWorld(roomId: string, ticket: string): Promise<WorldRoom> {
+    const room = (await client().joinById(roomId, joinOptions(ticket), WorldState)) as WorldRoom;
+    cleanups.push(async () => {
+      await room.leave();
+    });
+    return room;
+  }
+
+  function wildsActor(options: CreateActorOptions = {}): Promise<TestActor> {
+    return createActor(db, 'Combat', {
+      mapId: STARTER_WILDS_MAP_ID,
+      position: tileUnits({ x: 6, y: 15 }),
+      ...options,
+    });
+  }
+
+  beforeAll(async () => {
+    const port = await reservePort();
+    database = createDatabase(requireDatabaseUrl(), { max: 5 });
+    db = database.db;
+
+    const env: GameServerEnv = {
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'silent',
+      GAME_SERVER_HOST: '127.0.0.1',
+      GAME_SERVER_PORT: port,
+      DATABASE_URL: requireDatabaseUrl(),
+      GAME_SERVER_ID: 'game-server-combat-test',
+    };
+
+    runtime = createGameServer({
+      env,
+      logger: logger(),
+      database: db,
+      world: {
+        reconnectGraceSeconds: 1,
+        checkpointIntervalMs: 250,
+        combatRng: () => 0.5,
+        monsterRespawnMs: 2_000,
+        playerRespawnMs: 400,
+      },
+    });
+
+    await runtime.listen();
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterEach(async () => {
+    await Promise.allSettled(cleanups.splice(0).map((cleanup) => cleanup()));
+    clients.splice(0);
+  });
+
+  afterAll(async () => {
+    await runtime?.shutdown();
+    await database?.close();
+  });
+
+  it('exposes nearby monsters with a class combat profile', async () => {
+    const actor = await wildsActor();
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+
+    const profile = await waitForMessage<CombatProfile>(room, 'combat.profile', (payload) =>
+      combatProfileSchema.parse(payload),
+    );
+    expect(profile.classId).toBe('warrior');
+    expect(profile.attack).toBe(12);
+    expect(profile.skills.map((skill) => skill.id)).toEqual(['warrior_heavy_strike']);
+    expect(profile.skills[0]?.cooldownRemainingMs).toBe(0);
+
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+    const slime = monsterState(room, SLIME);
+    expect(slime?.templateId).toBe('wild_slime');
+    expect(slime?.hp).toBe(50);
+    // The adjacent player aggros immediately, so any living FSM state is valid.
+    expect(slime?.state).not.toBe(MONSTER_STATE_CODES.dead);
+
+    room.send('combat.basicAttack', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetId: SLIME,
+    });
+
+    await waitUntil(
+      () => events.some((event) => event.kind === 'hit' && event.targetId === SLIME),
+      3_000,
+      'first hit',
+    );
+    const hit = events.find((event) => event.kind === 'hit' && event.targetId === SLIME);
+    expect(hit?.kind).toBe('hit');
+    if (hit?.kind !== 'hit') {
+      return;
+    }
+    expect(hit.sourceType).toBe('player');
+    // Seeded zero variance: 12 attack - 2 defense / 2 = 11.
+    expect(hit.damage).toBe(11);
+    expect(hit.critical).toBe(false);
+    await waitUntil(() => monsterState(room, SLIME)?.hp === hit.targetHp, 2_000, 'hp sync');
+
+    const rejection = waitForMessage<CommandRejected>(room, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    room.send('combat.basicAttack', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 1,
+      targetId: SLIME,
+    });
+    const cooldown = await rejection;
+    expect(cooldown.code).toBe('COOLDOWN');
+    expect(cooldown.retryAfterMs).toBeGreaterThan(0);
+  });
+
+  it('spends mana for skills and rejects forged or wrong-protocol commands', async () => {
+    const actor = await wildsActor();
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+    await waitForMessage(room, 'combat.profile', (payload) => combatProfileSchema.parse(payload));
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+
+    const startHp = monsterState(room, SLIME)?.hp ?? 0;
+    room.send('skill.cast', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      skillId: 'warrior_heavy_strike',
+      targetId: SLIME,
+    });
+    await waitUntil(
+      () =>
+        events.some((event) => event.kind === 'attack' && event.skillId === 'warrior_heavy_strike'),
+      3_000,
+      'heavy strike',
+    );
+    await waitUntil(() => room.state.players.get(actor.character.id)?.mp === 24, 2_000, 'mp spend');
+    await waitUntil(
+      () => (monsterState(room, SLIME)?.hp ?? startHp) < startHp,
+      2_000,
+      'skill damage',
+    );
+
+    const forgedRejection = waitForMessage<CommandRejected>(room, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    room.send('combat.basicAttack', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 1,
+      targetId: SLIME,
+      damage: 999,
+    });
+    expect((await forgedRejection).code).toBe('INVALID_PAYLOAD');
+
+    const protocolRejection = waitForMessage<CommandRejected>(room, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    room.send('combat.basicAttack', {
+      protocolVersion: 999,
+      commandId: randomUUID(),
+      clientSequence: 2,
+      targetId: SLIME,
+    });
+    expect((await protocolRejection).code).toBe('PROTOCOL_MISMATCH');
+
+    const hpBeforeCooldownProbe = monsterState(room, SLIME)?.hp;
+    const cooldownRejection = waitForMessage<CommandRejected>(room, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    room.send('skill.cast', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 3,
+      skillId: 'warrior_heavy_strike',
+      targetId: SLIME,
+    });
+    const cooldown = await cooldownRejection;
+    expect(cooldown.code).toBe('COOLDOWN');
+    expect(monsterState(room, SLIME)?.hp).toBe(hpBeforeCooldownProbe);
+  });
+
+  it('replays a duplicate command id without rolling a second hit', async () => {
+    const actor = await wildsActor();
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+
+    const command = {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetId: SLIME,
+    };
+    room.send('combat.basicAttack', command);
+    room.send('combat.basicAttack', command);
+
+    await waitUntil(
+      () => events.filter((event) => event.kind === 'hit' && event.targetId === SLIME).length >= 2,
+      3_000,
+      'duplicate delivery',
+    );
+    const hits = events.filter(
+      (event): event is Extract<CombatEvent, { kind: 'hit' }> =>
+        event.kind === 'hit' && event.targetId === SLIME,
+    );
+    expect(hits).toHaveLength(2);
+    expect(hits[0]?.eventId).toBe(hits[1]?.eventId);
+    expect(hits[0]?.targetHp).toBe(hits[1]?.targetHp);
+    await waitUntil(
+      () => monsterState(room, SLIME)?.hp === hits[0]?.targetHp,
+      2_000,
+      'deduplicated hp sync',
+    );
+  });
+
+  it('keeps one authoritative monster hp for two attackers', async () => {
+    const alice = await wildsActor();
+    const bob = await createActor(db, 'CombatBob', {
+      mapId: STARTER_WILDS_MAP_ID,
+      position: tileUnits({ x: 8, y: 15 }),
+    });
+    const aliceRoom = await createWorld(alice.ticket);
+    const bobRoom = await joinWorld(aliceRoom.roomId, bob.ticket);
+    const aliceEvents = collectCombatEvents(aliceRoom);
+    const bobEvents = collectCombatEvents(bobRoom);
+
+    await waitUntil(
+      () => aliceRoom.state.players.size === 2 && monsterState(aliceRoom, SLIME) !== undefined,
+      5_000,
+      'both players and slime visible',
+    );
+    expect(monsterState(bobRoom, SLIME)).toBeDefined();
+
+    aliceRoom.send('combat.basicAttack', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetId: SLIME,
+    });
+    await waitUntil(
+      () => aliceEvents.some((event) => event.kind === 'hit' && event.targetId === SLIME),
+      3_000,
+      'alice hit',
+    );
+    bobRoom.send('combat.basicAttack', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetId: SLIME,
+    });
+    await waitUntil(
+      () => bobEvents.some((event) => event.kind === 'hit' && event.targetId === SLIME),
+      3_000,
+      'bob hit',
+    );
+
+    const lastAliceHit = aliceEvents
+      .filter(
+        (event): event is Extract<CombatEvent, { kind: 'hit' }> =>
+          event.kind === 'hit' && event.targetId === SLIME,
+      )
+      .at(-1);
+    await waitUntil(
+      () =>
+        monsterState(aliceRoom, SLIME)?.hp === lastAliceHit?.targetHp &&
+        monsterState(bobRoom, SLIME)?.hp === lastAliceHit?.targetHp,
+      3_000,
+      'shared authoritative hp',
+    );
+    expect(monsterState(aliceRoom, SLIME)?.hp).toBeLessThan(50);
+  });
+
+  it('lets a monster chase and damage a player', async () => {
+    const actor = await wildsActor({ position: tileUnits({ x: 8, y: 15 }) });
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+
+    await waitUntil(
+      () => events.some((event) => event.kind === 'hit' && event.targetType === 'player'),
+      6_000,
+      'monster hit',
+    );
+    const hit = events.find(
+      (event): event is Extract<CombatEvent, { kind: 'hit' }> =>
+        event.kind === 'hit' && event.targetType === 'player',
+    );
+    expect(hit?.sourceType).toBe('monster');
+    await waitUntil(
+      () => room.state.players.get(actor.character.id)?.hp === hit?.targetHp,
+      2_000,
+      'player hp sync',
+    );
+    expect(room.state.players.get(actor.character.id)?.hp).toBeLessThan(120);
+  });
+
+  it('kills a monster and respawns it at the same spawn point', async () => {
+    const actor = await wildsActor();
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      if (events.some((event) => event.kind === 'death' && event.entityId === SLIME)) {
+        break;
+      }
+      const hitsBefore = events.filter(
+        (event) => event.kind === 'hit' && event.targetId === SLIME,
+      ).length;
+      room.send('combat.basicAttack', {
+        protocolVersion: PROTOCOL_VERSION,
+        commandId: randomUUID(),
+        clientSequence: attempt,
+        targetId: SLIME,
+      });
+      await waitUntil(
+        () =>
+          events.some((event) => event.kind === 'death' && event.entityId === SLIME) ||
+          events.filter((event) => event.kind === 'hit' && event.targetId === SLIME).length >
+            hitsBefore,
+        2_000,
+        `attack ${String(attempt)} resolved`,
+      );
+      if (events.some((event) => event.kind === 'death' && event.entityId === SLIME)) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 950));
+    }
+
+    await waitUntil(
+      () => monsterState(room, SLIME)?.state === MONSTER_STATE_CODES.dead,
+      5_000,
+      'monster death',
+    );
+    expect(monsterState(room, SLIME)?.hp).toBe(0);
+    expect(events.some((event) => event.kind === 'death' && event.entityId === SLIME)).toBe(true);
+
+    await waitUntil(
+      () => events.some((event) => event.kind === 'spawn' && event.entityId === SLIME),
+      5_000,
+      'monster respawn',
+    );
+    await waitUntil(() => monsterState(room, SLIME)?.hp === 50, 3_000, 'respawn hp');
+    // Players are still adjacent, so the respawned monster may already aggro.
+    expect(monsterState(room, SLIME)?.state).not.toBe(MONSTER_STATE_CODES.dead);
+    const spawnEvent = events.find((event) => event.kind === 'spawn' && event.entityId === SLIME);
+    expect(spawnEvent?.kind).toBe('spawn');
+    if (spawnEvent?.kind !== 'spawn') {
+      return;
+    }
+    expect(Math.floor(spawnEvent.x / 1_000)).toBe(SLIME_TILE.x);
+    expect(Math.floor(spawnEvent.y / 1_000)).toBe(SLIME_TILE.y);
+  });
+
+  it('respawns a defeated player at the map spawn point', async () => {
+    const actor = await wildsActor({ position: tileUnits({ x: 8, y: 15 }), hp: 5 });
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+
+    await waitUntil(
+      () => events.some((event) => event.kind === 'death' && event.entityId === actor.character.id),
+      10_000,
+      'player death',
+    );
+    await waitUntil(
+      () => room.state.players.get(actor.character.id)?.alive === false,
+      2_000,
+      'dead state sync',
+    );
+
+    await waitUntil(
+      () =>
+        events.some((event) => event.kind === 'respawn' && event.entityId === actor.character.id),
+      5_000,
+      'player respawn',
+    );
+    await waitUntil(
+      () => room.state.players.get(actor.character.id)?.alive === true,
+      3_000,
+      'alive',
+    );
+    const revived = room.state.players.get(actor.character.id);
+    expect(revived?.hp).toBe(120);
+    expect(Math.floor((revived?.x ?? 0) / 1_000)).toBe(2);
+    expect(Math.floor((revived?.y ?? 0) / 1_000)).toBe(16);
+  });
+});

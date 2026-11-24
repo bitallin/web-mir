@@ -18,6 +18,7 @@
     "@web-legend/auth": "workspace:*",
     "@web-legend/config": "workspace:*",
     "@web-legend/contracts": "workspace:*",
+    "@web-legend/game-domain": "workspace:*",
     "@web-legend/game-simulation": "workspace:*",
     "@web-legend/map-runtime": "workspace:*",
     "@web-legend/observability": "workspace:*",

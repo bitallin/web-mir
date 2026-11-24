@@ -266,6 +266,9 @@ async function main(): Promise<void> {
       room.onMessage('command.rejected', () => {
         rejected += 1;
       });
+      // Load clients only measure movement, but the server sends a profile on
+      // join; consume it so the SDK does not warn about an unhandled message.
+      room.onMessage('combat.profile', () => undefined);
     }
 
     const startedAt = Date.now();

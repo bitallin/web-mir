@@ -18,6 +18,10 @@ export type RoomMetricsSnapshot = {
   rejectionsByCode: Record<string, number>;
   chatMessages: number;
   transfers: number;
+  combatCommands: number;
+  combatEvents: number;
+  monsterKills: number;
+  playerDeaths: number;
   tick: TickStats;
 };
 
@@ -40,6 +44,10 @@ export class RoomMetrics {
   private rejectedCommands = 0;
   private chatMessages = 0;
   private transfers = 0;
+  private combatCommands = 0;
+  private combatEvents = 0;
+  private monsterKills = 0;
+  private playerDeaths = 0;
   private readonly rejectionsByCode = new Map<string, number>();
 
   constructor(
@@ -71,6 +79,22 @@ export class RoomMetrics {
     this.transfers += 1;
   }
 
+  recordCombatCommand(): void {
+    this.combatCommands += 1;
+  }
+
+  recordCombatEvents(count: number): void {
+    this.combatEvents += count;
+  }
+
+  recordMonsterKill(): void {
+    this.monsterKills += 1;
+  }
+
+  recordPlayerDeath(): void {
+    this.playerDeaths += 1;
+  }
+
   setPlayers(count: number): void {
     this.players = count;
   }
@@ -95,6 +119,10 @@ export class RoomMetrics {
       rejectionsByCode: Object.fromEntries(this.rejectionsByCode),
       chatMessages: this.chatMessages,
       transfers: this.transfers,
+      combatCommands: this.combatCommands,
+      combatEvents: this.combatEvents,
+      monsterKills: this.monsterKills,
+      playerDeaths: this.playerDeaths,
       tick: this.tickStats(),
     };
   }
@@ -110,6 +138,10 @@ export type MetricsSnapshot = {
     rejectedCommands: number;
     chatMessages: number;
     transfers: number;
+    combatCommands: number;
+    combatEvents: number;
+    monsterKills: number;
+    playerDeaths: number;
   };
   timestamp: string;
 };
@@ -121,6 +153,10 @@ export class MetricsRegistry {
   private rejectedCommands = 0;
   private chatMessages = 0;
   private transfers = 0;
+  private combatCommands = 0;
+  private combatEvents = 0;
+  private monsterKills = 0;
+  private playerDeaths = 0;
 
   register(roomId: string): RoomMetrics {
     const metrics = new RoomMetrics(roomId);
@@ -139,6 +175,10 @@ export class MetricsRegistry {
     this.rejectedCommands += snapshot.rejectedCommands;
     this.chatMessages += snapshot.chatMessages;
     this.transfers += snapshot.transfers;
+    this.combatCommands += snapshot.combatCommands;
+    this.combatEvents += snapshot.combatEvents;
+    this.monsterKills += snapshot.monsterKills;
+    this.playerDeaths += snapshot.playerDeaths;
     this.rooms.delete(roomId);
   }
 
@@ -151,6 +191,10 @@ export class MetricsRegistry {
     const activeRejected = rooms.reduce((total, room) => total + room.rejectedCommands, 0);
     const activeChat = rooms.reduce((total, room) => total + room.chatMessages, 0);
     const activeTransfers = rooms.reduce((total, room) => total + room.transfers, 0);
+    const activeCombatCommands = rooms.reduce((total, room) => total + room.combatCommands, 0);
+    const activeCombatEvents = rooms.reduce((total, room) => total + room.combatEvents, 0);
+    const activeMonsterKills = rooms.reduce((total, room) => total + room.monsterKills, 0);
+    const activePlayerDeaths = rooms.reduce((total, room) => total + room.playerDeaths, 0);
 
     return {
       service: 'game-server',
@@ -162,6 +206,10 @@ export class MetricsRegistry {
         rejectedCommands: this.rejectedCommands + activeRejected,
         chatMessages: this.chatMessages + activeChat,
         transfers: this.transfers + activeTransfers,
+        combatCommands: this.combatCommands + activeCombatCommands,
+        combatEvents: this.combatEvents + activeCombatEvents,
+        monsterKills: this.monsterKills + activeMonsterKills,
+        playerDeaths: this.playerDeaths + activePlayerDeaths,
       },
       timestamp: new Date().toISOString(),
     };

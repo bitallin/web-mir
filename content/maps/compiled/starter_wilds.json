@@ -259,8 +259,40 @@
         "x": 32,
         "y": 22
       }
+    },
+    {
+      "id": "wilds_slime_2",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 7,
+        "y": 15
+      }
+    },
+    {
+      "id": "wilds_slime_3",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 11,
+        "y": 20
+      }
+    },
+    {
+      "id": "wilds_wolf_2",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 28,
+        "y": 19
+      }
+    },
+    {
+      "id": "wilds_wolf_3",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 35,
+        "y": 24
+      }
     }
   ],
   "assetManifestVersion": "phase3.1",
-  "checksum": "4d87d032eabf642673e316fefe4ad15bdf0d3e8d10baa55e16c1d087b5ddf6fc"
+  "checksum": "675cfc7cb9a24548e333d76d5b74100587e93de5349f99abc4cc66db8bea0700"
 }

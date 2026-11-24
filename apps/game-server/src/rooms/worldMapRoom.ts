@@ -8,19 +8,28 @@ import {
   DEFAULT_PATCH_RATE_MS,
   DEFAULT_TICK_HZ,
   FACING,
+  MONSTER_STATE_CODES,
   PLAYER_SPEED_UNITS_PER_SECOND,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
   TILE_UNITS,
+  characterClassSchema,
   chatMessageSchema,
   chatSendSchema,
+  combatBasicAttackSchema,
+  combatEventSchema,
+  combatProfileSchema,
   commandAckSchema,
   commandRejectedSchema,
   moveToCommandSchema,
   sessionTransferSchema,
+  skillCastSchema,
   tilePointSchema,
   worldJoinOptionsSchema,
   type ChatMessage,
+  type CombatEvent,
+  type CombatEventPayload,
+  type CombatProfile,
   type CommandAck,
   type CommandRejected,
   type CommandRejectionCode,
@@ -30,11 +39,14 @@ import {
   type TilePoint,
 } from '@web-legend/contracts';
 import {
+  MonsterState,
   PlayerState,
   WorldState,
+  type MonsterStateInstance,
   type PlayerStateInstance,
   type WorldStateInstance,
 } from '@web-legend/contracts/world-state';
+import { CombatWorld, type CombatCommandResult } from '@web-legend/game-domain';
 import {
   DEFAULT_INTEREST,
   InterestManager,
@@ -60,6 +72,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import type { MetricsRegistry, RoomMetrics } from '../metrics';
+import { createCombatRng } from '../world/combatRng';
 import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket, type TokenBucket } from '../world/rateLimiter';
 
@@ -79,6 +92,10 @@ export type WorldMapRoomOptions = {
   checkpointIntervalMs?: number;
   interestCellSize?: number;
   interestRadiusCells?: number;
+  /** Deterministic in tests; production defaults to a crypto-seeded RNG. */
+  combatRng?: () => number;
+  monsterRespawnMs?: number;
+  playerRespawnMs?: number;
 };
 
 const DEFAULT_RECONNECT_GRACE_SECONDS = 15;
@@ -103,6 +120,8 @@ const authDataSchema = z.object({
   characterId: z.uuid(),
   realmId: z.uuid(),
   displayName: z.string().min(1).max(32),
+  classId: characterClassSchema,
+  level: z.number().int().min(1),
   mapId: z.string().min(1),
   x: z.number().int().nonnegative(),
   y: z.number().int().nonnegative(),
@@ -123,6 +142,7 @@ type SessionRecord = {
   rateBucket: TokenBucket;
   chatBucket: TokenBucket;
   recentChatIds: Set<string>;
+  recentCombat: Map<string, CombatEvent[]>;
   hp: number;
   mp: number;
   transferring: boolean;
@@ -192,6 +212,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private metrics!: RoomMetrics;
   private map!: MapInstance;
   private simulation!: WorldSimulation;
+  private combat!: CombatWorld;
   private interest!: InterestManager;
   private runner!: FixedStepRunner;
   private tick = 0;
@@ -207,6 +228,40 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       cellSize: options.interestCellSize ?? DEFAULT_INTEREST.cellSize,
       radiusCells: options.interestRadiusCells ?? DEFAULT_INTEREST.radiusCells,
     });
+
+    const respawnTile = this.map.runtime.manifest.spawnPoints[0];
+    if (respawnTile === undefined) {
+      throw new Error(`map "${this.map.mapId}" has no spawn point for combat respawn`);
+    }
+    this.combat = new CombatWorld({
+      spawns: this.map.runtime.manifest.monsterSpawns,
+      grid: this.map.runtime.grid,
+      pathfinder: findPath,
+      rng: options.combatRng ?? createCombatRng(),
+      playerRespawnTile: respawnTile,
+      ...(options.monsterRespawnMs === undefined
+        ? {}
+        : { monsterRespawnMs: options.monsterRespawnMs }),
+      ...(options.playerRespawnMs === undefined
+        ? {}
+        : { playerRespawnMs: options.playerRespawnMs }),
+    });
+    for (const monster of this.combat.listMonsters()) {
+      const monsterState = new MonsterState();
+      monsterState.monsterId = monster.id;
+      monsterState.templateId = monster.templateId;
+      monsterState.displayName = monster.displayName;
+      monsterState.level = monster.level;
+      monsterState.x = monster.x;
+      monsterState.y = monster.y;
+      monsterState.facing = monster.facing;
+      monsterState.hp = monster.hp;
+      monsterState.maxHp = monster.maxHp;
+      monsterState.state = MONSTER_STATE_CODES[monster.state];
+      this.state.monsters.set(monster.id, monsterState);
+      this.interest.add(monster.id, tileOfUnits(monster));
+    }
+
     this.metrics = options.metrics.register(this.roomId);
 
     const tickHz = options.tickHz ?? DEFAULT_TICK_HZ;
@@ -237,6 +292,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.chatSend, (client, message) => {
       this.handleChat(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.combatBasicAttack, (client, message) => {
+      this.handleBasicAttack(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.skillCast, (client, message) => {
+      this.handleSkillCast(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
@@ -253,6 +314,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         tickHz,
         patchRateMs,
         serverId: options.serverId,
+        monsters: this.state.monsters.size,
       },
       'world map room created',
     );
@@ -290,7 +352,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       throw new ServerError(ErrorCode.AUTH_FAILED, '该角色正在另一台设备上游戏');
     }
 
-    const spawn = this.resolveSpawn(auth);
+    // A character that was last checkpointed at 0 HP re-enters at a spawn point
+    // with full vitals; combat never persists a dead character in place.
+    const needsRevival = auth.hp <= 0;
+    const spawn: { tile: TilePoint; position?: { x: number; y: number } } = needsRevival
+      ? { tile: this.pickSpawnPoint() }
+      : this.resolveSpawn(auth);
     this.simulation.addPlayer({
       id: auth.characterId,
       displayName: auth.displayName,
@@ -300,18 +367,45 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       facing: toFacing(auth.facing),
     });
 
+    const position = this.simulation.getPlayer(auth.characterId);
+    try {
+      this.combat.addPlayer({
+        id: auth.characterId,
+        displayName: auth.displayName,
+        classId: auth.classId,
+        level: auth.level,
+        hp: needsRevival ? auth.maxHp : auth.hp,
+        mp: needsRevival ? auth.maxMp : auth.mp,
+        x: position?.x ?? 0,
+        y: position?.y ?? 0,
+      });
+    } catch (error) {
+      this.simulation.removePlayer(auth.characterId);
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, characterId: auth.characterId },
+        'failed to initialize combat state',
+      );
+      throw new ServerError(ErrorCode.AUTH_FAILED, '角色战斗状态初始化失败');
+    }
+    const combatPlayer = this.combat.getPlayer(auth.characterId);
+    if (combatPlayer === undefined || position === undefined) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '角色战斗状态初始化失败');
+    }
+
     const player = new PlayerState();
     player.playerId = auth.characterId;
     player.displayName = auth.displayName;
+    player.classId = auth.classId;
+    player.level = auth.level;
     player.colorIndex = colorIndexFor(auth.characterId);
-    player.hp = auth.hp;
-    player.maxHp = auth.maxHp;
-    player.mp = auth.mp;
-    player.maxMp = auth.maxMp;
-    const position = this.simulation.getPlayer(auth.characterId);
-    player.x = position?.x ?? 0;
-    player.y = position?.y ?? 0;
-    player.facing = position?.facing ?? 0;
+    player.hp = combatPlayer.hp;
+    player.maxHp = combatPlayer.maxHp;
+    player.mp = combatPlayer.mp;
+    player.maxMp = combatPlayer.maxMp;
+    player.alive = combatPlayer.alive;
+    player.x = position.x;
+    player.y = position.y;
+    player.facing = position.facing;
     this.state.players.set(auth.characterId, player);
     this.state.playerCount = this.state.players.size;
 
@@ -334,8 +428,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         startMs: Date.now(),
       }),
       recentChatIds: new Set(),
-      hp: auth.hp,
-      mp: auth.mp,
+      recentCombat: new Map(),
+      hp: combatPlayer.hp,
+      mp: combatPlayer.mp,
       transferring: false,
       transferTargetMapId: null,
       checkpointing: false,
@@ -350,6 +445,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const affected = this.interest.add(auth.characterId, spawn.tile);
     this.refreshViews(affected);
     this.metrics.setPlayers(this.state.players.size);
+    // Deferred so the profile is delivered after the join handshake; a message
+    // sent inside onJoin can otherwise race the client's listener registration.
+    this.clock.setTimeout(() => {
+      const session = this.sessions.get(client.sessionId);
+      if (session !== undefined) {
+        this.sendProfile(session.client, session.playerId);
+      }
+    }, 50);
 
     this.options.logger.info(
       {
@@ -376,7 +479,16 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     session.lastSequence = -1;
     session.recentAcks.clear();
     session.recentChatIds.clear();
+    session.recentCombat.clear();
     this.setConnected(session.playerId, true);
+    this.combat.setPlayerTargetable(session.playerId, true);
+    const playerId = session.playerId;
+    this.clock.setTimeout(() => {
+      const current = this.sessions.get(client.sessionId);
+      if (current !== undefined) {
+        this.sendProfile(current.client, playerId);
+      }
+    }, 50);
 
     if (session.transferring && session.transferTargetMapId !== null) {
       this.sendTransfer(client, session.transferTargetMapId);
@@ -400,6 +512,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     this.setConnected(session.playerId, false);
     this.simulation.clearPath(session.playerId);
+    // A dropped player must not be killed by monsters during the grace window.
+    this.combat.setPlayerTargetable(session.playerId, false);
 
     try {
       await this.allowReconnection(
@@ -407,6 +521,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.options.reconnectGraceSeconds ?? DEFAULT_RECONNECT_GRACE_SECONDS,
       );
       this.setConnected(session.playerId, true);
+      this.combat.setPlayerTargetable(session.playerId, true);
     } catch {
       await this.removeSession(client.sessionId);
     }
@@ -467,6 +582,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       characterId: character.id,
       realmId: character.realmId,
       displayName: character.name,
+      classId: character.classId,
+      level: character.level,
       mapId: character.mapId,
       x: character.x,
       y: character.y,
@@ -528,7 +645,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           return;
         }
         const player = this.simulation.getPlayer(session.playerId);
-        if (player === undefined) {
+        const combatPlayer = this.combat.getPlayer(session.playerId);
+        if (player === undefined || combatPlayer === undefined) {
           return;
         }
         session.checkpointing = true;
@@ -539,8 +657,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
             x: player.x,
             y: player.y,
             facing: player.facing,
-            hp: session.hp,
-            mp: session.mp,
+            hp: combatPlayer.hp,
+            mp: combatPlayer.mp,
           });
         } catch (error) {
           this.options.logger.error(
@@ -559,13 +677,25 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.state.serverTick = this.tick;
     this.tick += 1;
 
-    this.simulation.step(1_000 / this.state.tickHz);
+    const stepMs = 1_000 / this.state.tickHz;
+    this.simulation.step(stepMs);
+
+    const positions = new Map(
+      this.simulation.listPlayers().map((player) => [player.id, { x: player.x, y: player.y }]),
+    );
+    const combatEvents = this.combat.step(stepMs, positions);
+    this.applyCombatEvents(combatEvents);
+
     this.syncPlayers();
+    this.syncMonsters();
 
     for (const player of this.simulation.listPlayers()) {
       const sessionId = this.sessionByPlayer.get(player.id);
       const session = sessionId === undefined ? undefined : this.sessions.get(sessionId);
       if (session === undefined || session.transferring) {
+        continue;
+      }
+      if (this.combat.getPlayer(player.id)?.alive === false) {
         continue;
       }
       const portal = this.map.runtime.portalAt(tileOfUnits(player));
@@ -587,16 +717,85 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.metrics.recordTick(performance.now() - started);
   }
 
+  private applyCombatEvents(events: readonly CombatEventPayload[]): void {
+    for (const event of events) {
+      if (event.kind === 'death' && event.entityType === 'player') {
+        this.simulation.clearPath(event.entityId);
+      } else if (event.kind === 'respawn') {
+        try {
+          this.simulation.setPosition(event.entityId, { x: event.x, y: event.y });
+        } catch (error) {
+          this.options.logger.error(
+            { err: error, roomId: this.roomId, characterId: event.entityId },
+            'failed to move respawned player',
+          );
+        }
+        const affected = this.interest.move(event.entityId, {
+          x: Math.floor(event.x / TILE_UNITS),
+          y: Math.floor(event.y / TILE_UNITS),
+        });
+        if (affected.length > 0) {
+          this.refreshViews(affected);
+        }
+      }
+    }
+
+    this.recordCombatOutcomes(events);
+
+    if (events.length === 0) {
+      return;
+    }
+    const wireEvents = this.toWireEvents(events);
+    for (const event of wireEvents) {
+      this.broadcast(SERVER_MESSAGES.combatEvent, event);
+    }
+    this.metrics.recordCombatEvents(wireEvents.length);
+  }
+
   private syncPlayers(): void {
     for (const player of this.simulation.listPlayers()) {
       const statePlayer = this.state.players.get(player.id);
-      if (statePlayer === undefined) {
+      const combatPlayer = this.combat.getPlayer(player.id);
+      if (statePlayer === undefined || combatPlayer === undefined) {
         continue;
       }
       statePlayer.x = player.x;
       statePlayer.y = player.y;
       statePlayer.facing = player.facing;
-      statePlayer.moving = player.moving;
+      statePlayer.moving = combatPlayer.alive && player.moving;
+      statePlayer.hp = combatPlayer.hp;
+      statePlayer.maxHp = combatPlayer.maxHp;
+      statePlayer.mp = combatPlayer.mp;
+      statePlayer.maxMp = combatPlayer.maxMp;
+      statePlayer.alive = combatPlayer.alive;
+
+      const sessionId = this.sessionByPlayer.get(player.id);
+      const session = sessionId === undefined ? undefined : this.sessions.get(sessionId);
+      if (session !== undefined) {
+        session.hp = combatPlayer.hp;
+        session.mp = combatPlayer.mp;
+      }
+    }
+  }
+
+  private syncMonsters(): void {
+    for (const monster of this.combat.listMonsters()) {
+      const stateMonster = this.state.monsters.get(monster.id);
+      if (stateMonster === undefined) {
+        continue;
+      }
+      stateMonster.x = monster.x;
+      stateMonster.y = monster.y;
+      stateMonster.facing = monster.facing;
+      stateMonster.hp = monster.hp;
+      stateMonster.maxHp = monster.maxHp;
+      stateMonster.moving = monster.moving;
+      stateMonster.state = MONSTER_STATE_CODES[monster.state];
+
+      const affected = this.interest.move(monster.id, tileOfUnits(monster));
+      if (affected.length > 0) {
+        this.refreshViews(affected);
+      }
     }
   }
 
@@ -621,9 +820,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         if (session.visible.has(visibleId)) {
           continue;
         }
-        const statePlayer = this.state.players.get(visibleId);
-        if (statePlayer !== undefined) {
-          session.view.add(statePlayer);
+        const entity = this.stateEntity(visibleId);
+        if (entity !== undefined) {
+          session.view.add(entity);
           session.visible.add(visibleId);
         }
       }
@@ -631,13 +830,17 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         if (desired.has(visibleId)) {
           continue;
         }
-        const statePlayer = this.state.players.get(visibleId);
-        if (statePlayer !== undefined) {
-          session.view.remove(statePlayer);
+        const entity = this.stateEntity(visibleId);
+        if (entity !== undefined) {
+          session.view.remove(entity);
         }
         session.visible.delete(visibleId);
       }
     }
+  }
+
+  private stateEntity(entityId: string): PlayerStateInstance | MonsterStateInstance | undefined {
+    return this.state.players.get(entityId) ?? this.state.monsters.get(entityId);
   }
 
   private async beginTransfer(
@@ -646,6 +849,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     player: { facing: Facing },
   ): Promise<void> {
     const target = tileCenter(portal.targetTile);
+    const combatPlayer = this.combat.getPlayer(session.playerId);
     try {
       await saveCharacterTransfer(this.options.database, {
         characterId: session.playerId,
@@ -653,8 +857,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         x: target.x,
         y: target.y,
         facing: player.facing,
-        hp: session.hp,
-        mp: session.mp,
+        hp: combatPlayer?.hp ?? session.hp,
+        mp: combatPlayer?.mp ?? session.mp,
       });
       await releaseCharacterLease(
         this.options.database,
@@ -679,6 +883,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const affected = this.interest.remove(session.playerId);
     this.refreshViews(affected);
     this.simulation.removePlayer(session.playerId);
+    this.combat.removePlayer(session.playerId);
     this.state.players.delete(session.playerId);
     this.state.playerCount = this.state.players.size;
     this.metrics.setPlayers(this.state.players.size);
@@ -763,6 +968,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       );
       return;
     }
+    if (this.combat.getPlayer(session.playerId)?.alive === false) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'PLAYER_DEAD',
+      );
+      return;
+    }
 
     const target: TilePoint = { x: command.targetTileX, y: command.targetTileY };
     if (!this.map.runtime.isWalkable(target.x, target.y)) {
@@ -808,6 +1021,154 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     client.send(SERVER_MESSAGES.commandAck, commandAckSchema.parse(ack));
     this.metrics.recordAcceptedCommand();
+  }
+
+  private handleBasicAttack(client: Client, raw: unknown): void {
+    const parsed = combatBasicAttackSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    this.runCombatCommand(client, command, (playerId) =>
+      this.combat.basicAttack(playerId, command.targetId),
+    );
+  }
+
+  private handleSkillCast(client: Client, raw: unknown): void {
+    const parsed = skillCastSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    this.runCombatCommand(client, command, (playerId) =>
+      this.combat.castSkill(playerId, command.skillId, command.targetId),
+    );
+  }
+
+  /**
+   * Shared combat command pipeline: session/protocol validation, idempotent
+   * replay, sequence and rate limits, then the authoritative domain call. A
+   * duplicate command id resends the original events instead of re-rolling.
+   */
+  private runCombatCommand(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+    execute: (playerId: string) => CombatCommandResult,
+  ): void {
+    const session = this.sessions.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, {}, 'INVALID_SESSION');
+      return;
+    }
+    if (session.transferring) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'INVALID_SESSION',
+      );
+      return;
+    }
+    if (command.protocolVersion !== PROTOCOL_VERSION) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'PROTOCOL_MISMATCH',
+      );
+      return;
+    }
+
+    const cached = session.recentCombat.get(command.commandId);
+    if (cached !== undefined) {
+      for (const event of cached) {
+        client.send(SERVER_MESSAGES.combatEvent, event);
+      }
+      return;
+    }
+
+    if (command.clientSequence <= session.lastSequence) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'STALE_SEQUENCE',
+      );
+      return;
+    }
+    if (!session.rateBucket.take(Date.now())) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'RATE_LIMITED',
+      );
+      return;
+    }
+
+    const result = execute(session.playerId);
+    if (!result.accepted) {
+      const rejection = result.rejection;
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        rejection?.code ?? 'INVALID_TARGET',
+        {
+          ...(rejection?.message === undefined ? {} : { message: rejection.message }),
+          ...(rejection?.retryAfterMs === undefined
+            ? {}
+            : { retryAfterMs: rejection.retryAfterMs }),
+        },
+      );
+      return;
+    }
+
+    session.lastSequence = command.clientSequence;
+    const wireEvents = this.toWireEvents(result.events);
+    session.recentCombat.set(command.commandId, wireEvents);
+    if (session.recentCombat.size > RECENT_COMMAND_WINDOW) {
+      const oldest = session.recentCombat.keys().next();
+      if (!oldest.done) {
+        session.recentCombat.delete(oldest.value);
+      }
+    }
+    for (const event of wireEvents) {
+      this.broadcast(SERVER_MESSAGES.combatEvent, event);
+    }
+    this.recordCombatOutcomes(result.events);
+    this.metrics.recordCombatCommand();
+    this.metrics.recordCombatEvents(wireEvents.length);
+    this.metrics.recordAcceptedCommand();
+  }
+
+  private recordCombatOutcomes(events: readonly CombatEventPayload[]): void {
+    for (const event of events) {
+      if (event.kind !== 'death') {
+        continue;
+      }
+      if (event.entityType === 'monster') {
+        this.metrics.recordMonsterKill();
+      } else {
+        this.metrics.recordPlayerDeath();
+      }
+    }
+  }
+
+  private toWireEvents(events: readonly CombatEventPayload[]): CombatEvent[] {
+    return events.map((payload) =>
+      combatEventSchema.parse({
+        ...payload,
+        eventId: randomUUID(),
+        serverTime: Date.now(),
+      }),
+    );
+  }
+
+  private sendProfile(client: Client, playerId: string): void {
+    const profile = this.combat.getProfile(playerId);
+    if (profile === undefined) {
+      return;
+    }
+    const message: CombatProfile = { characterId: playerId, ...profile };
+    client.send(SERVER_MESSAGES.combatProfile, combatProfileSchema.parse(message));
   }
 
   private handleChat(client: Client, raw: unknown): void {
@@ -869,13 +1230,15 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     client: Client,
     meta: { commandId?: string; clientSequence?: number },
     code: CommandRejectionCode,
+    options: { message?: string; retryAfterMs?: number } = {},
   ): void {
     const rejection: CommandRejected = {
       code,
-      message: COMMAND_REJECTION_MESSAGES[code],
+      message: options.message ?? COMMAND_REJECTION_MESSAGES[code],
       serverTime: Date.now(),
       ...(meta.commandId === undefined ? {} : { commandId: meta.commandId }),
       ...(meta.clientSequence === undefined ? {} : { clientSequence: meta.clientSequence }),
+      ...(options.retryAfterMs === undefined ? {} : { retryAfterMs: options.retryAfterMs }),
     };
 
     client.send(SERVER_MESSAGES.commandRejected, commandRejectedSchema.parse(rejection));
@@ -920,12 +1283,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     const player = this.simulation.getPlayer(session.playerId);
+    const combatPlayer = this.combat.getPlayer(session.playerId);
     this.sessions.delete(sessionId);
     this.sessionByPlayer.delete(session.playerId);
 
     const affected = this.interest.remove(session.playerId);
     this.refreshViews(affected);
     this.simulation.removePlayer(session.playerId);
+    this.combat.removePlayer(session.playerId);
     this.state.players.delete(session.playerId);
     this.state.playerCount = this.state.players.size;
     this.metrics.setPlayers(this.state.players.size);
@@ -941,8 +1306,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
             x: player.x,
             y: player.y,
             facing: player.facing,
-            hp: session.hp,
-            mp: session.mp,
+            hp: combatPlayer?.hp ?? session.hp,
+            mp: combatPlayer?.mp ?? session.mp,
           });
         } catch (error) {
           this.options.logger.error(

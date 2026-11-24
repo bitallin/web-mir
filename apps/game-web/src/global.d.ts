@@ -16,11 +16,16 @@ declare global {
       currentMapId: () => string;
       /** Test-only input hook: submits the same intent a ground click sends. */
       moveToTile: (tileX: number, tileY: number) => boolean;
+      attackMonster: (monsterId: string) => boolean;
+      castSkill: (skillId: string, targetId: string) => boolean;
+      monsterScreenPoint: (monsterId: string) => { x: number; y: number } | null;
       /** Diagnostics for the E2E visibility measurement. */
       lastMoveIntentAt?: number;
       lastAckAt?: number;
       lastSnapshotAt?: number;
       lastMovingSnapshotAt?: number;
+      lastAttackIntentAt?: number;
+      lastCombatEventAt?: number;
     };
   }
 }

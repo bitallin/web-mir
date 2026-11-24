@@ -13,11 +13,14 @@ export const PlayerState = schema(
   {
     playerId: t.string(),
     displayName: t.string(),
+    classId: t.string().default('warrior'),
+    level: t.uint16().default(1),
     x: t.number().default(0),
     y: t.number().default(0),
     facing: t.uint8().default(0),
     moving: t.boolean().default(false),
     connected: t.boolean().default(true),
+    alive: t.boolean().default(true),
     colorIndex: t.uint8().default(0),
     hp: t.number().default(0),
     maxHp: t.number().default(1),
@@ -28,6 +31,31 @@ export const PlayerState = schema(
 );
 
 export type PlayerStateInstance = InstanceType<typeof PlayerState>;
+
+/**
+ * Public monster state for one fixed map spawn. `monsterId` is the spawn id
+ * from the compiled map and stays stable across respawns, so the client can
+ * keep a corpse slot and the server can reuse the same AOI cell identity.
+ */
+export const MonsterState = schema(
+  {
+    monsterId: t.string(),
+    templateId: t.string(),
+    displayName: t.string(),
+    level: t.uint16().default(1),
+    x: t.number().default(0),
+    y: t.number().default(0),
+    facing: t.uint8().default(0),
+    moving: t.boolean().default(false),
+    hp: t.number().default(0),
+    maxHp: t.number().default(1),
+    /** Encoded by `MONSTER_STATE_CODES` in `contracts/combat`. */
+    state: t.uint8().default(0),
+  },
+  'MonsterState',
+);
+
+export type MonsterStateInstance = InstanceType<typeof MonsterState>;
 
 export const WorldState = schema(
   {
@@ -40,6 +68,8 @@ export const WorldState = schema(
     // `.view()` makes the collection filterable: each client receives only the
     // PlayerState instances its AOI StateView was given (ADR-018).
     players: t.map(PlayerState).view(),
+    // Monsters share the same AOI cells and view filtering (ADR-019).
+    monsters: t.map(MonsterState).view(),
   },
   'WorldState',
 );

@@ -12,10 +12,15 @@ declare global {
       leaveWorld: () => Promise<void>;
       currentMapId: () => string;
       moveToTile: (tileX: number, tileY: number) => boolean;
+      attackMonster: (monsterId: string) => boolean;
+      castSkill: (skillId: string, targetId: string) => boolean;
+      monsterScreenPoint: (monsterId: string) => { x: number; y: number } | null;
       lastMoveIntentAt?: number;
       lastAckAt?: number;
       lastSnapshotAt?: number;
       lastMovingSnapshotAt?: number;
+      lastAttackIntentAt?: number;
+      lastCombatEventAt?: number;
     };
   }
 }

@@ -24,6 +24,8 @@ const serverPackages = [
   '@web-legend/testkit/*',
   '@web-legend/game-simulation',
   '@web-legend/game-simulation/*',
+  '@web-legend/game-domain',
+  '@web-legend/game-domain/*',
   '@web-legend/map-runtime',
   '@web-legend/map-runtime/*',
 ];
@@ -145,6 +147,41 @@ export default tseslint.config(
         'error',
         {
           patterns: [{ group: apps, message: 'Packages must never depend on applications.' }],
+        },
+      ],
+    },
+  },
+  {
+    // The combat domain must stay independent of simulation, persistence and
+    // adapters; grid, pathfinder and RNG are injected instead (ADR-019).
+    files: ['packages/game-domain/src/**/*.ts'],
+    ignores: ['packages/game-domain/src/**/*.test.ts', 'packages/game-domain/src/testSupport.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@web-legend/game-simulation',
+                '@web-legend/game-simulation/*',
+                '@web-legend/map-runtime',
+                '@web-legend/map-runtime/*',
+                '@web-legend/persistence',
+                '@web-legend/persistence/*',
+                '@web-legend/auth',
+                '@web-legend/auth/*',
+                '@web-legend/config',
+                '@web-legend/config/*',
+                '@web-legend/observability',
+                '@web-legend/observability/*',
+                '@web-legend/testkit',
+                '@web-legend/testkit/*',
+              ],
+              message: 'game-domain depends only on contracts; inject adapters at the call site.',
+            },
+            { group: apps, message: 'Packages must never depend on applications.' },
+          ],
         },
       ],
     },

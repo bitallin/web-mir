@@ -1,4 +1,10 @@
-import type { CharacterView, ChatMessage, TilePoint } from '@web-legend/contracts';
+import type {
+  CharacterView,
+  ChatMessage,
+  CombatEvent,
+  CombatProfile,
+  TilePoint,
+} from '@web-legend/contracts';
 import type Phaser from 'phaser';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
@@ -6,11 +12,23 @@ import { createWorldGame } from '../game/createWorldGame';
 import { mapBundleFor } from '../game/mapCatalog';
 import { WorldBridge } from '../game/worldBridge';
 import { loadRoomPreference } from '../lib/identity';
-import { WorldClient, type ConnectionStatus, type PlayerView } from '../net/worldClient';
+import {
+  WorldClient,
+  type ConnectionStatus,
+  type MonsterView,
+  type PlayerView,
+} from '../net/worldClient';
 
 export type SessionNotice = {
   kind: 'info' | 'warning' | 'error';
   message: string;
+  at: number;
+};
+
+export type CombatLogEntry = {
+  id: string;
+  text: string;
+  tone: 'self' | 'other' | 'system';
   at: number;
 };
 
@@ -20,6 +38,7 @@ export type SessionState = {
   mapId: string;
   instanceId: string;
   players: PlayerView[];
+  monsters: MonsterView[];
   selfId: string;
   latencyMs: number | null;
   commandCount: number;
@@ -27,6 +46,10 @@ export type SessionState = {
   roomId: string | null;
   roomPlayerCount: number;
   messages: ChatMessage[];
+  combatProfile: CombatProfile | null;
+  combatLog: CombatLogEntry[];
+  selectedTargetId: string | null;
+  skillCooldowns: Record<string, number>;
   notice: SessionNotice | null;
 };
 
@@ -36,6 +59,7 @@ export type WorldSessionOptions = {
 };
 
 const MAX_CHAT_MESSAGES = 120;
+const MAX_COMBAT_LOG = 12;
 
 function initialState(character: CharacterView): SessionState {
   return {
@@ -44,6 +68,7 @@ function initialState(character: CharacterView): SessionState {
     mapId: character.mapId,
     instanceId: '1',
     players: [],
+    monsters: [],
     selfId: character.id,
     latencyMs: null,
     commandCount: 0,
@@ -51,8 +76,84 @@ function initialState(character: CharacterView): SessionState {
     roomId: null,
     roomPlayerCount: 0,
     messages: [],
+    combatProfile: null,
+    combatLog: [],
+    selectedTargetId: null,
+    skillCooldowns: {},
     notice: null,
   };
+}
+
+function entityName(state: Pick<SessionState, 'players' | 'monsters'>, entityId: string): string {
+  const player = state.players.find((candidate) => candidate.playerId === entityId);
+  if (player !== undefined) {
+    return player.displayName;
+  }
+  const monster = state.monsters.find((candidate) => candidate.monsterId === entityId);
+  return monster?.displayName ?? '目标';
+}
+
+function combatLogFor(
+  state: SessionState,
+  event: CombatEvent,
+  characterId: string,
+): CombatLogEntry | null {
+  const tone = (id: string): CombatLogEntry['tone'] => (id === characterId ? 'self' : 'other');
+  const name = (id: string): string => entityName(state, id);
+  const entry = (text: string, kind: CombatLogEntry['tone']): CombatLogEntry => ({
+    id: event.eventId,
+    text,
+    tone: kind,
+    at: Date.now(),
+  });
+
+  switch (event.kind) {
+    case 'hit':
+      if (event.sourceId === characterId) {
+        return entry(
+          `你对 ${name(event.targetId)} 造成 ${String(event.damage)} 点伤害${
+            event.critical ? '（暴击）' : ''
+          }`,
+          'self',
+        );
+      }
+      if (event.targetId === characterId) {
+        return entry(
+          `${name(event.sourceId)} 对你造成 ${String(event.damage)} 点伤害${
+            event.critical ? '（暴击）' : ''
+          }`,
+          tone(event.sourceId),
+        );
+      }
+      return entry(
+        `${name(event.sourceId)} 击中 ${name(event.targetId)}，${String(event.damage)} 点伤害`,
+        'other',
+      );
+    case 'miss':
+      if (event.sourceId === characterId) {
+        return entry(`你的攻击被 ${name(event.targetId)} 闪避`, 'self');
+      }
+      if (event.targetId === characterId) {
+        return entry(`你闪避了 ${name(event.sourceId)} 的攻击`, tone(event.sourceId));
+      }
+      return null;
+    case 'heal':
+      return entry(`你恢复了 ${String(event.amount)} 点生命`, 'self');
+    case 'death':
+      if (event.entityId === characterId) {
+        return entry('你倒下了，3 秒后在地图出生点复活', 'system');
+      }
+      return entry(
+        `${name(event.entityId)} 被击败`,
+        event.killerId === characterId ? 'self' : 'other',
+      );
+    case 'respawn':
+      return entry('你已在地图出生点复活', 'system');
+    case 'spawn':
+      return entry(`${event.displayName} 重新出现`, 'other');
+    case 'attack':
+      return null;
+  }
 }
 
 function resolveGameServerUrl(): string {
@@ -90,6 +191,15 @@ class WorldSession {
     this.bridge.onMoveRequest = (tile) => {
       this.moveTo(tile);
     };
+    this.bridge.onAttackRequest = (targetId) => {
+      this.attack(targetId);
+    };
+    this.bridge.onSkillRequest = (skillId, targetId) => {
+      this.castSkill(skillId, targetId);
+    };
+    this.bridge.onTargetChange = (targetId) => {
+      this.updateState((previous) => ({ ...previous, selectedTargetId: targetId }));
+    };
   }
 
   start(): void {
@@ -125,6 +235,7 @@ class WorldSession {
             mapId: snapshot.mapId,
             instanceId: snapshot.instanceId,
             players: snapshot.players,
+            monsters: snapshot.monsters,
             serverTick: snapshot.tick,
             roomPlayerCount: snapshot.playerCount,
             selfId: characterId,
@@ -157,6 +268,47 @@ class WorldSession {
             messages: [...previous.messages, message].slice(-MAX_CHAT_MESSAGES),
           }));
         },
+        onCombatProfile: (profile) => {
+          this.updateState((previous) => ({ ...previous, combatProfile: profile }));
+        },
+        onCombatEvent: (event) => {
+          this.bridge.pushCombatEvent(event);
+          if (import.meta.env.DEV) {
+            const debug = window.__webLegendDebug;
+            if (debug !== undefined) {
+              debug.lastCombatEventAt = Date.now();
+            }
+          }
+          this.updateState((previous) => {
+            let next = previous;
+            if (
+              event.kind === 'attack' &&
+              event.sourceId === characterId &&
+              event.skillId !== undefined
+            ) {
+              const skill = previous.combatProfile?.skills.find(
+                (candidate) => candidate.id === event.skillId,
+              );
+              if (skill !== undefined) {
+                next = {
+                  ...next,
+                  skillCooldowns: {
+                    ...next.skillCooldowns,
+                    [skill.id]: Date.now() + skill.cooldownMs,
+                  },
+                };
+              }
+            }
+            if (next.combatLog.some((entry) => entry.id === event.eventId)) {
+              return next;
+            }
+            const logEntry = combatLogFor(next, event, characterId);
+            if (logEntry !== null) {
+              next = { ...next, combatLog: [...next.combatLog, logEntry].slice(-MAX_COMBAT_LOG) };
+            }
+            return next;
+          });
+        },
         onTransfer: (mapId) => {
           this.handleTransfer(mapId);
         },
@@ -180,6 +332,34 @@ class WorldSession {
       this.commandCount += 1;
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
+  }
+
+  attack(targetId: string): boolean {
+    const sent = this.client?.sendBasicAttack(targetId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+      if (import.meta.env.DEV) {
+        const debug = window.__webLegendDebug;
+        if (debug !== undefined) {
+          debug.lastAttackIntentAt = Date.now();
+        }
+      }
+    }
+    return sent;
+  }
+
+  selectTarget(monsterId: string): void {
+    this.bridge.selectTarget(monsterId);
+  }
+
+  castSkill(skillId: string, targetId: string): boolean {
+    const sent = this.client?.sendSkill(skillId, targetId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
   }
 
   sendChat(text: string): boolean {
@@ -234,8 +414,13 @@ class WorldSession {
       detail: '正在前往新的地图',
       mapId,
       players: [],
+      monsters: [],
       messages: [],
       roomPlayerCount: 0,
+      combatProfile: null,
+      combatLog: [],
+      selectedTargetId: null,
+      skillCooldowns: {},
     }));
     this.switchMap(mapId);
     if (this.client !== null) {
@@ -267,6 +452,9 @@ class WorldSession {
         this.moveTo({ x: tileX, y: tileY });
         return true;
       },
+      attackMonster: (monsterId) => this.attack(monsterId),
+      castSkill: (skillId, targetId) => this.castSkill(skillId, targetId),
+      monsterScreenPoint: (monsterId) => this.bridge.monsterScreenPoint(monsterId),
     };
     this.debugInstalled = true;
   }
@@ -283,6 +471,9 @@ export type WorldSessionControls = {
   state: SessionState;
   rejoin: () => void;
   sendChat: (text: string) => boolean;
+  castSkill: (skillId: string, targetId: string) => boolean;
+  selectTarget: (monsterId: string) => void;
+  attack: (targetId: string) => boolean;
 };
 
 /**
@@ -329,6 +520,18 @@ export function useWorldSession(
   }, []);
 
   const sendChat = useCallback((text: string) => sessionRef.current?.sendChat(text) ?? false, []);
+  const castSkill = useCallback(
+    (skillId: string, targetId: string) =>
+      sessionRef.current?.castSkill(skillId, targetId) ?? false,
+    [],
+  );
+  const selectTarget = useCallback((monsterId: string) => {
+    sessionRef.current?.selectTarget(monsterId);
+  }, []);
+  const attack = useCallback(
+    (targetId: string) => sessionRef.current?.attack(targetId) ?? false,
+    [],
+  );
 
-  return { state, rejoin, sendChat };
+  return { state, rejoin, sendChat, castSkill, selectTarget, attack };
 }
