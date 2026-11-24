@@ -770,7 +770,8 @@ pnpm load:world
 
 ### 阶段提交
 
-- 待本条目提交后记录：`feat(phase-4): deliver monsters, combat and skills`。
+- 阶段 4 主提交：`cb3617bc5a1396df89661f206a0b9e0562fbe23e`
+  主题：`feat(phase-4): deliver monsters, combat and skills`。
 
 ### 下一步计划
 

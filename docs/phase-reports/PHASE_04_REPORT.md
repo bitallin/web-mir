@@ -297,7 +297,7 @@
 
 ## 11. 阶段提交
 
-- 阶段 4 主提交：`待记录`
+- 阶段 4 主提交：`cb3617bc5a1396df89661f206a0b9e0562fbe23e`
   主题：`feat(phase-4): deliver monsters, combat and skills`
 - 后续文档提交记录本哈希。
 

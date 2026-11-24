@@ -292,7 +292,7 @@
 - 阶段 2 主提交：`df45db7feb83f973129626c51c013d9fecc98d69`
 - 阶段 3 主提交：`80cb003aa2cdd3767c5ec62a9914c52cd26f6cca`
   主题：`feat(phase-3): deliver compiled maps, AOI, transfers and chat`
-- 阶段 4 主提交：`待记录`
+- 阶段 4 主提交：`cb3617bc5a1396df89661f206a0b9e0562fbe23e`
   主题：`feat(phase-4): deliver monsters, combat and skills`
 
 ## 11. 当前环境事实
