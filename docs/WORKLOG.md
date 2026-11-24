@@ -157,9 +157,13 @@ PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
 - 后端默认无热重载；当前环境限制，非架构问题。
 - CI 尚未在真实 GitHub Runner 上执行过（本机无远端仓库）；工作流已静态编写。
 
+### 阶段提交
+
+- 阶段 0 主提交：`69df6c387eff5ae143f84f79e6c7a4cf96e57721`
+  `chore(phase-0): establish engineering foundation`。
+
 ### 下一步计划
 
-1. 提交阶段 0 Git commit。
-2. 等待 Tech Lead 审阅阶段 0 报告。
-3. 批准后执行阶段 1：`game-simulation` 固定 tick、world_map Room、双浏览器
+1. 等待 Tech Lead 审阅阶段 0 报告。
+2. 批准后执行阶段 1：`game-simulation` 固定 tick、world_map Room、双浏览器
    实时可见和服务端权威移动，详见阶段报告第 11 节。

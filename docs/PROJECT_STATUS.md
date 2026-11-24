@@ -120,9 +120,9 @@ Colyseus 真实 WebSocket join / Zod 消息校验 / 未授权断线重连。
 
 ## 10. 最近一次 Git 提交
 
-阶段 0 提交将在审阅前创建；提交 hash 会在提交后补充到本文件和 WORKLOG。
-
-提交主题：`chore(phase-0): establish engineering foundation`
+- 阶段 0 主提交：`69df6c387eff5ae143f84f79e6c7a4cf96e57721`
+- 主题：`chore(phase-0): establish engineering foundation`
+- 后续仅允许文档补记提交；代码变更需等待阶段 1 批准。
 
 ## 11. 当前环境事实
 

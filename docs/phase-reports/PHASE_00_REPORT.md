@@ -445,3 +445,9 @@ game-web 与 admin-web 有 Vite >500 kB chunk 警告。阶段 0 接受，阶段 
 
 阶段 0 已完成并在此停止。未收到 Tech Lead 明确批准前，不开始阶段 1，不修改阶段 1
 范围，不跳过阶段门禁。
+
+## 13. Git 提交
+
+- 阶段 0 主提交：`69df6c387eff5ae143f84f79e6c7a4cf96e57721`
+  `chore(phase-0): establish engineering foundation`
+- 本文档的后续补记提交可通过 `git log --oneline` 查看。
