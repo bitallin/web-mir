@@ -27,6 +27,8 @@ Fastify Control API 和 Colyseus 实时服务器。
 4. 点击地面移动；服务端寻路并推进，另一端在约 100–150ms 内看到移动。
 5. 刷新任一窗口会优先使用 sessionStorage 中的重连 token 恢复原座位；网络断开会
    显示“重连中”，恢复后自动继续。
+6. 通过 `http://<局域网IP>:<端口>/` 直接访问即可，不要求 HTTPS 或 localhost；
+   身份和命令 ID 在非安全上下文使用 `crypto.getRandomValues` 生成。
 
 开发身份只存在于 `NODE_ENV=development|test`；生产服务器拒绝无票据的连接
 （ADR-015）。开发环境可用 `?name=Alice&key=<8-64位>` 固定身份，`?fresh=1`

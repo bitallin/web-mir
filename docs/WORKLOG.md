@@ -286,6 +286,13 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 GAME_SERVER_PORT=8847 \
     `STALE_SEQUENCE` 拒绝。修复为在 `onReconnect` 重置该会话的序号与幂等窗口；
     集成测试改为“移动 → 断线 → 重连 → 序号 0 再次移动”，E2E 刷新测试增加刷新后
     移动断言。修复提交 `954155f`。
+12. **局域网 HTTP 访问黑屏（用户实测发现）**：`crypto.randomUUID()` 只在安全上下文
+    （HTTPS/localhost）存在，通过 `http://10.30.0.25:8588` 访问时抛
+    `TypeError: crypto.randomUUID is not a function`，React 崩溃、Phaser 未启动，
+    页面只剩标题。新增 `createUuid()`：优先 `randomUUID`，否则用
+    `getRandomValues` 生成 UUIDv4；单元测试 + 非 localhost HTTP 的 Playwright
+    回归测试覆盖。同时为 Chromium 加 `--no-proxy-server`，避免本机代理拦截
+    局域网地址。修复提交 `5f2dbbf`。
 
 ### 尚未解决的问题
 
@@ -301,7 +308,8 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 GAME_SERVER_PORT=8847 \
 
 - 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
   `feat(phase-1): deliver browser two-player realtime slice`。
-- 阶段 1 修复提交：`954155f` `fix(phase-1): reset the command sequence when a client reconnects`。
+- 阶段 1 修复提交：`954155f` `fix(phase-1): reset the command sequence when a client reconnects`
+  和 `5f2dbbf` `fix(phase-1): support plain-HTTP LAN origins without secure-context crypto`。
 
 ### 下一步计划
 

@@ -134,7 +134,7 @@
 pnpm format:check   # All matched files use Prettier code style!
 pnpm lint           # 0 error / 0 warning
 pnpm typecheck      # 根配置 + 10 个 workspace
-pnpm test           # 21 files / 94 tests passed (约 3.0s)
+pnpm test           # 22 files / 97 tests passed (约 3.0s)
 pnpm build          # 4 个应用全部成功
 ```
 
@@ -143,7 +143,7 @@ E2E（本机已有旧开发栈占用 84–87，新栈运行在 8844–8847）：
 ```bash
 GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 GAME_SERVER_PORT=8847 \
   PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
-# 6 passed (约 23s)
+# 7 passed (约 25s)
 ```
 
 标准环境直接运行 `pnpm test:e2e`，Playwright 会自动启动 game-web、admin-web、
@@ -334,12 +334,16 @@ Node 侧 Playwright IPC 不计入预算。
 16. E2E：注册 → 登录 → 创建角色 → 进图 → 两个 Context 可见。
 17. 更新 ADR-015 为 Superseded（或记录退出条件完成）。
 
-### 自查修复
+### 自查与实测修复
 
-阶段报告初稿完成后的自查发现并修复了一个重连缺陷：刷新后新客户端从
-`clientSequence=0` 开始，而 Room 保留刷新前序号，首条移动会被 `STALE_SEQUENCE`
-拒绝。修复为 `onReconnect` 重置会话序号与幂等窗口；集成测试和 E2E 刷新场景均
-增加“重连后再次移动”断言。修复提交：`954155f`。
+1. **重连序号**：刷新后新客户端从 `clientSequence=0` 开始，而 Room 保留刷新前
+   序号，首条移动会被 `STALE_SEQUENCE` 拒绝。修复为 `onReconnect` 重置会话序号
+   与幂等窗口；集成测试和 E2E 刷新场景均增加“重连后再次移动”断言。
+   修复提交：`954155f`。
+2. **局域网 HTTP 黑屏（用户实测）**：`crypto.randomUUID()` 只在安全上下文存在，
+   通过 `http://<LAN-IP>:port` 访问时 React 崩溃，只剩标题。新增基于
+   `getRandomValues` 的 UUIDv4 回退，并增加非 localhost HTTP 的 E2E 回归测试。
+   Playwright 同时禁用本机 HTTP 代理，确保能访问局域网地址。修复提交：`5f2dbbf`。
 
 ## 11. 审阅门禁
 
@@ -352,4 +356,6 @@ Node 侧 Playwright IPC 不计入预算。
   `feat(phase-1): deliver browser two-player realtime slice`。
 - 阶段 1 修复提交：`954155f`
   `fix(phase-1): reset the command sequence when a client reconnects`。
+- 阶段 1 修复提交：`5f2dbbf`
+  `fix(phase-1): support plain-HTTP LAN origins without secure-context crypto`。
 - 本文档的补记提交可通过 `git log --oneline` 查看。

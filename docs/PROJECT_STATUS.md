@@ -157,7 +157,9 @@
 阶段 1 关键证据：
 
 - 双浏览器移动可见延迟（浏览器内计时，5 次单独运行 + 完整套件）：136ms、145ms、
-  152ms、174ms、179ms、180ms、204ms，全部 < 250ms。
+  152ms、174ms、179ms、180ms、180ms、204ms，全部 < 250ms。
+- 非 localhost HTTP 来源（`http://<LAN-IP>:port`）实测可加载地图、连接并移动，
+  由 UUID 回退和 E2E 回归测试锁定。
 - `world_map` 集成测试连续 3 次 8/8 通过：双客户端互相可见、服务端移动、伪造
   payload/错误协议/墙体/封闭房间拒绝、幂等、限频、重连、宽限期移除、指标。
 - 实时指标（2 名玩家，52 个 tick 样本）：tick p50 0.02ms、p95 0.03ms、
@@ -173,6 +175,8 @@
   主题：`feat(phase-1): deliver browser two-player realtime slice`
 - 阶段 1 修复提交：`954155f`（刷新重连后序号重置）
   主题：`fix(phase-1): reset the command sequence when a client reconnects`
+- 阶段 1 修复提交：`5f2dbbf`（局域网 HTTP 安全上下文）
+  主题：`fix(phase-1): support plain-HTTP LAN origins without secure-context crypto`
 
 ## 11. 当前环境事实
 
