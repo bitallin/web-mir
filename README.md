@@ -117,6 +117,8 @@ pnpm dev
   访问它，必须使用容器网关 `192.51.0.1:5432`（`.env.example` 已按此配置）。
   容器内 `127.0.0.1:5432` 是环境中另一个 PostgreSQL，连接会报
   `role "web_legend" does not exist`。
+- PostgreSQL 的 5432 端口发布在宿主机所有接口上，SSH 容器才能经网关访问。这是
+  开发环境配置；共享主机必须用防火墙限制外部访问，生产环境使用私有网络。
 - `fs.inotify.max_user_watches` 仅为 8192。默认 `pnpm dev` 不启用后端 watch，
   Vite 使用轮询。需要后端热重载时运行 `pnpm --filter ... dev:watch`，但需先确认
   watcher 限额。

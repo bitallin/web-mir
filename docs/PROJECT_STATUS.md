@@ -80,6 +80,7 @@
 | Phaser 4 客户端包体积大                | game-web 生产 JS 约 1.89 MB（gzip 0.51 MB） | 阶段 8 前做路由/场景级代码拆分与资源按需加载；当前为可接受警告            |
 | 本地 PostgreSQL 18.3，CI/生产目标 18.7 | 补丁版本差异可能影响边界行为                | 同属 18.x；CI 使用 18.7；升级本地镜像后重跑迁移与全量测试                 |
 | 当前开发主机 Docker 在 SSH 容器外      | 端口与数据库地址非标准，易误连              | README/AGENTS/PROJECT_STATUS 明确端口和网关；错误信息写入故障排查         |
+| 开发 PostgreSQL 端口发布在所有接口     | 共享主机上可能被外部访问                    | 仅用于本地开发；由宿主机防火墙限制，生产使用私有网络和最小暴露            |
 | 容器 inotify 限额 8192                 | 文件 watcher 触发 ENOSPC                    | 默认后端无 watch、Vite 轮询；提供 `dev:watch` 供限额充足环境使用          |
 | Playwright 浏览器无法在当前系统下载    | E2E 依赖预装 Chromium                       | `.env` 指定 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`；普通环境使用官方安装        |
 | 集成测试使用共享开发库                 | 并行测试或残留数据风险                      | 测试插入唯一 code 并清理；阶段 5 前建立独立测试库/临时 schema             |
