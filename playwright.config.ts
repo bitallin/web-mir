@@ -1,0 +1,51 @@
+import { existsSync } from 'node:fs';
+
+import { defineConfig, devices } from '@playwright/test';
+
+if (existsSync('.env')) {
+  process.loadEnvFile('.env');
+}
+
+const gameWebPort = process.env.GAME_WEB_PORT ?? '5173';
+const adminWebPort = process.env.ADMIN_WEB_PORT ?? '5174';
+const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === 'true';
+const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  fullyParallel: true,
+  forbidOnly: process.env.CI === 'true',
+  retries: process.env.CI === 'true' ? 2 : 0,
+  reporter: [['list'], ['html', { open: 'never' }]],
+  use: {
+    baseURL: `http://127.0.0.1:${gameWebPort}`,
+    trace: 'on-first-retry',
+    ...(chromiumExecutable === undefined
+      ? {}
+      : { launchOptions: { executablePath: chromiumExecutable } }),
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+  ...(skipWebServer
+    ? {}
+    : {
+        webServer: [
+          {
+            command: 'pnpm --filter @web-legend/game-web dev',
+            url: `http://127.0.0.1:${gameWebPort}`,
+            reuseExistingServer: process.env.CI !== 'true',
+            timeout: 120_000,
+          },
+          {
+            command: 'pnpm --filter @web-legend/admin-web dev',
+            url: `http://127.0.0.1:${adminWebPort}`,
+            reuseExistingServer: process.env.CI !== 'true',
+            timeout: 120_000,
+          },
+        ],
+      }),
+});

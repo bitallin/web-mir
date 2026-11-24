@@ -1,0 +1,24 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+playwright-report/
+test-results/
+blob-report/
+
+.DS_Store
+.idea/
+.vscode/
+.toolchains/
+
+# Local infrastructure state
+infra/docker/data/

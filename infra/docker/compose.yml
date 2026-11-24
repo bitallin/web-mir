@@ -1,0 +1,43 @@
+name: web-legend
+
+services:
+  postgres:
+    # PostgreSQL 18.3, pinned by digest. This host cannot reach Docker Hub
+    # directly; the image is available through the local mirror. Override with
+    # POSTGRES_IMAGE to use another 18.x build (e.g. postgres:18.7-alpine).
+    image: ${POSTGRES_IMAGE:-docker.m.daocloud.io/postgres@sha256:a9abf4275f9e99bff8e6aed712b3b7dfec9cac1341bba01c1ffdfce9ff9fc34a}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: web_legend
+      POSTGRES_PASSWORD: web_legend_dev
+      POSTGRES_DB: web_legend
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U web_legend -d web_legend']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # Not part of the MVP single-server topology. Start explicitly with:
+  #   docker compose -f infra/docker/compose.yml --profile scale up -d redis
+  redis:
+    image: redis:8.2.11-alpine
+    profiles: ['scale']
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  postgres-data:
+  redis-data:
