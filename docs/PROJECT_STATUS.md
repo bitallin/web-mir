@@ -222,7 +222,8 @@
 - 阶段 1 主提交：`e6574057308dd6bfe5c9f99d4b06d24a5ee00236`
 - 阶段 1 修复提交：`954155f`、`5f2dbbf`、`f4b74ff`
 - 阶段 2 主提交：`df45db7feb83f973129626c51c013d9fecc98d69`
-- 阶段 3 主提交：待本次提交后由 `docs(phase-3)` 提交记录
+- 阶段 3 主提交：`80cb003aa2cdd3767c5ec62a9914c52cd26f6cca`
+  主题：`feat(phase-3): deliver compiled maps, AOI, transfers and chat`
 
 ## 11. 当前环境事实
 

@@ -619,7 +619,7 @@ pnpm load:world
 
 ### 阶段提交
 
-- 阶段 3 主提交：待提交后记录
+- 阶段 3 主提交：`80cb003aa2cdd3767c5ec62a9914c52cd26f6cca`
   主题：`feat(phase-3): deliver compiled maps, AOI, transfers and chat`。
 
 ### 下一步计划

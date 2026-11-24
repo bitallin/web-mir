@@ -337,6 +337,6 @@ E2E 证据（`docs/phase-reports/phase-03/`）：
 
 ## 12. Git 提交
 
-- 阶段 3 主提交：`<pending>`
+- 阶段 3 主提交：`80cb003aa2cdd3767c5ec62a9914c52cd26f6cca`
   主题：`feat(phase-3): deliver compiled maps, AOI, transfers and chat`。
 - 本报告、状态与证据随主提交归档；提交哈希由紧随其后的 `docs(phase-3)` 提交记录。
