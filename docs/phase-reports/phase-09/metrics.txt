@@ -1,0 +1,7 @@
+web_legend_game_server_room_players{room="uhxTbnqzY",realm="classic-01",map="starter_wilds",instance="1"} 4
+web_legend_game_server_ws_sent_bytes_total{room="uhxTbnqzY",realm="classic-01",map="starter_wilds",instance="1"} 30624
+web_legend_game_server_patch_bytes_total{room="uhxTbnqzY",realm="classic-01",map="starter_wilds",instance="1"} 8467
+web_legend_game_server_ws_received_bytes_total{room="uhxTbnqzY",realm="classic-01",map="starter_wilds",instance="1"} 1220
+web_legend_game_server_ws_connections_total{room="uhxTbnqzY",realm="classic-01",map="starter_wilds",instance="1"} 4
+web_legend_game_server_ws_disconnects_total{room="uhxTbnqzY",realm="classic-01",map="starter_wilds",instance="1"} 0
+web_legend_game_server_ws_reconnects_total{room="uhxTbnqzY",realm="classic-01",map="starter_wilds",instance="1"} 0

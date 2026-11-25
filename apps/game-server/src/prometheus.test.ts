@@ -14,6 +14,10 @@ const snapshot: MetricsSnapshot = {
       players: 3,
       wsSentBytes: 2048,
       wsPatchBytes: 1024,
+      wsReceivedBytes: 512,
+      wsConnections: 3,
+      wsDisconnects: 1,
+      wsReconnects: 1,
       acceptedCommands: 10,
       rejectedCommands: 1,
       rejectionsByCode: { RATE_LIMITED: 1 },
@@ -43,6 +47,10 @@ const snapshot: MetricsSnapshot = {
     rejectedCommands: 1,
     wsSentBytes: 2048,
     wsPatchBytes: 1024,
+    wsReceivedBytes: 512,
+    wsConnections: 3,
+    wsDisconnects: 1,
+    wsReconnects: 1,
     chatMessages: 2,
     chatFiltered: 0,
     chatMuted: 0,
@@ -87,6 +95,12 @@ describe('renderGameServerPrometheus', () => {
       'web_legend_game_server_room_content_info{room="room-1",realm="classic-01",map="starter_town",instance="1",version="baseline"} 1',
     );
     expect(text).toContain('web_legend_game_server_patch_bytes_total{room="room-1"');
+    expect(text).toContain(
+      'web_legend_game_server_ws_received_bytes_total{room="room-1",realm="classic-01",map="starter_town",instance="1"} 512',
+    );
+    expect(text).toContain('web_legend_game_server_ws_connections_total{room="room-1"');
+    expect(text).toContain('web_legend_game_server_ws_disconnects_total{room="room-1"');
+    expect(text).toContain('web_legend_game_server_ws_reconnects_total{room="room-1"');
     expect(text).toContain('web_legend_game_server_tick_duration_ms');
     expect(text).toContain('nodejs_gc_pause_seconds_total');
   });

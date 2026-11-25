@@ -505,6 +505,15 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
     );
     expect(playerCount(room)).toBe(1);
 
+    const roomMetrics = runtime.metrics
+      .snapshot()
+      .rooms.find((entry) => entry.roomId === room.roomId);
+    expect(roomMetrics?.wsConnections).toBe(1);
+    expect(roomMetrics?.wsDisconnects).toBeGreaterThanOrEqual(1);
+    expect(roomMetrics?.wsReconnects).toBe(1);
+    // The move before and after the drop both reached the server.
+    expect(roomMetrics?.wsReceivedBytes).toBeGreaterThan(0);
+
     // A refreshed page after reconnection starts its sequence at 0 again.
     const ack = waitForMessage<CommandAck>(room, 'command.ack', (body) =>
       commandAckSchema.parse(body),
@@ -578,6 +587,8 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
         roomId: string;
         players: number;
         acceptedCommands: number;
+        wsReceivedBytes: number;
+        wsConnections: number;
         tick: { samples: number; p95Ms: number };
       }[];
     };
@@ -587,6 +598,8 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
     expect(roomMetrics).toBeDefined();
     expect(roomMetrics?.players).toBe(1);
     expect(roomMetrics?.acceptedCommands).toBeGreaterThanOrEqual(1);
+    expect(roomMetrics?.wsReceivedBytes).toBeGreaterThan(0);
+    expect(roomMetrics?.wsConnections).toBe(1);
     expect(roomMetrics?.tick.samples).toBeGreaterThan(0);
     expect(roomMetrics?.tick.p95Ms).toBeLessThan(25);
   });

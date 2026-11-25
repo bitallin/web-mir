@@ -240,6 +240,12 @@ pnpm exec playwright install chromium
 | `pnpm prod:deploy`       | 生产 compose 发布（变量见 runbook）      |
 | `pnpm prod:rollback`     | 回滚到上一个镜像标签                     |
 
+`pnpm test` 会在 `DATABASE_URL` 指向的实例上创建一次性数据库
+`wl_test_<时间戳>_<随机>`，运行现有迁移后执行测试，结束后删除；开发库中的账号、
+物品与审计数据不会被测试写入。目标角色需要 `CREATEDB`，也可以用
+`TEST_DATABASE_URL` 指向独立实例。异常中断留下的测试库会在 24 小时后自动清理，
+需要立即清理时运行 `TEST_DATABASE_STALE_MS=0 pnpm test`。
+
 E2E 会执行迁移与区服 seed，并启动 game-web、admin-web、control-api 和
 game-server 四个开发服务；如果开发栈已运行，可复用现有服务：
 
@@ -334,7 +340,7 @@ pnpm test:e2e
 验收规则：
 
 - 单元测试覆盖纯逻辑与校验；
-- 集成测试连接真实 PostgreSQL 和真实 Colyseus WebSocket；
+- 集成测试连接真实 PostgreSQL（一次性 `wl_test_*` 数据库）和真实 Colyseus WebSocket；
 - 浏览器测试使用真实 Chromium；
 - 不使用 mock 数据库或硬编码成功响应冒充验收；
 - 每个阶段必须提供真实命令和结果，见 `docs/phase-reports/`。

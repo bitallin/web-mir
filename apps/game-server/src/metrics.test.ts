@@ -59,6 +59,22 @@ describe('RoomMetrics', () => {
     expect(snapshot.wsPatchBytes).toBe(100);
   });
 
+  it('counts inbound bytes and the connection lifecycle', () => {
+    const metrics = new RoomMetrics('room-1');
+    metrics.recordWsReceived(120);
+    metrics.recordWsReceived(80);
+    metrics.recordWsReceived(0);
+    metrics.recordWsConnection();
+    metrics.recordWsDisconnect();
+    metrics.recordWsReconnect();
+
+    const snapshot = metrics.snapshot();
+    expect(snapshot.wsReceivedBytes).toBe(200);
+    expect(snapshot.wsConnections).toBe(1);
+    expect(snapshot.wsDisconnects).toBe(1);
+    expect(snapshot.wsReconnects).toBe(1);
+  });
+
   it('counts accepted and filtered chat separately', () => {
     const metrics = new RoomMetrics('room-1');
     metrics.recordChatMessage();
@@ -78,6 +94,10 @@ describe('MetricsRegistry', () => {
     first.recordRejectedCommand('UNREACHABLE');
     first.recordChatFiltered();
     first.recordPvpKill();
+    first.recordWsReceived(64);
+    first.recordWsConnection();
+    first.recordWsDisconnect();
+    first.recordWsReconnect();
     first.setPlayers(2);
 
     const active = registry.snapshot();
@@ -93,5 +113,9 @@ describe('MetricsRegistry', () => {
     expect(disposed.totals.rejectedCommands).toBe(1);
     expect(disposed.totals.chatFiltered).toBe(1);
     expect(disposed.totals.pvpKills).toBe(1);
+    expect(disposed.totals.wsReceivedBytes).toBe(64);
+    expect(disposed.totals.wsConnections).toBe(1);
+    expect(disposed.totals.wsDisconnects).toBe(1);
+    expect(disposed.totals.wsReconnects).toBe(1);
   });
 });

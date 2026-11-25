@@ -116,6 +116,33 @@ export function renderGameServerPrometheus(
       points: rooms.map((room) => ({ labels: labelsFor(room, realm), value: room.wsPatchBytes })),
     },
     {
+      name: 'web_legend_game_server_ws_received_bytes_total',
+      help: 'WebSocket payload bytes received from clients.',
+      type: 'counter',
+      points: rooms.map((room) => ({
+        labels: labelsFor(room, realm),
+        value: room.wsReceivedBytes,
+      })),
+    },
+    {
+      name: 'web_legend_game_server_ws_connections_total',
+      help: 'Initial room joins accepted. Divide reconnects by connections for the reconnect rate.',
+      type: 'counter',
+      points: rooms.map((room) => ({ labels: labelsFor(room, realm), value: room.wsConnections })),
+    },
+    {
+      name: 'web_legend_game_server_ws_disconnects_total',
+      help: 'Unconsented socket drops that entered the reconnect grace window.',
+      type: 'counter',
+      points: rooms.map((room) => ({ labels: labelsFor(room, realm), value: room.wsDisconnects })),
+    },
+    {
+      name: 'web_legend_game_server_ws_reconnects_total',
+      help: 'Dropped sessions resumed within the reconnect grace window.',
+      type: 'counter',
+      points: rooms.map((room) => ({ labels: labelsFor(room, realm), value: room.wsReconnects })),
+    },
+    {
       name: 'web_legend_game_server_chat_messages_total',
       help: 'Chat messages broadcast, filtered or blocked by mute.',
       type: 'counter',

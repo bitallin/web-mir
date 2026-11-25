@@ -248,6 +248,11 @@ pnpm prod:rollback       # 回滚到 previous-tag，无数据库反向迁移
 - 不用固定 sleep 等待异步结果；使用可观察条件或事件。
 - 不为了让测试通过而降低断言或跳过失败测试。确需跳过时必须在报告中说明。
 - 验收截图、日志和指标存入 `docs/phase-reports/<phase>/`。
+- `pnpm test` 使用一次性 PostgreSQL 数据库（`wl_test_*`，ADR-024），结束后
+  删除；测试不得依赖或写入共享开发库数据。目标角色需要 `CREATEDB`，可用
+  `TEST_DATABASE_URL` 指向独立实例。
+- E2E 仍连接开发栈数据库，必须使用唯一账号/角色名；需要完全隔离时用
+  `TEST_DATABASE_URL` 与独立端口启动一套栈。
 
 ## 9. Git 规范
 

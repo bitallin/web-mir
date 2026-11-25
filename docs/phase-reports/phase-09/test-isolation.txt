@@ -1,0 +1,46 @@
+# 阶段 9 测试数据隔离证据
+
+日期：2026-11-25
+数据库：`postgres://web_legend:***@192.51.0.1:5432/web_legend`（开发库）
+
+## 1. 全量测试前后的开发库计数
+
+运行 `pnpm test` 前：
+
+```
+accounts=2819 characters=2652 item_instances=3860
+admin_audit_logs=205 content_releases=34 outbox_events=48
+```
+
+运行 `pnpm test`（61 个文件 / 329 个测试，全部通过）后：
+
+```
+accounts=2819 characters=2652 item_instances=3860
+admin_audit_logs=205 content_releases=34 outbox_events=48
+```
+
+计数完全一致，说明测试没有写入开发库。
+
+## 2. 临时测试库
+
+- 测试库名称形如 `wl_test_mww..._<随机>`，由 `vitest.config.ts` 生成。
+- 测试结束后 `globalSetup.teardown` 执行 `DROP DATABASE ... WITH (FORCE)`。
+- 全量测试结束后查询：
+
+```
+select datname from pg_database where datname like 'wl_test_%'
+-- 0 rows
+```
+
+## 3. 隔离断言
+
+`packages/persistence/test/testDatabase.test.ts` 在测试进程内断言：
+
+- `current_database()` 等于本次运行生成的 `wl_test_*` 名称；
+- `public` schema 有完整的迁移表（>10 张）；
+- `drizzle.__drizzle_migrations` 在临时库内存在且非空。
+
+## 4. 清理策略
+
+- 异常中断残留的测试库在下次运行启动时清理，阈值默认 24 小时。
+- 需要立即清理时：`TEST_DATABASE_STALE_MS=0 pnpm test`。

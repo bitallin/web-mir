@@ -31,6 +31,10 @@ export type RoomMetricsSnapshot = {
   players: number;
   wsSentBytes: number;
   wsPatchBytes: number;
+  wsReceivedBytes: number;
+  wsConnections: number;
+  wsDisconnects: number;
+  wsReconnects: number;
   acceptedCommands: number;
   rejectedCommands: number;
   rejectionsByCode: Record<string, number>;
@@ -71,6 +75,10 @@ export class RoomMetrics {
   private players = 0;
   private wsSentBytes = 0;
   private wsPatchBytes = 0;
+  private wsReceivedBytes = 0;
+  private wsConnections = 0;
+  private wsDisconnects = 0;
+  private wsReconnects = 0;
   private acceptedCommands = 0;
   private rejectedCommands = 0;
   private chatMessages = 0;
@@ -112,6 +120,25 @@ export class RoomMetrics {
     if (patching) {
       this.wsPatchBytes += bytes;
     }
+  }
+
+  recordWsReceived(bytes: number): void {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return;
+    }
+    this.wsReceivedBytes += bytes;
+  }
+
+  recordWsConnection(): void {
+    this.wsConnections += 1;
+  }
+
+  recordWsDisconnect(): void {
+    this.wsDisconnects += 1;
+  }
+
+  recordWsReconnect(): void {
+    this.wsReconnects += 1;
   }
 
   recordAcceptedCommand(): void {
@@ -227,6 +254,10 @@ export class RoomMetrics {
       players: this.players,
       wsSentBytes: this.wsSentBytes,
       wsPatchBytes: this.wsPatchBytes,
+      wsReceivedBytes: this.wsReceivedBytes,
+      wsConnections: this.wsConnections,
+      wsDisconnects: this.wsDisconnects,
+      wsReconnects: this.wsReconnects,
       acceptedCommands: this.acceptedCommands,
       rejectedCommands: this.rejectedCommands,
       rejectionsByCode: Object.fromEntries(this.rejectionsByCode),
@@ -261,6 +292,10 @@ export type MetricsSnapshot = {
     rejectedCommands: number;
     wsSentBytes: number;
     wsPatchBytes: number;
+    wsReceivedBytes: number;
+    wsConnections: number;
+    wsDisconnects: number;
+    wsReconnects: number;
     chatMessages: number;
     chatFiltered: number;
     chatMuted: number;
@@ -287,6 +322,10 @@ export class MetricsRegistry {
   private rejectedCommands = 0;
   private wsSentBytes = 0;
   private wsPatchBytes = 0;
+  private wsReceivedBytes = 0;
+  private wsConnections = 0;
+  private wsDisconnects = 0;
+  private wsReconnects = 0;
   private chatMessages = 0;
   private chatFiltered = 0;
   private chatMuted = 0;
@@ -320,6 +359,10 @@ export class MetricsRegistry {
     this.rejectedCommands += snapshot.rejectedCommands;
     this.wsSentBytes += snapshot.wsSentBytes;
     this.wsPatchBytes += snapshot.wsPatchBytes;
+    this.wsReceivedBytes += snapshot.wsReceivedBytes;
+    this.wsConnections += snapshot.wsConnections;
+    this.wsDisconnects += snapshot.wsDisconnects;
+    this.wsReconnects += snapshot.wsReconnects;
     this.chatMessages += snapshot.chatMessages;
     this.chatFiltered += snapshot.chatFiltered;
     this.chatMuted += snapshot.chatMuted;
@@ -347,6 +390,10 @@ export class MetricsRegistry {
     const activeRejected = rooms.reduce((total, room) => total + room.rejectedCommands, 0);
     const activeWsSent = rooms.reduce((total, room) => total + room.wsSentBytes, 0);
     const activeWsPatch = rooms.reduce((total, room) => total + room.wsPatchBytes, 0);
+    const activeWsReceived = rooms.reduce((total, room) => total + room.wsReceivedBytes, 0);
+    const activeWsConnections = rooms.reduce((total, room) => total + room.wsConnections, 0);
+    const activeWsDisconnects = rooms.reduce((total, room) => total + room.wsDisconnects, 0);
+    const activeWsReconnects = rooms.reduce((total, room) => total + room.wsReconnects, 0);
     const activeChat = rooms.reduce((total, room) => total + room.chatMessages, 0);
     const activeChatFiltered = rooms.reduce((total, room) => total + room.chatFiltered, 0);
     const activeChatMuted = rooms.reduce((total, room) => total + room.chatMuted, 0);
@@ -373,6 +420,10 @@ export class MetricsRegistry {
         rejectedCommands: this.rejectedCommands + activeRejected,
         wsSentBytes: this.wsSentBytes + activeWsSent,
         wsPatchBytes: this.wsPatchBytes + activeWsPatch,
+        wsReceivedBytes: this.wsReceivedBytes + activeWsReceived,
+        wsConnections: this.wsConnections + activeWsConnections,
+        wsDisconnects: this.wsDisconnects + activeWsDisconnects,
+        wsReconnects: this.wsReconnects + activeWsReconnects,
         chatMessages: this.chatMessages + activeChat,
         chatFiltered: this.chatFiltered + activeChatFiltered,
         chatMuted: this.chatMuted + activeChatMuted,

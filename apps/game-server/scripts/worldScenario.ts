@@ -144,6 +144,10 @@ type RoomMetricsJson = {
   players: number;
   wsSentBytes: number;
   wsPatchBytes: number;
+  wsReceivedBytes: number;
+  wsConnections: number;
+  wsDisconnects: number;
+  wsReconnects: number;
   acceptedCommands: number;
   rejectedCommands: number;
   combatCommands: number;
@@ -517,12 +521,15 @@ async function main(): Promise<void> {
     throw new Error('wilds room metrics were not reported');
   }
 
+  const reconnectRate = wilds.wsConnections > 0 ? wilds.wsReconnects / wilds.wsConnections : 0;
   const summary = {
     runAt: new Date().toISOString(),
     options,
     joined: clients.length,
     clientAccepted,
     clientRejected,
+    reconnectRate,
+    inboundBytesPerPlayer: wilds.players > 0 ? wilds.wsReceivedBytes / wilds.players : 0,
     room: wilds,
     samples: tickSamples,
     runtime: runtimeSamples,
@@ -546,7 +553,8 @@ async function main(): Promise<void> {
       `players=${String(wilds.players)} tick p50=${String(wilds.tick.p50Ms)}ms ` +
       `p95=${String(wilds.tick.p95Ms)}ms p99=${String(wilds.tick.p99Ms)}ms ` +
       `max=${String(wilds.tick.maxMs)}ms assetTx p95=${String(wilds.assetTx.p95Ms)}ms ` +
-      `ws=${String(wilds.wsSentBytes)}B patch=${String(wilds.wsPatchBytes)}B ` +
+      `wsOut=${String(wilds.wsSentBytes)}B wsIn=${String(wilds.wsReceivedBytes)}B ` +
+      `patch=${String(wilds.wsPatchBytes)}B reconnectRate=${(reconnectRate * 100).toFixed(2)}% ` +
       `kills=${String(wilds.monsterKills)} assetFailures=${String(wilds.assetFailures)}\n`,
   );
   process.stdout.write(`evidence: ${options.output}\n`);
@@ -571,6 +579,9 @@ async function main(): Promise<void> {
     }
     if (wilds.wsPatchBytes === 0) {
       throw new Error('no patch bytes were recorded');
+    }
+    if (wilds.wsReceivedBytes === 0) {
+      throw new Error('no inbound WebSocket bytes were recorded');
     }
     if (options.attackers > 0 && wilds.combatEvents === 0) {
       throw new Error('attackers produced no combat events');

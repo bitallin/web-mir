@@ -5,14 +5,15 @@
 
 ## 1. 当前阶段
 
-**阶段 8：质量、压测、部署与恢复 —— 实现与自动化验收完成，等待用户确认。**
+**阶段 9：MVP 收口（测试数据隔离与 WebSocket 观测）—— 实现与自动化验收完成，
+等待用户确认。**
 
-阶段 0–3 已通过用户验收；阶段 4–7 的实现和自动化验收完成，阶段 6/7 的用户
-实测仍未单独记录。阶段 8 由上一会话开始、因环境配置中断，本会话完成：生产
-镜像与 nginx edge（HTTPS/WSS/安全头/限流）、Prometheus 指标与告警、Game Server
-按 Realm 绑定内容、发布/回滚脚本、数据库备份与真实恢复演练、Game Server 正常/
-崩溃重启与 Outbox 重试演练、30+10 玩家 10 分钟与 50 玩家容量场景。阶段 7 的
-后台功能与 8584/8585 实测仍按原计划等待用户确认。
+阶段 0–3 已通过用户验收；阶段 4–8 的实现和自动化验收完成，阶段 6/7 的用户
+实测与阶段 8 的证据确认仍未单独记录。阶段 9 在 MVP 计划定义的 0–8 阶段全部
+交付后，按 `docs/WEB_LEGEND_MVP_PLAN_v2.md` 第 19 节 Definition of Done 做差距
+审计，补齐两项验收基础：`pnpm test` 改为每次运行创建一次性 PostgreSQL 数据库，
+不再写入共享开发库；WebSocket 观测补齐入站字节、连接/断线/重连计数，并修复
+重连后出站字节漏计。阶段 7 的后台实测与阶段 8 的生产演练确认仍等待用户完成。
 
 ## 2. 阶段进度
 
@@ -27,8 +28,16 @@
 | 阶段 6：聊天、PK 与体验        | 自动化完成 | 安全区、PvP、死亡复活、聊天过滤、系统消息、小地图/角色面板、音效      |
 | 阶段 7：运营后台与内容发布     | 待实测     | 管理员 RBAC、审计、Outbox、Kick/Ban/Mute、内容 Draft/Release/回滚     |
 | 阶段 8：质量、压测、部署与恢复 | 自动化完成 | 生产镜像/edge、指标告警、Realm 绑定、备份恢复、重启/Outbox 演练、压测 |
+| 阶段 9：MVP 收口与工程隔离     | 自动化完成 | 一次性测试库、WS 入站/连接/断线/重连指标、负载证据、ADR-024           |
 
 ## 3. 当前正在进行的任务
+
+阶段 9 确认（自动化证据已就绪）：
+
+1. 阅读 `docs/phase-reports/PHASE_09_REPORT.md` 与
+   `docs/phase-reports/phase-09/`（隔离前后计数、指标快照、短时负载）。
+2. 若使用自己的数据库角色，确认其具备 `CREATEDB`，或设置
+   `TEST_DATABASE_URL`；`pnpm test` 会创建并删除 `wl_test_*` 数据库。
 
 阶段 7 实测（仍待用户确认）：
 
@@ -411,19 +420,55 @@
   指标测试；E2E 20/20 通过。
 - ADR-023、部署与恢复 runbook、AGENTS/README、阶段 8 报告与证据目录。
 
+### 阶段 9：MVP 收口（测试数据隔离与 WebSocket 观测）
+
+`packages/persistence` / `vitest.config.ts`：
+
+- `pnpm test` 每次生成一次性数据库 `wl_test_<base36 时间戳>_<随机后缀>`，
+  `globalSetup` 建库并运行现有 Drizzle 迁移，`teardown` 删除；测试连接串优先取
+  `TEST_DATABASE_URL`，否则取 `DATABASE_URL`。
+- 迁移 SQL 显式使用 `"public".` 全限定名，因此采用临时数据库而不是同库 schema；
+  迁移文件本身不做任何改写。
+- 异常中断残留的 `wl_test_*` 库在下次运行启动时清理（默认 24 小时，
+  `TEST_DATABASE_STALE_MS=0` 可立即清理）。
+- 新增 `testDatabase.test.ts`：断言测试进程位于临时库、迁移表齐全；全量测试
+  前后开发库账号/角色/物品/审计/Release/Outbox 计数完全一致。
+
+`apps/game-server`：
+
+- `RoomMetrics` 新增 `wsReceivedBytes`、`wsConnections`、`wsDisconnects`、
+  `wsReconnects`，注册表在 Room 销毁后汇总到 totals。
+- `WorldMapRoom.instrumentClient` 同时包装出站 `raw`/`enqueueRaw` 与底层
+  WebSocket `message` 事件；初次加入与重连都会应用，修复重连后出站字节漏计。
+- 非主动、非传送的断线进入宽限期时记录 disconnect，`onReconnect` 记录
+  reconnect。
+- JSON `/metrics` 与 `/metrics/prometheus` 同步输出四个新指标；Prometheus
+  名称：`ws_received_bytes_total`、`ws_connections_total`、
+  `ws_disconnects_total`、`ws_reconnects_total`，均带 Room/Realm/地图标签。
+- 负载脚本输出 `wsIn`、连接/断线/重连计数与重连率，并断言入站字节大于 0。
+
+`tests` 与文档：
+
+- 61 个测试文件、329 个测试全部通过；20 个浏览器 E2E 回归通过。
+- 短时负载：6 玩家 + 2 攻击者 30 秒，入站 58,638 B、出站 1,353,745 B、
+  tick p95 0.75ms、0 资产失败。
+- ADR-024；AGENTS/README 补充测试库与指标说明；阶段 9 报告与证据目录。
+
 ## 5. 尚未完成内容
 
 - 多 Game Server / 多 Realm 路由与实例注册：阶段 8 已让每个 Game Server 进程
   绑定一个 Realm，但没有进程注册、连接路由或按人数开新实例。
-- 独立 Outbox worker、审计/Release/Outbox 归档与独立测试数据库仍未建立。
-- 负载脚本未统计重连率与入站字节；WebSocket 指标只覆盖下行。
+- 独立 Outbox worker、审计/Release/Outbox 归档仍未建立。
+- WebSocket 指标已覆盖上下行与连接生命周期，但按 Room 聚合，没有单会话标签；
+  入站字节在应用层按 WS payload 统计，不包含 TCP/TLS/WS 帧头。
 - 聊天持久化、人工审核、敏感词热更新、禁言历史查询、举报与跨图频道。
 - 红名、爆装、罪恶值、死亡惩罚、竞技匹配与野外局部安全区（MVP 不做）。
 - NPC 对话/商店/任务；当前只有编译 NPC 标记。
 - 正式美术资源、怪物/技能动画与音效；当前为占位美术与 WebAudio 合成音。
 - 内容工作台当前按类型保存完整 JSON section，未提供逐字段表单、审批流或按
   Realm 的独立草稿；新增内容类型需要新增 schema 与校验规则。
-- 独立测试数据库或临时 schema；集成/E2E 仍使用共享开发库。
+- `pnpm test` 已使用一次性数据库；E2E 仍连接开发栈数据库（验证真实开发拓扑），
+  仅靠唯一账号/角色名隔离。
 - 过期掉落、`asset_commands`、审计与 Outbox 历史没有定期归档/清理任务。
 - 后台会话无 refresh token，8 小时后需重新登录；无 MFA/OIDC。
 - Outbox dispatcher 与 Control API 同进程；吞吐不足时需要独立 worker。
@@ -447,7 +492,7 @@
 | 审计/Outbox/Release 表持续增长      | 长期数据量上升                      | append-only 设计；归档与保留策略仍待数据库专项                          |
 | 后台会话无 refresh                  | 8 小时后重新登录                    | MVP 可接受；后续接入 OIDC/MFA                                           |
 | Playwright 并行数过高               | 250ms 可见性/攻击时序抖动           | 默认 2 worker；`PLAYWRIGHT_WORKERS` 可覆盖                              |
-| 共享开发库残留内容 Release/审计     | 后台列表较长、测试数据混杂          | 测试使用唯一 ID；独立测试库仍未建立                                     |
+| 共享开发库残留内容 Release/审计     | 后台列表较长、测试数据混杂          | `pnpm test` 使用一次性库；E2E 使用唯一 ID；历史数据未清理               |
 | 传送为离开/重新加入                 | 切换有短暂加载                      | 服务端先提交再通知；客户端重建场景；后续优化体验                        |
 | AOI 依赖 Colyseus StateView 行为    | 升级可能改变过滤/带宽               | 集成测试锁定远处不可见、近处可见、离开释放                              |
 | CombatEvent 全 Room 广播            | 远处玩家收到战斗表现事件            | MVP 事件量小；扩容前评估 AOI 事件过滤与带宽                             |
@@ -457,7 +502,8 @@
 | checkpoint 20 秒                    | 崩溃最多丢 20 秒瞬时状态            | 正常离开立即保存；资产不在 tick/内存中                                  |
 | 软件渲染下浏览器约 22–27 FPS        | 客户端帧率与可见延迟受影响          | 静态地表合批、nearest 渲染、20Hz patch；真机应更高                      |
 | Node fetch 拒绝 87 端口             | 负载脚本不能直连 matchmaking        | 通过 Vite `/ws` 代理 + `node:http` 读指标；内部客户端也使用 `node:http` |
-| 共享开发数据库                      | 测试数据残留、掉落/内容恢复污染     | 唯一账号/角色名、测试按 owner 过滤；独立测试库仍未建立                  |
+| E2E 共享开发数据库                  | E2E 数据残留、掉落/内容恢复污染     | 唯一账号/角色名、测试按 owner 过滤；需要完全隔离时用独立栈              |
+| 临时测试库需要 CREATEDB             | 权限不足时 `pnpm test` 失败         | 明确错误提示；`TEST_DATABASE_URL` 指向有权限的实例                      |
 | 开发 PostgreSQL 端口发布在所有接口  | 共享主机暴露风险                    | 仅本地开发；生产使用私有网络                                            |
 | 容器 inotify 限额 8192              | watcher ENOSPC                      | 默认后端无 watch、Vite 轮询                                             |
 | Playwright 浏览器无法在当前系统下载 | E2E 依赖预装 Chromium               | `.env` 指定 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`                            |
@@ -477,7 +523,11 @@
   CSRF Origin 校验会拒绝局域网来源。
 - 阶段 7 测试在共享开发库留下 17 个 Content Release、31 条激活记录、21 个
   管理员账号与 114 条审计记录；当前激活内容已恢复为 `baseline`，但发布中心会
-  显示这些测试历史。
+  显示这些测试历史。阶段 9 起 `pnpm test` 不再增加这类数据。
+- `pnpm test` 当前使用一次性数据库，每次增加一次建库与全量迁移（约 1–3 秒）；
+  数据库角色需要 `CREATEDB`。E2E 仍写入开发库，只靠唯一名称隔离。
+- 完整 `pnpm test:e2e` 会重写阶段 3–7 的截图与 WebSocket 日志；提交前只保留
+  本阶段新增证据，历史文件用 `git checkout` 恢复（阶段 8 起沿用此做法）。
 - 内容工作台以 JSON 编辑完整 section；便于技术运营，但不是最终面向非技术运营的
   表单化编辑器。校验问题与差异会阻止发布，但保存草稿只做 schema 校验。
 - 内容激活/回滚只影响之后创建的 Room；固定地图 Room 需要玩家重新进入或等待
@@ -510,8 +560,9 @@
 
 ## 8. 阻塞事项
 
-无技术阻塞。阶段 7 等待用户在 8584（游戏）与 8585（后台）实测验收；阶段 8
-自动化验收已完成，等待用户确认证据与生产演练方式。两项确认前不进入下一阶段。
+无技术阻塞。阶段 7 等待用户在 8584（游戏）与 8585（后台）实测验收；阶段 8 与
+阶段 9 的自动化验收已完成，等待用户确认证据。本阶段按用户“继续研发、确定下一
+阶段”的明确指令执行，不改变阶段 7/8 仍需用户确认的事实。
 
 ## 9. 最近一次测试结果
 
@@ -522,8 +573,9 @@
 | 格式        | `pnpm format:check`                                                                                     | 通过                                                                                        |
 | Lint / 边界 | `pnpm lint`                                                                                             | 通过（0 error / 0 warning）                                                                 |
 | 类型        | `pnpm typecheck`                                                                                        | 通过（根配置 + 15 个 workspace）                                                            |
-| 单元/集成   | `pnpm test`                                                                                             | 60 个文件，325 个测试全部通过（约 12.4s）                                                   |
-| 浏览器      | `pnpm test:e2e`（2 workers）                                                                            | 20 个测试全部通过（约 1.8 分钟）                                                            |
+| 单元/集成   | `pnpm test`                                                                                             | 61 个文件，329 个测试全部通过（约 13.3s）                                                   |
+| 隔离验证    | `pnpm test` 前后查询开发库计数                                                                          | 账号/角色/物品/审计/Release/Outbox 完全一致；无 `wl_test_*` 残留                            |
+| 浏览器      | `PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e`（2 workers）                                             | 20 个测试全部通过（约 1.8 分钟）                                                            |
 | 构建        | `pnpm build`                                                                                            | 4 个应用全部成功                                                                            |
 | 迁移        | `pnpm db:migrate`                                                                                       | 6 条迁移、19 张表                                                                           |
 | 容量 A      | `LOAD_PLAYERS=30 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 pnpm load:scenario`                          | 30/30、36000 接受、11069 拒绝、tick p95 4.3ms / p99 5.84ms、资产队列 p95 33.3ms、0 资产失败 |
@@ -533,6 +585,7 @@
 | 恢复        | `pnpm db:restore-drill`                                                                                 | 19 张表、6 条迁移、行数与不变量一致，演练库删除                                             |
 | 重启演练    | `pnpm drill:recovery`                                                                                   | SIGTERM 租约 1ms 释放；SIGKILL 周期 checkpoint 生效                                         |
 | Outbox      | `pnpm drill:outbox`                                                                                     | 失败退避 → applied → 重复 commandId duplicate                                               |
+| 短时负载    | `LOAD_PLAYERS=6 LOAD_ATTACKERS=2 LOAD_DURATION_MS=30000 pnpm load:scenario`                             | 6/6 加入、360 接受、tick p95 0.75ms、出站 1,353,745B、入站 58,638B、0 资产失败              |
 
 阶段 8 关键证据：
 
@@ -551,6 +604,17 @@
 - 证据目录：`docs/phase-reports/phase-08/`（deployment-check、rollback-drill、
   recovery-drill.json、restore-drill、backup、outbox-drill、database.txt、
   metrics、两份容量 JSON）。
+
+阶段 9 关键证据：
+
+- 测试隔离：全量测试前后开发库账号/角色/物品/审计/Release/Outbox 计数一致；
+  测试库 `wl_test_*` 在结束时删除，无残留。
+- 网络指标：Room JSON 与 Prometheus 均输出 `wsReceivedBytes`、
+  `wsConnections`、`wsDisconnects`、`wsReconnects`；重连集成测试断言计数与
+  入站字节。
+- 负载：短时场景记录 `wsIn`、`wsOut`、patch 与重连率，并断言入站字节大于 0。
+- 证据目录：`docs/phase-reports/phase-09/`（test-isolation.txt、
+  metrics.json、metrics.txt、load-short.json）。
 
 用户验收（历史）：
 
@@ -571,6 +635,8 @@
   主题：`feat(phase-7): deliver admin console, outbox operations and content releases`
 - 阶段 8 主提交：`d079b9644e4d9aff7a88358fadc7d002698e2c4f`
   主题：`feat(phase-8): deliver production deployment, observability and recovery`
+- 阶段 9 主提交：（待提交）
+  主题：`feat(phase-9): isolate test databases and complete websocket metrics`
 
 ## 11. 当前环境事实
 
@@ -581,23 +647,25 @@
   （8586）、game-server 87（8587）。
 - PostgreSQL 从 SSH 容器通过网关 `192.51.0.1:5432` 访问。
 - Playwright 使用预装 Chromium 131；默认 2 workers，软件渲染约 22–27 FPS。
-- 开发库当前有 2748 账号、2586 角色、3731 物品实例、196 钱包、43 管理员、
-  191 条审计（159 成功/32 失败）、44 条 Outbox（全部 applied）、32 个 Release、
-  54 条激活、8 个区服、0 个活跃租约；钱包/流水、物品放置不变量均为 0。
+- 开发库当前有 2819 账号、2652 角色、3860 物品实例、205 条审计、34 个 Release、
+  48 条 Outbox；钱包/流水、物品放置不变量均为 0。阶段 9 的全量测试未改变这些
+  计数。
 - 开发管理员：`admin` / `web-legend-admin`（除非 `ADMIN_SEED_PASSWORD` 覆盖）。
 - 激活内容为 `baseline`，checksum
   `732f923b8c9a0637af7f78644aa5e2d6be616376d2d649af4b5004f268ed245c`。
 
 ## 12. 下一步
 
-1. 在 `http://<LAN-IP>:8584/` 与 `http://<LAN-IP>:8585/` 按第 3 节完成阶段 7
+1. 确认阶段 9 证据（`docs/phase-reports/PHASE_09_REPORT.md`）；在目标数据库
+   角色上验证 `pnpm test` 的一次性库创建/删除，必要时设置 `TEST_DATABASE_URL`。
+2. 在 `http://<LAN-IP>:8584/` 与 `http://<LAN-IP>:8585/` 按第 3 节完成阶段 7
    实测，并确认阶段 1–6 游戏行为无回归。
-2. 确认阶段 8 证据与部署方式（`docs/phase-reports/PHASE_08_REPORT.md`、
+3. 确认阶段 8 证据与部署方式（`docs/phase-reports/PHASE_08_REPORT.md`、
    `docs/runbooks/DEPLOYMENT_AND_RECOVERY.md`）；在自己的证书与镜像仓库上复跑
    一次 `prod:deploy` / `prod:rollback`。
-3. 下一阶段前评估：独立测试数据库、Outbox 独立 worker、审计/Release/Outbox
-   归档、多 Realm 路由与聊天持久化/审核。
-4. 保持阶段 1–8 的 325 个测试与 20 个浏览器 E2E 为回归门禁；软件渲染环境默认
-   2 个 Playwright worker。新增压测/演练脚本已并入 `pnpm load:scenario`、
+4. 后续评估：E2E 独立环境、Outbox 独立 worker、审计/Release/Outbox 归档、
+   多 Realm 路由与聊天持久化/审核。
+5. 保持阶段 1–9 的 329 个测试与 20 个浏览器 E2E 为回归门禁；软件渲染环境默认
+   2 个 Playwright worker。压测/演练脚本已并入 `pnpm load:scenario`、
    `pnpm drill:*` 与 `pnpm db:*`。
-5. 正式音效与美术资源在用户确认阶段 8 后替换。
+6. 正式音效与美术资源在用户确认阶段 8 后替换。

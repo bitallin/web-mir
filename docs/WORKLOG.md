@@ -1364,3 +1364,102 @@ pnpm db:restore-drill <dump> <manifest>
 1. 用户在 8584/8585 完成阶段 7 实测，并确认阶段 8 的部署/恢复证据。
 2. 进入下一阶段前评估独立测试库、Outbox worker、审计/Release 归档、多 Realm
    路由与正式美术/音效。
+
+---
+
+## 2026-11-25 阶段 9：MVP 收口（测试数据隔离与 WebSocket 观测）
+
+### 目标
+
+MVP 计划定义的阶段 0–8 已全部交付。按用户“确定下一个尚未完成的 MVP 阶段”的
+指令，对照 `docs/WEB_LEGEND_MVP_PLAN_v2.md` 第 19 节 Definition of Done 与
+`docs/PROJECT_STATUS.md` 未完成项做差距审计，选择仍属 MVP 验收基础、且不新增
+玩法的两项：
+
+1. `pnpm test` 全部连接共享开发库，重复/并行运行会留下账号、物品、审计、
+   Release 与 Outbox 数据；PROJECT_STATUS 将其列为未完成项与风险。
+2. 架构 15.1 与 MVP 计划要求“断线率、重连率、每玩家上下行 bytes”；现有指标
+   只有出站字节，且 `onJoin` 的出站包装在重连后的新 Client 上未重新应用，
+   重连后出站字节漏计。
+
+### 实际改动
+
+1. **ADR-024**：记录一次性测试数据库与 Room 级网络指标的决策、替代方案与
+   后果；说明为什么不用同库 schema（Drizzle 迁移显式写 `"public".` 全限定名）。
+2. **测试数据隔离**
+   - `packages/persistence/test/testDatabaseNaming.ts`：生成
+     `wl_test_<base36 时间戳>_<随机>`、替换连接串中的数据库名、解析残留库年龄。
+   - `packages/persistence/test/testDatabase.ts`：建库、运行现有迁移、删库、
+     清理 24 小时前的 `wl_test_*` 残留库；`NODE_ENV=production` 拒绝执行。
+   - `packages/persistence/test/databaseGlobalSetup.ts`：Vite/Vitest 全局
+     setup/teardown；使用命名导出（默认导出会让 Vitest 忽略 `teardown`）。
+   - `vitest.config.ts`：每次运行生成库名并把带临时库的 `DATABASE_URL` 注入
+     worker；`TEST_DATABASE_URL` 可覆盖基础连接。
+   - `testDatabase.test.ts`：断言当前数据库是本次临时库、迁移表齐全。
+3. **WebSocket 观测**
+   - `RoomMetrics` / `MetricsSnapshot` 增加 `wsReceivedBytes`、`wsConnections`、
+     `wsDisconnects`、`wsReconnects`，注册表销毁 Room 时汇总到 totals。
+   - `WorldMapRoom.instrumentClient`：包装 `raw` / `enqueueRaw` 计出站字节，
+     监听底层 WebSocket `message` 计入站 payload；初次加入和重连都应用。
+   - `onLeave` 对非主动、非传送断线记 disconnect；`onReconnect` 记 reconnect。
+   - Prometheus 增加四个计数器；JSON `/metrics` 同步字段。
+   - 负载脚本输出 `wsIn`、重连率并断言入站字节大于 0。
+4. **文档**：AGENTS 测试要求、README 测试命令与门禁、PROJECT_STATUS、
+   ADR-024、阶段 9 报告与证据目录。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
+LOAD_PLAYERS=6 LOAD_ATTACKERS=2 LOAD_DURATION_MS=30000 pnpm load:scenario
+```
+
+- 格式 / lint / typecheck / build：通过。
+- 单元/集成：61 个文件、329 个测试全部通过（约 13.3s）。
+- 隔离：全量测试前后开发库账号/角色/物品/审计/Release/Outbox 计数一致；
+  `wl_test_*` 库为 0。
+- 浏览器 E2E：20/20 通过（约 1.8 分钟，2 workers）。
+- 短时负载：6/6 加入、360 接受、tick p95 0.75ms、出站 1,353,745B、
+  入站 58,638B、0 资产失败；重连率 0%。
+- 实时 Prometheus 快照：4 个 WS 指标均有 Room 标签与数值。
+
+### 遇到的问题及解决方法
+
+1. **同库 schema 不可行**：首次用 `search_path` + `migrationsSchema`，迁移仍
+   失败于 `CREATE TYPE "public"."admin_audit_result"`，因为 Drizzle 生成的 DDL
+   显式限定 `public`。改为每次创建独立数据库，不再改写迁移。
+2. **Vitest 未执行 teardown**：`databaseGlobalSetup.ts` 同时使用默认导出和命名
+   `teardown` 时，Vitest 只取默认导出，残留了 5 个测试库。改为仅命名导出
+   `setup`/`teardown`，并用 `TEST_DATABASE_STALE_MS=0` 清理后验证为 0。
+3. **配置加载告警**：`vitest.config.ts` 直接导入 persistence 会拉起整张 schema
+   依赖并产生 20+ 条 Vite native loader 告警；抽出仅依赖 `node:crypto` 的
+   `testDatabaseNaming.ts` 后降到 1 条。
+4. **ESLint `preserve-caught-error`**：建库失败重新抛出时补充 `cause`。
+5. **负载证据路径**：`LOAD_OUTPUT` 相对路径以 `apps/game-server` 为 cwd，产物
+   写到包目录；已移动回 `docs/phase-reports/phase-09/`。
+6. **E2E 覆盖旧截图**：与阶段 8 相同，完整 E2E 重写阶段 3–7 证据；提交前
+   `git checkout` 恢复历史文件。
+
+### 尚未解决的问题
+
+- E2E 仍使用开发栈数据库；完全隔离需要独立端口与一套测试栈，留待后续。
+- 网络指标按 Room 聚合，无单会话标签；入站字节为应用层 WS payload，不含
+  TCP/TLS/WS 帧头。
+- 多 Realm 路由、独立 Outbox worker、审计/Release 归档、聊天持久化仍属后续阶段。
+
+### 阶段提交
+
+- 阶段 9 主提交：（待提交）
+  主题：`feat(phase-9): isolate test databases and complete websocket metrics`。
+
+### 下一步计划
+
+1. 用户确认阶段 9 证据，并在目标数据库角色上验证 `CREATEDB` /
+   `TEST_DATABASE_URL`。
+2. 按原计划完成阶段 7 的 8584/8585 实测与阶段 8 的部署/恢复确认。
+3. 后续评估 E2E 独立环境、Outbox worker、审计/Release 归档与多 Realm 路由。

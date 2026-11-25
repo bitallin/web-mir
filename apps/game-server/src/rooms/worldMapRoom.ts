@@ -258,6 +258,27 @@ function tileCenter(tile: TilePoint): { x: number; y: number } {
   };
 }
 
+/** `ws` emits Buffer, ArrayBuffer or a list of fragments depending on framing. */
+function payloadByteLength(data: unknown): number {
+  if (typeof data === 'string') {
+    return Buffer.byteLength(data, 'utf8');
+  }
+  if (data instanceof ArrayBuffer) {
+    return data.byteLength;
+  }
+  if (ArrayBuffer.isView(data)) {
+    return data.byteLength;
+  }
+  if (Array.isArray(data)) {
+    let total = 0;
+    for (const chunk of data) {
+      total += payloadByteLength(chunk);
+    }
+    return total;
+  }
+  return 0;
+}
+
 /**
  * One Colyseus room per map instance (ADR-003 / ADR-018). The room performs
  * connection adaptation only: ticket validation, lease acquisition, rate
@@ -467,18 +488,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   override onJoin(client: Client): void {
-    // Bandwidth attribution is per client and transport-owned; wrap the raw
-    // senders once so every state patch and message is counted.
-    const raw = client.raw.bind(client);
-    client.raw = (data, options, callback) => {
-      this.metrics.recordWsSent(data.byteLength, this.patching);
-      raw(data, options, callback);
-    };
-    const enqueueRaw = client.enqueueRaw.bind(client);
-    client.enqueueRaw = (data, options) => {
-      this.metrics.recordWsSent(data.byteLength, this.patching);
-      enqueueRaw(data, options);
-    };
+    this.instrumentClient(client);
 
     const auth = authDataSchema.parse(client.auth);
     if (this.sessionByPlayer.has(auth.characterId)) {
@@ -614,6 +624,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       }
     }, 50);
 
+    this.metrics.recordWsConnection();
     this.options.logger.info(
       {
         roomId: this.roomId,
@@ -632,6 +643,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (session === undefined) {
       return;
     }
+    // The reconnected transport hands us a fresh Client; without reapplying
+    // the wrappers its outbound bytes and inbound messages would be invisible.
+    this.instrumentClient(client);
+    this.metrics.recordWsReconnect();
     session.client = client;
     client.view = session.view;
     // A refreshed browser starts a fresh client with sequence 0; accepting its
@@ -671,6 +686,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
 
+    this.metrics.recordWsDisconnect();
     this.setConnected(session.playerId, false);
     this.simulation.clearPath(session.playerId);
     // A dropped player must not be killed by monsters during the grace window.
@@ -686,6 +702,27 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     } catch {
       await this.removeSession(client.sessionId);
     }
+  }
+
+  /**
+   * Bandwidth attribution is per client and transport-owned. Wrapping the raw
+   * senders counts every patch and message; the raw socket's `message` event
+   * yields the inbound payload size before Colyseus decodes it (ADR-024).
+   */
+  private instrumentClient(client: Client): void {
+    const raw = client.raw.bind(client);
+    client.raw = (data, options, callback) => {
+      this.metrics.recordWsSent(data.byteLength, this.patching);
+      raw(data, options, callback);
+    };
+    const enqueueRaw = client.enqueueRaw.bind(client);
+    client.enqueueRaw = (data, options) => {
+      this.metrics.recordWsSent(data.byteLength, this.patching);
+      enqueueRaw(data, options);
+    };
+    client.ref.on('message', (data: unknown) => {
+      this.metrics.recordWsReceived(payloadByteLength(data));
+    });
   }
 
   override async onDispose(): Promise<void> {
