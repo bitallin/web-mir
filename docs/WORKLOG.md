@@ -1179,6 +1179,11 @@ pnpm load:world
     `git checkout` 恢复旧证据，只提交阶段 7 证据。
 13. **旧开发进程占用 84–87**：停止上一会话遗留的 Vite/tsx 进程后重新启动
     84–87；当前栈运行本阶段代码。
+14. **局域网后台登录报 Request origin is not allowed**：admin-web 的 Vite
+    `/api`/`/health` 代理使用字符串简写，转发的 Host 被改写为 `127.0.0.1:86`，
+    Control API 的 CSRF Origin 同源判断因此拒绝 `http://<LAN-IP>:8585`。改为
+    `{ changeOrigin: false }` 保留浏览器 Host；用 LAN Origin 直接请求登录返回
+    200。
 
 ### 尚未解决的问题
 

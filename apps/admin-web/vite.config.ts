@@ -22,8 +22,11 @@ export default defineConfig(({ mode }) => {
         interval: 500,
       },
       proxy: {
-        '/api': controlApiUrl,
-        '/health': controlApiUrl,
+        // Preserve the browser's Host header: the Control API validates the
+        // Origin of cookie-authenticated writes against it, and a rewritten
+        // Host would reject LAN origins that differ from 127.0.0.1.
+        '/api': { target: controlApiUrl, changeOrigin: false },
+        '/health': { target: controlApiUrl, changeOrigin: false },
       },
     },
     preview: {

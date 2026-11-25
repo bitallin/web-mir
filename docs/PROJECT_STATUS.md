@@ -442,6 +442,8 @@ Outbox + Game Server 幂等执行、内容草稿/校验/不可变 Release/按区
   提前解除（再次 Mute 一个过去时间可解除）。
 - 管理员会话 8 小时有效且无 refresh token；退出登录只撤销当前令牌。
 - 内部管理端点的共享令牌在开发环境使用默认值，生产必须显式覆盖。
+- 后台 `/api` 开发代理必须保留原始 Host（`changeOrigin: false`），否则 Control
+  API 的 CSRF Origin 校验会拒绝局域网来源；已修复并验证 LAN 登录 200。
 - 阶段 6 的安全区、PvP、聊天过滤、小地图、音效与阶段 1–5 行为保持不变；本次
   回归门禁 20/20 通过。
 - 技术占位 tileset、角色 Sprite 与怪物几何造型仍为占位；Tiled 源图为正交逻辑

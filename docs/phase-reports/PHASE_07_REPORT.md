@@ -208,6 +208,8 @@
 - 后台无 refresh token/MFA；禁言历史/申诉未实现。
 - Outbox dispatcher 与 Control API 同进程；吞吐不足时需要独立 worker。
 - 共享开发库留下测试 Release/审计/管理员记录；当前激活内容已恢复 baseline。
+- admin-web 的 Vite 代理必须保留 Host（`changeOrigin: false`），否则局域网后台
+  登录会被 CSRF Origin 校验拒绝；修复后 LAN Origin 登录 200。
 - 正式美术、音效、压测、部署与恢复演练属于阶段 8。
 
 ## 6. 用户实测清单（8584 / 8585）
