@@ -4,7 +4,7 @@
 - 日期：2026-11-25
 - 角色：Tech Lead / 首席架构师 / 研发负责人
 - 依据：`docs/MVP_ACCEPTANCE_REPORT.md`、`docs/GAMEPLAY_REVIEW.md`、
-  `docs/POST_MVP_ROADMAP.md`、`docs/TECHNICAL_DEBT.md`、
+  `docs/PROJECT_ROADMAP.md`、`docs/TECHNICAL_DEBT.md`、
   `docs/WEB_LEGEND_TECHNICAL_ARCHITECTURE_v2.md`、`docs/WEB_LEGEND_MVP_PLAN_v2.md`、
   `AGENTS.md`、ADR-001…025
 

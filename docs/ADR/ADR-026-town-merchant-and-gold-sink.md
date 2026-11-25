@@ -48,7 +48,9 @@ Alpha 0.1 后，游戏缺少稳定的金币消耗端：金币只能通过击杀�
 `item_instances`：
 
 - `shop_buy` / `shop_sell` 作为新的 `AssetCommandKind`；
-- 幂等键沿用 `cmd:<characterId>:<kind>:<commandId>`；
+- 幂等键沿用 `cmd:<characterId>:<kind>:<commandId>`；账本键也必须带操作类型
+  （`shop_buy:` / `shop_sell:`），否则同一 `commandId` 跨类型复用会撞账本唯一
+  约束并把整笔交易回滚（独立审查发现，已修复）；
 - 金币变化与物品变化在同一事务；
 - 购买使用条件更新（`balance >= cost`）扣款，失败即 `INSUFFICIENT_GOLD`；
 - 出售锁定物品行与角色行，校验归属后再删除/扣减；
@@ -86,6 +88,9 @@ Alpha 0.1 后，游戏缺少稳定的金币消耗端：金币只能通过击杀�
 
 目录只包含展示所需的最小字段，不包含完整内容 bundle，避免把运营配置整体
 暴露给客户端。
+
+目录在发送前逐商人、再整体做 `safeParse`：手改编译地图或超大类目时只禁用该
+商店并记录日志，不能让异常在加入定时器内抛出；客户端也不能依赖目录一定存在。
 
 ### 2.5 新角色启动资金
 

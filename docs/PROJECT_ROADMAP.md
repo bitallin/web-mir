@@ -1,9 +1,14 @@
-# Web Legend MVP 之后的研发路线（Alpha → Beta）
+# Web Legend 研发路线（Alpha → Beta → 长期）
+
+> 2026-11-25 由 `docs/POST_MVP_ROADMAP.md` 更名，历史引用已同步。本文件只回答
+> “先做什么、为什么、何时算完成”；产品原则见 `docs/PRODUCT_VISION.md`，里程碑
+> 级演进记录见 `docs/EVOLUTION_LOG.md`，任务级命令与结果见 `docs/WORKLOG.md`。
 
 - 日期：2026-11-25
-- 基线：MVP 阶段 0–9 已交付；审计结论见 `docs/MVP_ACCEPTANCE_REPORT.md`
+- 基线：MVP 阶段 0–9 + Alpha 0.1 已交付；审计结论见 `docs/MVP_ACCEPTANCE_REPORT.md`
 - 产品评审：`docs/GAMEPLAY_REVIEW.md`
 - 债务清单：`docs/TECHNICAL_DEBT.md`
+- 当前版本计划：`docs/ALPHA_02_EXECUTION_PLAN.md`
 - 估算口径：1 名全职全栈工程师 + 0.5 名美术，2 周一个迭代；人周为净开发量，
   不含等待与返工
 
@@ -93,9 +98,9 @@
 
 ## 3. Alpha 0.2：游戏体验完善（6 周）
 
-> 执行状态（2026-11-25）：切片 1“主城商店与经济闭环”已交付；后续顺序调整为
-> 商店 → 三职业 → 怪物威胁/死亡代价 → 装备与美术，理由见
-> `docs/ALPHA_02_EXECUTION_PLAN.md` §0.3。
+> 执行状态（2026-11-25）：切片 1“主城商店与经济闭环”已交付；S2 第一项
+> “服务端法力回复”已完成。后续顺序为 三职业技能 → 怪物威胁/死亡代价 →
+> 装备与美术，理由见 `docs/ALPHA_02_EXECUTION_PLAN.md` §0.3。
 
 ### 产品目标
 

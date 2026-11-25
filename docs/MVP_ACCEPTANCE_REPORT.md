@@ -1,5 +1,8 @@
 # Web Legend MVP 全面审计与验收报告
 
+> 本文是 2026-11-25 的 MVP 审计快照。Alpha 0.1 已关闭其中的 8 项 P1，Alpha 0.2
+> 已新增商店与法力回复；当前状态以 `docs/PROJECT_STATUS.md` 为准。
+
 - 日期：2026-11-25
 - 审计角色：Tech Lead / 首席架构师 / 研发负责人
 - 范围：阶段 0–9 的代码、数据库、内容、测试、部署与游戏体验
@@ -11,7 +14,7 @@
 
 - `docs/TECHNICAL_DEBT.md`：57 项债务（P1×8 / P2×25 / P3×24 / P0×0）
 - `docs/GAMEPLAY_REVIEW.md`：以制作人视角的十维游戏性评审
-- `docs/POST_MVP_ROADMAP.md`：Alpha 0.1/0.2/0.3、Beta 与长期路线
+- `docs/PROJECT_ROADMAP.md`：Alpha 0.1/0.2/0.3、Beta 与长期路线
 - `docs/phase-reports/audit-2026-11-25/`：本轮截图、压测与查询证据
 
 ## 1. 审计结论摘要
@@ -409,7 +412,7 @@ Alpha 0.1 门禁：
 
 满足后进入 Alpha 0.2（6 周）：三职业差异、4–6 种怪物、1–15 级内容、
 15–20 件装备、商店金币回收、HUD/美术第一版。详细范围、里程碑、验收与风险
-见 `docs/POST_MVP_ROADMAP.md`。
+见 `docs/PROJECT_ROADMAP.md`。
 
 ## 11. 证据索引
 

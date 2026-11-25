@@ -2,8 +2,9 @@
 
 - 版本：1.0（2026-11-25，Alpha 0.1 完成后确立）
 - 维护者：产品与架构负责人（Tech Lead / CTO / Game Director）
-- 配套文档：`docs/POST_MVP_ROADMAP.md`（版本路线）、`docs/ALPHA_02_EXECUTION_PLAN.md`
-  （当前迭代）、`docs/ENGINEERING_LEARNINGS.md`（工程经验）
+- 配套文档：`docs/PROJECT_ROADMAP.md`（版本路线）、`docs/ALPHA_02_EXECUTION_PLAN.md`
+  （当前迭代）、`docs/EVOLUTION_LOG.md`（里程碑演进与复盘）、
+  `docs/ENGINEERING_LEARNINGS.md`（工程经验）
 
 ## 1. 使命
 
@@ -85,7 +86,7 @@ MMORPG。它不是技术演示，也不是功能堆砌的网页小游戏，而�
 
 ## 6. 版本演进与门禁
 
-版本路线以 `docs/POST_MVP_ROADMAP.md` 为准；本文只固定原则：
+版本路线以 `docs/PROJECT_ROADMAP.md` 为准；本文只固定原则：
 
 - **Alpha 0.2**：核心体验。三职业差异、怪物威胁、死亡代价、经济闭环、正式
   美术第一版。
