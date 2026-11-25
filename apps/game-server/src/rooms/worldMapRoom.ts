@@ -40,6 +40,7 @@ import {
   sessionTransferSchema,
   shopBuySchema,
   shopCatalogSchema,
+  shopMerchantSchema,
   shopSellSchema,
   skillCastSchema,
   systemNoticeSchema,
@@ -67,6 +68,7 @@ import {
   type MapPortal,
   type SessionTransfer,
   type ShopCatalog,
+  type ShopMerchant,
   type ShopOffer,
   type ShopSellPrice,
   type SystemNotice,
@@ -2436,9 +2438,25 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
   private sendShopCatalog(client: Client, session: SessionRecord): void {
     const player = this.state.players.get(session.playerId);
-    const merchants = this.map.runtime.manifest.npcPoints
-      .filter((npc) => npc.role === 'merchant')
-      .map((npc) => ({ id: npc.id, name: npc.name, tile: npc.tile }));
+    const merchants: ShopMerchant[] = [];
+    for (const npc of this.map.runtime.manifest.npcPoints) {
+      if (npc.role !== 'merchant') {
+        continue;
+      }
+      const parsed = shopMerchantSchema.safeParse({
+        id: npc.id,
+        name: npc.name,
+        tile: npc.tile,
+      });
+      if (!parsed.success) {
+        this.options.logger.warn(
+          { roomId: this.roomId, npcId: npc.id },
+          'skipping merchant with an id the shop protocol cannot carry',
+        );
+        continue;
+      }
+      merchants.push(parsed.data);
+    }
     const items = Object.values(this.content.bundle.items);
     const offers: ShopOffer[] = items
       .filter(
@@ -2465,7 +2483,17 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       .filter((item) => itemSellPrice(item) > 0)
       .map((item) => ({ templateId: item.id, sellPrice: itemSellPrice(item) }));
     const catalog: ShopCatalog = { merchants, offers, sellPrices };
-    client.send(SERVER_MESSAGES.shopCatalog, shopCatalogSchema.parse(catalog));
+    // A hand-edited map or a very large release must degrade to "no shop",
+    // never throw inside the deferred join timer.
+    const parsed = shopCatalogSchema.safeParse(catalog);
+    if (!parsed.success) {
+      this.options.logger.error(
+        { roomId: this.roomId, issues: parsed.error.issues.length },
+        'shop catalog failed validation; players cannot trade in this room',
+      );
+      return;
+    }
+    client.send(SERVER_MESSAGES.shopCatalog, parsed.data);
   }
 
   private requireAlive(session: SessionRecord): CommandRejectionCode | null {

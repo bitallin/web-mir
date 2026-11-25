@@ -2,6 +2,7 @@ import {
   CHAT_MESSAGE_MAX_LENGTH,
   CHARACTER_CLASS_CATALOG,
   MONSTER_STATE_LABELS,
+  SHOP_MAX_QUANTITY,
   SHOP_RANGE_TILES,
   TILE_UNITS,
   type CharacterView,
@@ -802,47 +803,51 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
 
           {shopTab === 'buy' ? (
             <ul className="shop-list" data-testid="shop-offers">
-              {shopCatalog.offers.map((offer) => (
-                <li
-                  key={offer.templateId}
-                  className="shop-offer"
-                  data-testid="shop-offer"
-                  data-template-id={offer.templateId}
-                  data-price={offer.buyPrice}
-                >
-                  <div className="shop-offer-main">
-                    <strong>{offer.name}</strong>
-                    <span className="shop-offer-meta">{describeShopOffer(offer)}</span>
-                    <span className="shop-offer-level">
-                      Lv.{offer.levelRequirement}
-                      {offer.levelRequirement > level ? ' · 等级不足' : ''}
-                    </span>
-                  </div>
-                  <span className="shop-price">{offer.buyPrice} 金币</span>
-                  <button
-                    type="button"
-                    data-testid="shop-buy"
-                    disabled={gold < offer.buyPrice}
-                    onClick={() => {
-                      buyOffer(offer, 1);
-                    }}
+              {shopCatalog.offers.map((offer) => {
+                // Never offer a quantity the content or protocol will reject.
+                const bulkQuantity = Math.min(5, offer.maxStack, SHOP_MAX_QUANTITY);
+                return (
+                  <li
+                    key={offer.templateId}
+                    className="shop-offer"
+                    data-testid="shop-offer"
+                    data-template-id={offer.templateId}
+                    data-price={offer.buyPrice}
                   >
-                    买 1
-                  </button>
-                  {offer.stackable ? (
+                    <div className="shop-offer-main">
+                      <strong>{offer.name}</strong>
+                      <span className="shop-offer-meta">{describeShopOffer(offer)}</span>
+                      <span className="shop-offer-level">
+                        Lv.{offer.levelRequirement}
+                        {offer.levelRequirement > level ? ' · 等级不足' : ''}
+                      </span>
+                    </div>
+                    <span className="shop-price">{offer.buyPrice} 金币</span>
                     <button
                       type="button"
-                      data-testid="shop-buy-five"
-                      disabled={gold < offer.buyPrice * 5}
+                      data-testid="shop-buy"
+                      disabled={gold < offer.buyPrice}
                       onClick={() => {
-                        buyOffer(offer, 5);
+                        buyOffer(offer, 1);
                       }}
                     >
-                      买 5
+                      买 1
                     </button>
-                  ) : null}
-                </li>
-              ))}
+                    {offer.stackable && bulkQuantity > 1 ? (
+                      <button
+                        type="button"
+                        data-testid="shop-buy-five"
+                        disabled={gold < offer.buyPrice * bulkQuantity}
+                        onClick={() => {
+                          buyOffer(offer, bulkQuantity);
+                        }}
+                      >
+                        {`买 ${String(bulkQuantity)}`}
+                      </button>
+                    ) : null}
+                  </li>
+                );
+              })}
               {shopCatalog.offers.length === 0 ? (
                 <li className="empty">商人暂时没有可出售的商品</li>
               ) : null}
@@ -853,6 +858,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 .filter((item) => sellPriceByTemplate.has(item.templateId))
                 .map((item) => {
                   const unitPrice = sellPriceByTemplate.get(item.templateId) ?? 0;
+                  const bulkQuantity = Math.min(item.quantity, SHOP_MAX_QUANTITY);
                   return (
                     <li
                       key={item.itemId}
@@ -880,10 +886,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           type="button"
                           data-testid="shop-sell-all"
                           onClick={() => {
-                            shopSell(nearbyMerchant.id, item.itemId, item.quantity);
+                            shopSell(nearbyMerchant.id, item.itemId, bulkQuantity);
                           }}
                         >
-                          全部
+                          {bulkQuantity === item.quantity ? '全部' : `卖 ${String(bulkQuantity)}`}
                         </button>
                       ) : null}
                     </li>

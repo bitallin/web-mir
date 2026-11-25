@@ -290,6 +290,18 @@ export class AssetService {
     const table = requireLootTable(input.monsterTemplateId, this.content.lootTables);
 
     return this.db.transaction(async (tx) => {
+      // Lock the character before writing the idempotency row: the foreign key
+      // takes a share lock on the same row, and share-then-exclusive ordering
+      // deadlocks under concurrency (EL-012).
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
       const claimed = await tx
         .insert(assetCommands)
         .values({
@@ -302,15 +314,6 @@ export class AssetService {
         .returning({ id: assetCommands.id });
       if (claimed.length === 0) {
         return null;
-      }
-
-      const [character] = await tx
-        .select()
-        .from(characters)
-        .where(eq(characters.id, input.characterId))
-        .for('update');
-      if (character === undefined) {
-        throw new AssetError('INVALID_SESSION');
       }
 
       const roll = rollLoot(table, this.rng);
@@ -905,7 +908,9 @@ export class AssetService {
         balanceAfter: wallet.balance,
         reason: 'shop_purchase',
         referenceId: `${input.merchantId}:${input.templateId}`,
-        idempotencyKey: `shop:${input.characterId}:${input.commandId}:gold`,
+        // Include the kind: asset_commands claims are kind-scoped, so the same
+        // commandId must also produce distinct ledger keys for buy and sell.
+        idempotencyKey: `shop_buy:${input.characterId}:${input.commandId}:gold`,
         createdAt: now,
       });
 
@@ -1011,7 +1016,7 @@ export class AssetService {
         balanceAfter: wallet.balance,
         reason: 'shop_sale',
         referenceId: `${input.merchantId}:${item.id}`,
-        idempotencyKey: `shop:${input.characterId}:${input.commandId}:gold`,
+        idempotencyKey: `shop_sell:${input.characterId}:${input.commandId}:gold`,
         createdAt: now,
       });
 

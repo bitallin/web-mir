@@ -19,10 +19,12 @@ import {
   type CharacterProgress,
   type CommandRejected,
   type CombatProfile,
+  type ContentBundle,
   type InventorySnapshot,
   type LootClaimed,
   type ShopCatalog,
 } from '@web-legend/contracts';
+import { BASE_CONTENT_BUNDLE, contentChecksum } from '@web-legend/content-schema';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
 import { createLogger } from '@web-legend/observability';
 import {
@@ -39,6 +41,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { GameServerEnv } from '../src/env';
 import { createGameServer, type GameServerRuntime } from '../src/server';
+import type { ContentProvider } from '../src/world/contentStore';
 import {
   createActor,
   issueTicket,
@@ -192,9 +195,11 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
   }
 
   function townActor(options: CreateActorOptions = {}): Promise<TestActor> {
+    // (9,8) is exactly SHOP_RANGE_TILES (3) from the merchant at (12,8); the
+    // main buy/sell test therefore exercises the inclusive boundary.
     return createActor(db, 'Shop', {
       mapId: STARTER_TOWN_MAP_ID,
-      position: tileUnits({ x: 12, y: 9 }),
+      position: tileUnits({ x: 9, y: 8 }),
       ...options,
     });
   }
@@ -249,10 +254,31 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
       INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
 
+    // Priced class weapons let the tests exercise the offer filter and the
+    // authoritative CLASS_RESTRICTED path without shipping them in content.
+    const bundle = JSON.parse(JSON.stringify(BASE_CONTENT_BUNDLE)) as ContentBundle;
+    const warriorSword = bundle.items['warrior_sword'];
+    const mageStaff = bundle.items['mage_staff'];
+    if (warriorSword === undefined || mageStaff === undefined) {
+      throw new Error('baseline content is missing a class weapon');
+    }
+    warriorSword.buyPrice = 100;
+    mageStaff.buyPrice = 100;
+    const contentStore: ContentProvider = {
+      snapshot: () => ({
+        version: 'test-shop',
+        checksum: contentChecksum(bundle),
+        bundle,
+      }),
+      start: () => Promise.resolve(),
+      stop: () => undefined,
+    };
+
     runtime = createGameServer({
       env,
       logger: logger(),
       database: db,
+      contentStore,
       world: {
         reconnectGraceSeconds: 1,
         checkpointIntervalMs: 250,
@@ -574,5 +600,48 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     });
     await waitUntil(() => nearRejections.length > 0, 5_000, 'wrong merchant rejection');
     expect(nearRejections[0]?.code).toBe('SHOP_UNAVAILABLE');
+  });
+
+  it('filters class-restricted offers and rejects cross-class purchases', async () => {
+    const mage = await townActor({ classId: 'mage', gold: 200 });
+    const mageRoom = await createWorld(mage.ticket, STARTER_TOWN_MAP_ID);
+    const mageCatalogs: ShopCatalog[] = [];
+    const mageRejections: CommandRejected[] = [];
+    mageRoom.onMessage('shop.catalog', (payload: unknown) => {
+      mageCatalogs.push(shopCatalogSchema.parse(payload));
+    });
+    mageRoom.onMessage('command.rejected', (payload: unknown) => {
+      mageRejections.push(commandRejectedSchema.parse(payload));
+    });
+    await waitUntil(() => mageCatalogs.length > 0, 5_000, 'mage catalog');
+    expect(mageCatalogs[0]?.offers.some((offer) => offer.templateId === 'mage_staff')).toBe(true);
+    expect(mageCatalogs[0]?.offers.some((offer) => offer.templateId === 'warrior_sword')).toBe(
+      false,
+    );
+
+    mageRoom.send('shop.buy', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      merchantId: 'town_merchant',
+      templateId: 'warrior_sword',
+      quantity: 1,
+    });
+    await waitUntil(() => mageRejections.length > 0, 5_000, 'class rejection');
+    expect(mageRejections[0]?.code).toBe('CLASS_RESTRICTED');
+
+    const warrior = await townActor({ classId: 'warrior', gold: 200 });
+    const warriorRoom = await createWorld(warrior.ticket, STARTER_TOWN_MAP_ID);
+    const warriorCatalogs: ShopCatalog[] = [];
+    warriorRoom.onMessage('shop.catalog', (payload: unknown) => {
+      warriorCatalogs.push(shopCatalogSchema.parse(payload));
+    });
+    await waitUntil(() => warriorCatalogs.length > 0, 5_000, 'warrior catalog');
+    expect(warriorCatalogs[0]?.offers.some((offer) => offer.templateId === 'warrior_sword')).toBe(
+      true,
+    );
+    expect(warriorCatalogs[0]?.offers.some((offer) => offer.templateId === 'mage_staff')).toBe(
+      false,
+    );
   });
 });

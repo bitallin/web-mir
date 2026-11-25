@@ -845,6 +845,15 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
         quantity: 2,
       }),
     ).rejects.toMatchObject({ code: 'INVALID_QUANTITY' } satisfies Partial<AssetError>);
+    await expect(
+      service.buy({
+        characterId: character.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        templateId: 'small_hp_potion',
+        quantity: 21,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_QUANTITY' } satisfies Partial<AssetError>);
   });
 
   it('refuses to sell equipped, foreign or price-less items', async () => {
@@ -901,5 +910,145 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
         quantity: 1,
       }),
     ).rejects.toMatchObject({ code: 'CANNOT_SELL' } satisfies Partial<AssetError>);
+  });
+
+  it('keeps buy and sell ledger idempotency independent for one command id', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 100 });
+    const commandId = randomUUID();
+    const bought = await service.buy({
+      characterId: character.id,
+      commandId,
+      merchantId: 'town_merchant',
+      templateId: 'small_hp_potion',
+      quantity: 1,
+    });
+    const potion = bought.snapshot.items.find((item) => item.templateId === 'small_hp_potion');
+    expect(potion).toBeDefined();
+
+    // The same UUID is claimed once per kind, so the sell must still settle.
+    const sold = await service.sell({
+      characterId: character.id,
+      commandId,
+      merchantId: 'town_merchant',
+      itemId: potion!.itemId,
+      quantity: 1,
+    });
+    expect(sold.sold?.quantity).toBe(1);
+    expect(sold.snapshot.gold).toBe(90);
+  });
+
+  it('enforces class restrictions on priced items', async () => {
+    const bundle = JSON.parse(JSON.stringify(DEFAULT_CONTENT_BUNDLE)) as ContentBundle;
+    const sword = bundle.items['warrior_sword'];
+    expect(sword).toBeDefined();
+    if (sword === undefined) {
+      return;
+    }
+    sword.buyPrice = 100;
+    const themed = new AssetService(db, { now: () => clock, rng: () => 0, content: bundle });
+    const mage = await createCharacter(db, 'mage', { gold: 100 });
+    await expect(
+      themed.buy({
+        characterId: mage.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        templateId: 'warrior_sword',
+        quantity: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'CLASS_RESTRICTED' } satisfies Partial<AssetError>);
+
+    const warrior = await createCharacter(db, 'warrior', { gold: 100 });
+    const bought = await themed.buy({
+      characterId: warrior.id,
+      commandId: randomUUID(),
+      merchantId: 'town_merchant',
+      templateId: 'warrior_sword',
+      quantity: 1,
+    });
+    expect(bought.purchased?.templateId).toBe('warrior_sword');
+    expect(bought.snapshot.gold).toBe(0);
+  });
+
+  it('lets only one concurrent full-stack sale win', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    const potion = await inventoryItem(db, character.id, 'small_hp_potion');
+    const sellAll = () =>
+      service.sell({
+        characterId: character.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        itemId: potion.id,
+        quantity: potion.quantity,
+      });
+    const results = await Promise.allSettled([sellAll(), sellAll()]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected?.status === 'rejected' ? rejected.reason : null).toMatchObject({
+      code: 'ITEM_NOT_FOUND',
+    });
+
+    const loaded = await service.loadAssets(character.id);
+    expect(loaded.snapshot.gold).toBe(5 * potion.quantity);
+  });
+
+  it('replays a duplicate sell without crediting twice', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    const potion = await inventoryItem(db, character.id, 'small_hp_potion');
+    const commandId = randomUUID();
+    const first = await service.sell({
+      characterId: character.id,
+      commandId,
+      merchantId: 'town_merchant',
+      itemId: potion.id,
+      quantity: 1,
+    });
+    const replay = await service.sell({
+      characterId: character.id,
+      commandId,
+      merchantId: 'town_merchant',
+      itemId: potion.id,
+      quantity: 1,
+    });
+    expect(replay.deduplicated).toBe(true);
+    expect(replay.snapshot.gold).toBe(first.snapshot.gold);
+    expect(
+      await db
+        .select()
+        .from(currencyLedger)
+        .where(
+          and(eq(currencyLedger.characterId, character.id), eq(currencyLedger.reason, 'shop_sale')),
+        ),
+    ).toHaveLength(1);
+  });
+
+  it('serializes concurrent kill rewards on one character', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    const reward = () =>
+      service.grantKillReward({
+        characterId: character.id,
+        mapId: 'starter_wilds',
+        reference: `test-concurrent-kill-${randomUUID()}`,
+        monsterTemplateId: 'wild_slime',
+        x: 7_500,
+        y: 15_500,
+      });
+    const outcomes = await Promise.all([reward(), reward()]);
+    expect(outcomes[0]).not.toBeNull();
+    expect(outcomes[1]).not.toBeNull();
+
+    const loaded = await service.loadAssets(character.id);
+    const expectedGold = (outcomes[0]?.goldGained ?? 0) + (outcomes[1]?.goldGained ?? 0);
+    expect(loaded.snapshot.gold).toBe(expectedGold);
+    expect(
+      await db
+        .select()
+        .from(currencyLedger)
+        .where(
+          and(
+            eq(currencyLedger.characterId, character.id),
+            eq(currencyLedger.reason, 'monster_kill'),
+          ),
+        ),
+    ).toHaveLength(2);
   });
 });
