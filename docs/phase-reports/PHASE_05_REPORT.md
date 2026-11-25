@@ -5,8 +5,8 @@
 - 基线：`docs/WEB_LEGEND_TECHNICAL_ARCHITECTURE_v2.md`、`docs/WEB_LEGEND_MVP_PLAN_v2.md`
 - 决策：[ADR-020](../ADR/ADR-020-phase5-asset-economy.md)
 - 开工 HEAD：`de71d05`（工作区干净）
-- 阶段提交：`feat(phase-5): deliver loot, inventory, equipment and persistent economy`
-  （提交哈希见 PROJECT_STATUS §10）
+- 阶段提交：`c5cc9e001772b2fa808f16f2a130ea46c5d441cc`
+  `feat(phase-5): deliver loot, inventory, equipment and persistent economy`
 
 ## 1. 目标与范围
 

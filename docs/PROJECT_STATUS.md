@@ -403,6 +403,8 @@
   主题：`feat(phase-3): deliver compiled maps, AOI, transfers and chat`
 - 阶段 4 主提交：`cb3617bc5a1396df89661f206a0b9e0562fbe23e`
   主题：`feat(phase-4): deliver monsters, combat and skills`
+- 阶段 5 主提交：`c5cc9e001772b2fa808f16f2a130ea46c5d441cc`
+  主题：`feat(phase-5): deliver loot, inventory, equipment and persistent economy`
 
 ## 11. 当前环境事实
 

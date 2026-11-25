@@ -911,8 +911,7 @@ pnpm load:world
 
 ### 阶段提交
 
-- 阶段 5 主提交：见本条记录追加的 `docs(phase-5)` 提交与 PROJECT_STATUS
-  “最近一次 Git 提交”。
+- 阶段 5 主提交：`c5cc9e001772b2fa808f16f2a130ea46c5d441cc`
   主题：`feat(phase-5): deliver loot, inventory, equipment and persistent economy`。
 
 ### 下一步计划
