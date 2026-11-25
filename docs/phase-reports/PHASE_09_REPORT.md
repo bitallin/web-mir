@@ -117,7 +117,7 @@ web_legend_game_server_ws_reconnects_total{...} 0
 
 ## 7. 阶段提交
 
-- 阶段 9 主提交：（待提交）
+- 阶段 9 主提交：`8e3e534`
   主题：`feat(phase-9): isolate test databases and complete websocket metrics`。
 
 ## 8. 下一步
