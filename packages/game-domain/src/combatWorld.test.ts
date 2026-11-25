@@ -1,4 +1,5 @@
-import { TILE_UNITS, type CombatEventPayload } from '@web-legend/contracts';
+import { TILE_UNITS, type CombatEventPayload, type ContentBundle } from '@web-legend/contracts';
+import { BASE_CONTENT_BUNDLE } from '@web-legend/content-schema/base';
 import { describe, expect, it } from 'vitest';
 
 import { MONSTER_CATALOG, requireMonster } from './content';
@@ -549,5 +550,76 @@ describe('CombatWorld player combat', () => {
     const profile = world.getProfile('player-1');
     expect(profile?.pvpEnabled).toBe(true);
     expect(profile?.reviveMs).toBe(2_500);
+  });
+});
+
+describe('CombatWorld mana regeneration', () => {
+  it('restores class mana once per second and caps at max', () => {
+    const world = createTestWorld();
+    world.addPlayer(warrior({ classId: 'mage', hp: 80, mp: 0 }));
+
+    advance(world, 500);
+    expect(world.getPlayer('player-1')?.mp).toBe(0);
+    advance(world, 500);
+    expect(world.getPlayer('player-1')?.mp).toBe(3);
+    advance(world, 2_000);
+    expect(world.getPlayer('player-1')?.mp).toBe(9);
+    advance(world, 60_000);
+    expect(world.getPlayer('player-1')?.mp).toBe(80);
+  });
+
+  it('does not regenerate while dead', () => {
+    const world = createTestWorld({ playerRespawnMs: 60_000 });
+    world.addPlayer(warrior({ classId: 'mage', hp: 0, mp: 0 }));
+
+    advance(world, 5_000);
+    expect(world.getPlayer('player-1')?.alive).toBe(false);
+    expect(world.getPlayer('player-1')?.mp).toBe(0);
+  });
+
+  it('reads the rate from the injected content release', () => {
+    const bundle = JSON.parse(JSON.stringify(BASE_CONTENT_BUNDLE)) as ContentBundle;
+    bundle.classes.warrior.mpRegenPerSecond = 0;
+    bundle.classes.mage.mpRegenPerSecond = 10;
+    const world = createTestWorld({ content: bundle });
+    world.addPlayer(warrior({ mp: 0 }));
+    world.addPlayer(
+      warrior({
+        id: 'player-2',
+        classId: 'mage',
+        hp: 80,
+        mp: 0,
+        ...center({ x: 7, y: 5 }),
+      }),
+    );
+
+    advance(world, 2_000);
+    expect(world.getPlayer('player-1')?.mp).toBe(0);
+    expect(world.getPlayer('player-2')?.mp).toBe(20);
+  });
+});
+
+describe('CombatWorld mana regen carry', () => {
+  it('keeps the partial second across an HP-only consumable', () => {
+    const world = createTestWorld();
+    world.addPlayer(warrior({ classId: 'mage', hp: 40, mp: 0 }));
+
+    advance(world, 900);
+    expect(world.getPlayer('player-1')?.mp).toBe(0);
+    world.setPlayerVitals('player-1', { hp: 80, mp: 0 });
+    advance(world, 100);
+    expect(world.getPlayer('player-1')?.mp).toBe(3);
+  });
+
+  it('resets the carry when a consumable changes MP', () => {
+    const world = createTestWorld();
+    world.addPlayer(warrior({ classId: 'mage', hp: 40, mp: 0 }));
+
+    advance(world, 900);
+    world.setPlayerVitals('player-1', { hp: 80, mp: 10 });
+    advance(world, 500);
+    expect(world.getPlayer('player-1')?.mp).toBe(10);
+    advance(world, 500);
+    expect(world.getPlayer('player-1')?.mp).toBe(13);
   });
 });

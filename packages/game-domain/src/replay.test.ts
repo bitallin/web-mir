@@ -154,7 +154,7 @@ describe('combat replay fixture', () => {
             "alive": true,
             "hp": 80,
             "id": "mage-1",
-            "mp": 60,
+            "mp": 79,
           },
         ],
         "tickMs": 50,

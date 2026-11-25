@@ -20,6 +20,8 @@ export type CombatStats = {
   critMultiplier: number;
   attackIntervalMs: number;
   attackRangeTiles: number;
+  /** Mana restored per second while alive; content-driven, never client-set. */
+  mpRegenPerSecond: number;
 };
 
 export const MAX_COMBAT_LEVEL = 100 as const;
@@ -47,5 +49,6 @@ export function combatStatsFor(
     critMultiplier: definition.critMultiplier,
     attackIntervalMs: definition.attackIntervalMs,
     attackRangeTiles: definition.attackRangeTiles,
+    mpRegenPerSecond: definition.mpRegenPerSecond ?? 0,
   };
 }

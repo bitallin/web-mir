@@ -148,6 +148,8 @@ type PlayerRuntime = CombatPlayerSnapshot & {
   nextBasicAttackAt: number;
   cooldowns: Map<string, number>;
   reviveAt: number;
+  /** Fractional-second carry for integer-per-second mana regeneration. */
+  regenCarryMs: number;
   /** Disconnected players keep their state but are not new monster targets. */
   targetable: boolean;
 };
@@ -331,6 +333,7 @@ export class CombatWorld {
       nextBasicAttackAt: 0,
       cooldowns: new Map(),
       reviveAt: hp > 0 ? 0 : this.now + this.playerRespawnMs,
+      regenCarryMs: 0,
       targetable: true,
     });
   }
@@ -383,8 +386,13 @@ export class CombatWorld {
     if (player === undefined) {
       return false;
     }
+    const previousMp = player.mp;
     player.hp = Math.min(Math.max(Math.floor(vitals.hp), 0), player.maxHp);
     player.mp = Math.min(Math.max(Math.floor(vitals.mp), 0), player.maxMp);
+    // An HP-only consumable must not discard the partial mana-regen second.
+    if (player.mp !== previousMp) {
+      player.regenCarryMs = 0;
+    }
     player.alive = player.hp > 0;
     if (!player.alive) {
       player.reviveAt = this.now + this.playerRespawnMs;
@@ -679,10 +687,35 @@ export class CombatWorld {
 
     const events: CombatEventPayload[] = [];
     this.revivePlayers(events);
+    this.regenerateMana(stepMs);
     for (const monster of this.monsters.values()) {
       this.updateMonster(monster, stepMs, events);
     }
     return events;
+  }
+
+  /**
+   * Integer-per-second mana regeneration. The tick is the only clock: no
+   * client timestamps and no IO, so two identical steps always produce the
+   * same MP on the server.
+   */
+  private regenerateMana(stepMs: number): void {
+    for (const player of this.players.values()) {
+      if (!player.alive || player.mp >= player.maxMp || player.stats.mpRegenPerSecond <= 0) {
+        player.regenCarryMs = 0;
+        continue;
+      }
+      player.regenCarryMs += stepMs;
+      const gained = Math.floor(player.regenCarryMs / 1_000) * player.stats.mpRegenPerSecond;
+      if (gained <= 0) {
+        continue;
+      }
+      player.regenCarryMs %= 1_000;
+      player.mp = Math.min(player.maxMp, player.mp + gained);
+      if (player.mp >= player.maxMp) {
+        player.regenCarryMs = 0;
+      }
+    }
   }
 
   private revivePlayers(events: CombatEventPayload[]): void {

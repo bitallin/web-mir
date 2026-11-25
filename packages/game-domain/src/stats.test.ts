@@ -1,4 +1,5 @@
 import { CHARACTER_CLASS_CATALOG, CHARACTER_CLASSES } from '@web-legend/contracts';
+import { BASE_CONTENT_BUNDLE } from '@web-legend/content-schema/base';
 import { describe, expect, it } from 'vitest';
 
 import { combatStatsFor } from './stats';
@@ -13,6 +14,9 @@ describe('combatStatsFor', () => {
       expect(stats.attack).toBe(base.baseAttack);
       expect(stats.defense).toBe(base.baseDefense);
       expect(Number.isInteger(stats.defense)).toBe(true);
+      expect(stats.mpRegenPerSecond).toBe(
+        BASE_CONTENT_BUNDLE.classes[classId].mpRegenPerSecond ?? 0,
+      );
     }
   });
 

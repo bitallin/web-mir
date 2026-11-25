@@ -48,6 +48,11 @@ export const classContentSchema = z
     baseDefense: z.number().int().min(0).max(10_000),
     hpPerLevel: z.number().min(0).max(10_000),
     mpPerLevel: z.number().min(0).max(10_000),
+    /**
+     * Mana restored per second while alive. Optional for releases created
+     * before Alpha 0.2; absent means no regeneration (EL-004).
+     */
+    mpRegenPerSecond: z.number().int().min(0).max(100).optional(),
     attackPerLevel: z.number().min(0).max(1_000),
     defensePerLevel: z.number().min(0).max(1_000),
     hitChance: z.number().min(0).max(1),

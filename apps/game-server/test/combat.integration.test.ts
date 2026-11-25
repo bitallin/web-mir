@@ -300,7 +300,12 @@ describe.runIf(databaseUrl !== undefined)('world_map combat', () => {
       3_000,
       'heavy strike',
     );
-    await waitUntil(() => room.state.players.get(actor.character.id)?.mp === 24, 2_000, 'mp spend');
+    // Mana regenerates, so 24 is only a brief value; assert the spend itself.
+    await waitUntil(
+      () => (room.state.players.get(actor.character.id)?.mp ?? 30) < 30,
+      2_000,
+      'mp spend',
+    );
     await waitUntil(
       () => (monsterState(room, SLIME)?.hp ?? startHp) < startHp,
       2_000,

@@ -87,6 +87,12 @@ async function monsterHp(page: Page): Promise<number> {
   return Number(value);
 }
 
+async function warriorMana(page: Page): Promise<number> {
+  const text = await page.getByTestId('vitals').innerText();
+  const match = /法力 (\d+)\/30/u.exec(text);
+  return match === null ? -1 : Number(match[1]);
+}
+
 async function attackUntilHpBelow(page: Page, threshold: number, attempts = 5): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if ((await monsterHp(page)) < threshold) {
@@ -206,11 +212,13 @@ test('two players fight one wilds monster with authoritative hp, skills and resp
   await expect(alice.page.getByTestId('auto-attack-bar')).toHaveCount(0, { timeout: 5_000 });
   await expect.poll(async () => monsterHp(alice.page), { timeout: 30_000 }).toBeGreaterThan(0);
 
-  // The warrior skill spends mana and exposes a server cooldown.
+  // The warrior skill spends mana and exposes a server cooldown. Mana now
+  // regenerates, so assert the dip rather than a frozen 24/30.
   await alice.page.getByTestId('skill-1').click();
-  await expect(alice.page.getByTestId('vitals')).toContainText('法力 24/30', {
-    timeout: 10_000,
-  });
+  await expect.poll(async () => warriorMana(alice.page), { timeout: 10_000 }).toBeLessThan(30);
+  await expect
+    .poll(async () => warriorMana(alice.page), { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(24);
   await expect(alice.page.getByTestId('skill-1')).toHaveAttribute('data-cooldown-ms', /[1-9]\d*/u, {
     timeout: 5_000,
   });
