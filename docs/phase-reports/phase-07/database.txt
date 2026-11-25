@@ -1,0 +1,26 @@
+Web Legend 阶段 7 数据库证据 — 2026-11-25T06:09:47.480Z
+migrations: 6
+tables (19): account_sessions, accounts, admin_audit_logs, admin_sessions, admin_users, asset_commands, character_sessions, characters, content_activations, content_drafts, content_releases, currency_ledger, game_tickets, item_instances, outbox_events, realm_active_content, realms, wallets, world_drops
+
+accounts: 2131
+characters: 1989
+item_instances: 2359
+world_drops: 230
+wallets: 130
+currency_ledger: 134
+asset_commands: 292
+admin_users: 21
+admin_sessions: 60
+admin_audit_logs: 114
+outbox_events: 24
+content_drafts: 2
+content_releases: 17
+content_activations: 31
+realm_active_content: 1
+
+outbox by status: applied=24
+audit by result: success=98, failed=16
+active leases: 0
+active content: baseline (732f923b8c9a0637af7f78644aa5e2d6be616376d2d649af4b5004f268ed245c)
+wallet/ledger mismatches: 0
+ledger rows missing idempotency key: 0

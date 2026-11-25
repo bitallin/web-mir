@@ -1,7 +1,34 @@
 export { ACCOUNT_STATUSES, accounts, accountSessions } from './accounts';
 export type { Account, AccountSession, AccountStatus, NewAccount } from './accounts';
+export {
+  ADMIN_AUDIT_RESULTS,
+  ADMIN_ROLE_IDS,
+  ADMIN_STATUSES,
+  adminAuditLogs,
+  adminAuditResultEnum,
+  adminRoleEnum,
+  adminSessions,
+  adminStatusEnum,
+  adminUsers,
+} from './admin';
+export type {
+  AdminAuditLog,
+  AdminSession,
+  AdminUser,
+  NewAdminAuditLog,
+  NewAdminUser,
+} from './admin';
 export { CHARACTER_CLASS_IDS, characters, characterSessions } from './characters';
 export type { Character, CharacterClassId, CharacterSession, NewCharacter } from './characters';
+export {
+  CONTENT_SECTION_IDS,
+  contentActivations,
+  contentDrafts,
+  contentReleases,
+  contentSectionEnum,
+  realmActiveContent,
+} from './content';
+export type { ContentActivation, ContentDraft, ContentRelease } from './content';
 export { gameTickets } from './gameTickets';
 export type { GameTicket } from './gameTickets';
 export {
@@ -24,5 +51,13 @@ export type {
   Wallet,
   WorldDrop,
 } from './items';
+export {
+  ADMIN_COMMAND_STATUS_IDS,
+  ADMIN_COMMAND_TYPE_IDS,
+  adminCommandStatusEnum,
+  adminCommandTypeEnum,
+  outboxEvents,
+} from './outbox';
+export type { NewOutboxEvent, OutboxEvent } from './outbox';
 export { REALM_STATUSES, realms } from './realms';
 export type { NewRealm, Realm, RealmStatus } from './realms';

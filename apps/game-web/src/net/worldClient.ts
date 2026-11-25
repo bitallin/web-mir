@@ -15,6 +15,7 @@ import {
   levelUpSchema,
   lootClaimedSchema,
   monsterStateKindFromCode,
+  sessionKickedSchema,
   sessionTransferSchema,
   systemNoticeSchema,
   worldRoomNameFor,
@@ -30,6 +31,7 @@ import {
   type LevelUp,
   type LootClaimed,
   type MonsterStateKind,
+  type SessionKicked,
   type SystemNotice,
   type TilePoint,
 } from '@web-legend/contracts';
@@ -118,6 +120,7 @@ export type WorldClientCallbacks = {
   onLevelUp: (levelUp: LevelUp) => void;
   onLootClaimed: (claimed: LootClaimed) => void;
   onSystemNotice: (notice: SystemNotice) => void;
+  onKicked: (notice: SessionKicked) => void;
 };
 
 export type WorldClientOptions = {
@@ -562,6 +565,15 @@ export class WorldClient {
         const parsed = systemNoticeSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onSystemNotice(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.sessionKicked, (payload: unknown) => {
+        const parsed = sessionKickedSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onKicked(parsed.data);
         }
       }),
     );

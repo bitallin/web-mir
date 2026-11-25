@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import { INVENTORY_CAPACITY } from '@web-legend/contracts';
-import { STARTER_KIT, combatStatsFor, requireItem } from '@web-legend/game-domain';
+import { INVENTORY_CAPACITY, type ContentBundle } from '@web-legend/contracts';
+import {
+  DEFAULT_CONTENT_BUNDLE,
+  STARTER_KIT,
+  combatStatsFor,
+  requireItem,
+} from '@web-legend/game-domain';
 import {
   characters,
   createDatabase,
@@ -494,5 +499,35 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     expect(reloaded.snapshot.exp).toBe(12);
     expect(reloaded.snapshot.items.length).toBeGreaterThan(0);
     expect(reloaded.stats.attack).toBe(combatStatsFor('warrior', 1).attack + 6);
+  });
+
+  it('uses the injected content release for stats, loot and item names', async () => {
+    const bundle = JSON.parse(JSON.stringify(DEFAULT_CONTENT_BUNDLE)) as ContentBundle;
+    const slimeLoot = bundle.lootTables['wild_slime'];
+    const gel = bundle.items['slime_gel'];
+    expect(slimeLoot).toBeDefined();
+    expect(gel).toBeDefined();
+    if (slimeLoot === undefined || gel === undefined) {
+      return;
+    }
+    slimeLoot.exp = 999;
+    gel.name = '训练凝胶';
+    bundle.classes.mage.baseMaxMp = 200;
+    const themed = new AssetService(db, { now: () => clock, rng: () => 0, content: bundle });
+    const character = await createCharacter(db, 'mage');
+
+    const loaded = await themed.loadAssets(character.id);
+    expect(loaded.snapshot.maxMp).toBe(200);
+
+    const outcome = await themed.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference: `test-content-${randomUUID()}`,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    expect(outcome?.expGained).toBe(999);
+    expect(outcome?.drops.map((drop) => drop.displayName)).toContain('训练凝胶');
   });
 });

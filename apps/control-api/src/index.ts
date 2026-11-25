@@ -1,9 +1,11 @@
 import { createLogger } from '@web-legend/observability';
 import { createDatabase } from '@web-legend/persistence';
 
-import { loadControlApiEnv } from './env';
+import { gameServerInternalUrl, loadControlApiEnv } from './env';
+import { AdminCommandDispatcher } from './outbox/dispatcher';
 import { createDatabaseProbe } from './readiness';
 import { buildServer } from './server';
+import { GameServerClient } from './services/gameServerClient';
 
 async function main(): Promise<void> {
   const env = loadControlApiEnv();
@@ -14,12 +16,23 @@ async function main(): Promise<void> {
   });
 
   const database = createDatabase(env.DATABASE_URL, { max: 10 });
+  const gameServerClient = new GameServerClient(
+    gameServerInternalUrl(env),
+    env.INTERNAL_ADMIN_TOKEN,
+  );
   const app = await buildServer({
     env,
     logger,
     readiness: createDatabaseProbe(database.db),
     database: database.db,
+    gameServerClient,
   });
+  const dispatcher = new AdminCommandDispatcher({
+    db: database.db,
+    client: gameServerClient,
+    logger,
+  });
+  dispatcher.start();
 
   let shuttingDown = false;
 
@@ -31,6 +44,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'control api shutting down');
 
     try {
+      await dispatcher.stop();
       await app.close();
       await database.close();
       logger.info('control api stopped');

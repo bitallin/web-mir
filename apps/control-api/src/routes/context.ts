@@ -1,7 +1,13 @@
 import { SESSION_POLICY, type IssuedSessionTokens } from '@web-legend/auth';
-import type { AuthResponse, AccountView, CharacterView } from '@web-legend/contracts';
+import {
+  roleHasPermission,
+  type AdminPermission,
+  type AuthResponse,
+  type AccountView,
+  type CharacterView,
+} from '@web-legend/contracts';
 import { authResponseSchema } from '@web-legend/contracts';
-import type { Account, CharacterWithRealm } from '@web-legend/persistence';
+import type { Account, AdminUser, CharacterWithRealm } from '@web-legend/persistence';
 import type {
   FastifyInstance,
   FastifyReply,
@@ -14,6 +20,11 @@ import type { Logger } from 'pino';
 import type { ZodType } from 'zod';
 
 import {
+  ADMIN_ACCESS_COOKIE,
+  ADMIN_COOKIE_PATH,
+  ADMIN_SESSION_TTL_SECONDS,
+} from '../http/adminCookies';
+import {
   ACCESS_COOKIE,
   ACCESS_COOKIE_PATH,
   REFRESH_COOKIE,
@@ -23,8 +34,11 @@ import {
   serializeCookie,
 } from '../http/cookies';
 import { AppError } from '../http/errors';
+import type { AdminService } from '../services/admin';
+import type { AdminAuthService } from '../services/adminAuth';
 import type { AuthService } from '../services/auth';
 import type { CharacterService } from '../services/characters';
+import type { ContentService } from '../services/content';
 import type { TicketService } from '../services/tickets';
 import { toAccountView, toCharacterView } from '../services/views';
 
@@ -39,7 +53,11 @@ export type RouteDependencies = {
   auth: AuthService;
   characters: CharacterService;
   tickets: TicketService;
+  adminAuth: AdminAuthService;
+  admin: AdminService;
+  content: ContentService;
   rateLimit: (key: string) => boolean;
+  adminRateLimit: (key: string) => boolean;
   secureCookies: boolean;
 };
 
@@ -115,4 +133,71 @@ export function accountAuthResponse(
   const accountView: AccountView = toAccountView(account);
   const characterViews: CharacterView[] = characters.map(toCharacterView);
   return authResponseSchema.parse({ account: accountView, characters: characterViews });
+}
+
+export async function requireAdmin(
+  dependencies: RouteDependencies,
+  request: FastifyRequest,
+): Promise<{ admin: AdminUser; token: string }> {
+  const token = readCookie(request.headers.cookie, ADMIN_ACCESS_COOKIE);
+  if (token === undefined) {
+    throw new AppError(401, 'UNAUTHORIZED', '请先登录管理后台');
+  }
+  const admin = await dependencies.adminAuth.authenticate(token);
+  return { admin, token };
+}
+
+export function assertAdminPermission(admin: AdminUser, permission: AdminPermission): void {
+  if (!roleHasPermission(admin.role, permission)) {
+    throw new AppError(403, 'FORBIDDEN', '没有访问该后台功能的权限');
+  }
+}
+
+export function setAdminCookie(reply: FastifyReply, token: string, secure: boolean): void {
+  reply.header(
+    'Set-Cookie',
+    serializeCookie(ADMIN_ACCESS_COOKIE, token, {
+      path: ADMIN_COOKIE_PATH,
+      maxAgeSeconds: ADMIN_SESSION_TTL_SECONDS,
+      secure,
+    }),
+  );
+}
+
+export function clearAdminCookie(reply: FastifyReply, secure: boolean): void {
+  reply.header(
+    'Set-Cookie',
+    clearCookie(ADMIN_ACCESS_COOKIE, {
+      path: ADMIN_COOKIE_PATH,
+      maxAgeSeconds: 0,
+      secure,
+    }),
+  );
+}
+
+export function enforceAdminLoginRateLimit(
+  dependencies: RouteDependencies,
+  request: FastifyRequest,
+): void {
+  if (!dependencies.adminRateLimit(`${request.ip}:admin-login`)) {
+    throw new AppError(429, 'RATE_LIMITED', '登录尝试过于频繁，请稍后再试');
+  }
+}
+
+export function requireUuid(value: string | undefined, label: string): string {
+  if (
+    value === undefined ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)
+  ) {
+    throw new AppError(422, 'VALIDATION_ERROR', `${label} 不合法`);
+  }
+  return value;
+}
+
+export function reasonFromBody(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null || !('reason' in body)) {
+    return null;
+  }
+  const reason = body.reason;
+  return typeof reason === 'string' ? reason.slice(0, 200) : null;
 }

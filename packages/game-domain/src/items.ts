@@ -1,164 +1,43 @@
-import type { CharacterClass, EquipmentSlot, ItemKind } from '@web-legend/contracts';
+import { BASE_CONTENT_BUNDLE } from '@web-legend/content-schema/base';
+import type {
+  CharacterClass,
+  ContentBundle,
+  ItemContent,
+  StarterKitEntry,
+} from '@web-legend/contracts';
 
 import type { CombatStats } from './stats';
 
 /**
- * Fixed phase-5 item catalog. IDs are stable and referenced by persisted
- * `item_instances.template_id`; phase 7 moves the numbers into Content
- * Releases, but the behaviour handlers stay in code (ADR-011 / ADR-020).
+ * Inventory and equipment rules over a declarative item catalog. The baseline
+ * catalog is the phase-5 content moved into `content-schema` (ADR-022).
  */
 
-export type ItemDefinition = {
-  id: string;
-  name: string;
-  kind: ItemKind;
-  equipSlot?: EquipmentSlot;
-  /** Undefined means every class may equip it. */
-  classId?: CharacterClass;
-  levelRequirement: number;
-  stackable: boolean;
-  maxStack: number;
-  attackBonus: number;
-  defenseBonus: number;
-  maxHpBonus: number;
-  maxMpBonus: number;
-  healHp: number;
-  healMp: number;
-};
+export type ItemDefinition = ItemContent;
+export type ItemCatalog = Readonly<Record<string, ItemContent>>;
 
-const NO_BONUS = {
-  attackBonus: 0,
-  defenseBonus: 0,
-  maxHpBonus: 0,
-  maxMpBonus: 0,
-  healHp: 0,
-  healMp: 0,
-} as const;
+export const ITEM_CATALOG: ItemCatalog = BASE_CONTENT_BUNDLE.items;
 
-export const ITEM_CATALOG: Readonly<Record<string, ItemDefinition>> = {
-  warrior_sword: {
-    id: 'warrior_sword',
-    name: '铁剑',
-    kind: 'weapon',
-    equipSlot: 'weapon',
-    classId: 'warrior',
-    levelRequirement: 1,
-    stackable: false,
-    maxStack: 1,
-    ...NO_BONUS,
-    attackBonus: 6,
-  },
-  mage_staff: {
-    id: 'mage_staff',
-    name: '灵木杖',
-    kind: 'weapon',
-    equipSlot: 'weapon',
-    classId: 'mage',
-    levelRequirement: 1,
-    stackable: false,
-    maxStack: 1,
-    ...NO_BONUS,
-    attackBonus: 7,
-  },
-  taoist_blade: {
-    id: 'taoist_blade',
-    name: '青锋剑',
-    kind: 'weapon',
-    equipSlot: 'weapon',
-    classId: 'taoist',
-    levelRequirement: 1,
-    stackable: false,
-    maxStack: 1,
-    ...NO_BONUS,
-    attackBonus: 5,
-    maxMpBonus: 10,
-  },
-  cloth_armor: {
-    id: 'cloth_armor',
-    name: '布衣',
-    kind: 'armor',
-    equipSlot: 'armor',
-    levelRequirement: 1,
-    stackable: false,
-    maxStack: 1,
-    ...NO_BONUS,
-    defenseBonus: 2,
-  },
-  leather_armor: {
-    id: 'leather_armor',
-    name: '皮甲',
-    kind: 'armor',
-    equipSlot: 'armor',
-    levelRequirement: 3,
-    stackable: false,
-    maxStack: 1,
-    ...NO_BONUS,
-    defenseBonus: 5,
-    maxHpBonus: 15,
-  },
-  small_hp_potion: {
-    id: 'small_hp_potion',
-    name: '金创药',
-    kind: 'consumable',
-    levelRequirement: 1,
-    stackable: true,
-    maxStack: 20,
-    ...NO_BONUS,
-    healHp: 40,
-  },
-  small_mp_potion: {
-    id: 'small_mp_potion',
-    name: '魔法药',
-    kind: 'consumable',
-    levelRequirement: 1,
-    stackable: true,
-    maxStack: 20,
-    ...NO_BONUS,
-    healMp: 30,
-  },
-  slime_gel: {
-    id: 'slime_gel',
-    name: '史莱姆凝胶',
-    kind: 'material',
-    levelRequirement: 1,
-    stackable: true,
-    maxStack: 50,
-    ...NO_BONUS,
-  },
-  wolf_pelt: {
-    id: 'wolf_pelt',
-    name: '狼皮',
-    kind: 'material',
-    levelRequirement: 1,
-    stackable: true,
-    maxStack: 50,
-    ...NO_BONUS,
-  },
-};
+export type StarterItem = StarterKitEntry;
 
-export type StarterItem = { templateId: string; quantity: number };
-
-/** New characters spawn with a class weapon and a few potions. */
 export const STARTER_KIT: Readonly<Record<CharacterClass, readonly StarterItem[]>> = {
-  warrior: [
-    { templateId: 'warrior_sword', quantity: 1 },
-    { templateId: 'small_hp_potion', quantity: 3 },
-    { templateId: 'small_mp_potion', quantity: 1 },
-  ],
-  mage: [
-    { templateId: 'mage_staff', quantity: 1 },
-    { templateId: 'small_hp_potion', quantity: 2 },
-    { templateId: 'small_mp_potion', quantity: 3 },
-  ],
-  taoist: [
-    { templateId: 'taoist_blade', quantity: 1 },
-    { templateId: 'small_hp_potion', quantity: 2 },
-    { templateId: 'small_mp_potion', quantity: 2 },
-  ],
+  warrior: BASE_CONTENT_BUNDLE.classes.warrior.starterKit,
+  mage: BASE_CONTENT_BUNDLE.classes.mage.starterKit,
+  taoist: BASE_CONTENT_BUNDLE.classes.taoist.starterKit,
 };
 
-export function requireItem(templateId: string): ItemDefinition {
-  const item = ITEM_CATALOG[templateId];
+export function starterKitFor(
+  classId: CharacterClass,
+  content: ContentBundle = BASE_CONTENT_BUNDLE,
+): readonly StarterItem[] {
+  return content.classes[classId].starterKit;
+}
+
+export function requireItem(
+  templateId: string,
+  catalog: ItemCatalog = ITEM_CATALOG,
+): ItemDefinition {
+  const item = catalog[templateId];
   if (item === undefined) {
     throw new RangeError(`unknown item "${templateId}"`);
   }
@@ -238,13 +117,16 @@ export type InventoryPlacement =
  * that cannot fit produces `null`; the transaction then rolls back so the drop
  * stays on the ground.
  */
-export function findInventoryPlacement(input: {
-  items: readonly InventoryStack[];
-  templateId: string;
-  quantity: number;
-  capacity: number;
-}): InventoryPlacement | null {
-  const definition = requireItem(input.templateId);
+export function findInventoryPlacement(
+  input: {
+    items: readonly InventoryStack[];
+    templateId: string;
+    quantity: number;
+    capacity: number;
+  },
+  catalog: ItemCatalog = ITEM_CATALOG,
+): InventoryPlacement | null {
+  const definition = requireItem(input.templateId, catalog);
   if (!Number.isInteger(input.quantity) || input.quantity < 1) {
     throw new RangeError('item quantity must be a positive integer');
   }

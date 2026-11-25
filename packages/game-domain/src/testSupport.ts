@@ -1,4 +1,9 @@
-import { TILE_UNITS, type MapMonsterSpawn, type TilePoint } from '@web-legend/contracts';
+import {
+  TILE_UNITS,
+  type ContentBundle,
+  type MapMonsterSpawn,
+  type TilePoint,
+} from '@web-legend/contracts';
 import { createSeededRng } from '@web-legend/testkit';
 
 import { CombatWorld, type CombatGrid, type CombatWorldOptions } from './combatWorld';
@@ -81,6 +86,7 @@ export type TestWorldOptions = {
   pvpEnabled?: boolean;
   monsterRespawnMs?: number;
   playerRespawnMs?: number;
+  content?: ContentBundle;
   tuning?: Pick<Partial<CombatWorldOptions>, 'skills' | 'monsters'>;
 };
 
@@ -94,6 +100,7 @@ export function createTestWorld(options: TestWorldOptions = {}): CombatWorld {
     pvpEnabled: options.pvpEnabled ?? false,
     monsterRespawnMs: options.monsterRespawnMs ?? 500,
     playerRespawnMs: options.playerRespawnMs ?? 500,
+    ...(options.content === undefined ? {} : { content: options.content }),
     ...(options.tuning ?? {}),
   });
 }

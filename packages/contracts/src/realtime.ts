@@ -31,6 +31,7 @@ export const SERVER_MESSAGES = {
   combatEvent: 'combat.event',
   combatProfile: 'combat.profile',
   sessionTransfer: 'session.transfer',
+  sessionKicked: 'session.kicked',
   systemNotice: 'system.notice',
   inventorySnapshot: 'inventory.snapshot',
   assetResult: 'asset.result',
@@ -137,6 +138,20 @@ export const sessionTransferSchema = z
   .strict();
 
 export type SessionTransfer = z.infer<typeof sessionTransferSchema>;
+
+/**
+ * Sent immediately before an administrator disconnects a session. The client
+ * shows the reason and does not automatically reconnect (ADR-022).
+ */
+export const sessionKickedSchema = z
+  .object({
+    reason: z.string().min(1).max(200),
+    kind: z.enum(['kicked', 'banned']),
+    serverTime: z.number().nonnegative(),
+  })
+  .strict();
+
+export type SessionKicked = z.infer<typeof sessionKickedSchema>;
 
 export const COMMAND_REJECTION_CODES = [
   'INVALID_PAYLOAD',

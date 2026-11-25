@@ -26,6 +26,7 @@ describe.runIf(process.env.DATABASE_URL !== undefined)('control API database rea
       CONTROL_API_PORT: 3001,
       DATABASE_URL: requireDatabaseUrl(),
       CORS_ORIGINS: ['http://localhost:5173'],
+      INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
 
     database = createDatabase(env.DATABASE_URL, { max: 1 });

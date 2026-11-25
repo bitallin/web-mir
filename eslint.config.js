@@ -26,6 +26,8 @@ const serverPackages = [
   '@web-legend/game-simulation/*',
   '@web-legend/game-domain',
   '@web-legend/game-domain/*',
+  '@web-legend/content-schema',
+  '@web-legend/content-schema/*',
   '@web-legend/game-application',
   '@web-legend/game-application/*',
   '@web-legend/map-runtime',

@@ -90,6 +90,9 @@ importers:
       '@web-legend/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@web-legend/content-schema':
+        specifier: workspace:*
+        version: link:../../packages/content-schema
       '@web-legend/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -139,6 +142,9 @@ importers:
       '@web-legend/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@web-legend/content-schema':
+        specifier: workspace:*
+        version: link:../../packages/content-schema
       '@web-legend/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -225,6 +231,15 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
+  packages/content-schema:
+    dependencies:
+      '@web-legend/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+
   packages/contracts:
     dependencies:
       '@colyseus/schema':
@@ -251,6 +266,9 @@ importers:
 
   packages/game-domain:
     dependencies:
+      '@web-legend/content-schema':
+        specifier: workspace:*
+        version: link:../content-schema
       '@web-legend/contracts':
         specifier: workspace:*
         version: link:../contracts

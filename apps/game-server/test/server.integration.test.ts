@@ -81,6 +81,7 @@ describe('game server runtime', () => {
       GAME_SERVER_PORT: port,
       DATABASE_URL: databaseUrl,
       GAME_SERVER_ID: 'game-server-test',
+      INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
 
     runtime = createGameServer({

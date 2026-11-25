@@ -18,6 +18,7 @@ export type RoomMetricsSnapshot = {
   rejectionsByCode: Record<string, number>;
   chatMessages: number;
   chatFiltered: number;
+  chatMuted: number;
   transfers: number;
   combatCommands: number;
   combatEvents: number;
@@ -52,6 +53,7 @@ export class RoomMetrics {
   private rejectedCommands = 0;
   private chatMessages = 0;
   private chatFiltered = 0;
+  private chatMuted = 0;
   private transfers = 0;
   private combatCommands = 0;
   private combatEvents = 0;
@@ -93,6 +95,10 @@ export class RoomMetrics {
 
   recordChatFiltered(): void {
     this.chatFiltered += 1;
+  }
+
+  recordChatMuted(): void {
+    this.chatMuted += 1;
   }
 
   recordTransfer(): void {
@@ -167,6 +173,7 @@ export class RoomMetrics {
       rejectionsByCode: Object.fromEntries(this.rejectionsByCode),
       chatMessages: this.chatMessages,
       chatFiltered: this.chatFiltered,
+      chatMuted: this.chatMuted,
       transfers: this.transfers,
       combatCommands: this.combatCommands,
       combatEvents: this.combatEvents,
@@ -194,6 +201,7 @@ export type MetricsSnapshot = {
     rejectedCommands: number;
     chatMessages: number;
     chatFiltered: number;
+    chatMuted: number;
     transfers: number;
     combatCommands: number;
     combatEvents: number;
@@ -217,6 +225,7 @@ export class MetricsRegistry {
   private rejectedCommands = 0;
   private chatMessages = 0;
   private chatFiltered = 0;
+  private chatMuted = 0;
   private transfers = 0;
   private combatCommands = 0;
   private combatEvents = 0;
@@ -247,6 +256,7 @@ export class MetricsRegistry {
     this.rejectedCommands += snapshot.rejectedCommands;
     this.chatMessages += snapshot.chatMessages;
     this.chatFiltered += snapshot.chatFiltered;
+    this.chatMuted += snapshot.chatMuted;
     this.transfers += snapshot.transfers;
     this.combatCommands += snapshot.combatCommands;
     this.combatEvents += snapshot.combatEvents;
@@ -271,6 +281,7 @@ export class MetricsRegistry {
     const activeRejected = rooms.reduce((total, room) => total + room.rejectedCommands, 0);
     const activeChat = rooms.reduce((total, room) => total + room.chatMessages, 0);
     const activeChatFiltered = rooms.reduce((total, room) => total + room.chatFiltered, 0);
+    const activeChatMuted = rooms.reduce((total, room) => total + room.chatMuted, 0);
     const activeTransfers = rooms.reduce((total, room) => total + room.transfers, 0);
     const activeCombatCommands = rooms.reduce((total, room) => total + room.combatCommands, 0);
     const activeCombatEvents = rooms.reduce((total, room) => total + room.combatEvents, 0);
@@ -294,6 +305,7 @@ export class MetricsRegistry {
         rejectedCommands: this.rejectedCommands + activeRejected,
         chatMessages: this.chatMessages + activeChat,
         chatFiltered: this.chatFiltered + activeChatFiltered,
+        chatMuted: this.chatMuted + activeChatMuted,
         transfers: this.transfers + activeTransfers,
         combatCommands: this.combatCommands + activeCombatCommands,
         combatEvents: this.combatEvents + activeCombatEvents,

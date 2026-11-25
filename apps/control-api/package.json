@@ -9,12 +9,14 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json",
     "dev:watch": "tsx watch src/index.ts",
-    "repair:maps": "tsx src/scripts/relocateCharacters.ts"
+    "repair:maps": "tsx src/scripts/relocateCharacters.ts",
+    "seed:admin": "tsx src/scripts/seedAdmin.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.4.3",
     "@web-legend/auth": "workspace:*",
     "@web-legend/config": "workspace:*",
+    "@web-legend/content-schema": "workspace:*",
     "@web-legend/contracts": "workspace:*",
     "@web-legend/game-domain": "workspace:*",
     "@web-legend/observability": "workspace:*",

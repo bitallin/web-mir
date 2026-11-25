@@ -85,6 +85,9 @@ export const WorldState = schema(
   {
     mapId: t.string().default(''),
     instanceId: t.string().default(''),
+    /** Fixed content release snapshot this room was created with (ADR-022). */
+    contentVersion: t.string().default('base'),
+    contentChecksum: t.string().default('base'),
     serverTick: t.number().default(0),
     playerCount: t.uint8().default(0),
     tickHz: t.number().default(DEFAULT_TICK_HZ),

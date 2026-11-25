@@ -85,7 +85,7 @@ function monsterRow(page: Page) {
   return page.locator(`[data-testid="monster-row"][data-monster-id="${SLIME_ID}"]`);
 }
 
-async function attackUntilDead(page: Page, attempts = 8): Promise<void> {
+async function attackUntilDead(page: Page, attempts = 20): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const state = await monsterRow(page)
       .getAttribute('data-state')
@@ -97,7 +97,7 @@ async function attackUntilDead(page: Page, attempts = 8): Promise<void> {
       (monsterId) => window.__webLegendDebug?.attackMonster(monsterId) ?? false,
       SLIME_ID,
     );
-    await new Promise((resolve) => setTimeout(resolve, 950));
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 }
 

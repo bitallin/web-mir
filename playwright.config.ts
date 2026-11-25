@@ -12,10 +12,15 @@ const controlApiPort = process.env.CONTROL_API_PORT ?? '3000';
 const gameServerPort = process.env.GAME_SERVER_PORT ?? '2567';
 const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === 'true';
 const chromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+// This host renders WebGL in software; more than two browsers at once has
+// produced 250ms/attack-timing flakes. Override with PLAYWRIGHT_WORKERS.
+const workerOverride = Number(process.env.PLAYWRIGHT_WORKERS ?? '2');
+const workers = Number.isInteger(workerOverride) && workerOverride > 0 ? workerOverride : 2;
 
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
+  workers,
   forbidOnly: process.env.CI === 'true',
   retries: process.env.CI === 'true' ? 2 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],

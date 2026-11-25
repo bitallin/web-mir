@@ -11,17 +11,25 @@ import type { Database } from '@web-legend/persistence';
 import Fastify, { type FastifyError } from 'fastify';
 import type { Logger } from 'pino';
 
-import type { ControlApiEnv } from './env';
+import { ADMIN_LOGIN_RATE_LIMIT } from './http/adminCookies';
+import { gameServerInternalUrl, type ControlApiEnv } from './env';
 import { AppError, codeForStatus, errorEnvelope } from './http/errors';
 import { createOriginGuard } from './http/origin';
 import { createRateLimiter } from './http/rateLimit';
 import type { ReadinessProbe } from './readiness';
+import { registerAdminAuthRoutes } from './routes/adminAuthRoutes';
+import { registerAdminContentRoutes } from './routes/adminContentRoutes';
+import { registerAdminRoutes } from './routes/adminRoutes';
 import { registerAuthRoutes } from './routes/authRoutes';
 import { registerCharacterRoutes } from './routes/characterRoutes';
 import type { RouteDependencies } from './routes/context';
 import { registerGameRoutes } from './routes/gameRoutes';
+import { AdminService } from './services/admin';
+import { AdminAuthService } from './services/adminAuth';
 import { AuthService } from './services/auth';
 import { CharacterService } from './services/characters';
+import { ContentService } from './services/content';
+import { GameServerClient, type GameServerGateway } from './services/gameServerClient';
 import { TicketService } from './services/tickets';
 import { SERVICE_VERSION } from './version';
 
@@ -37,6 +45,9 @@ export type BuildServerOptions = {
   database: Database;
   startedAt?: number;
   authRateLimit?: AuthRateLimitConfig;
+  adminRateLimit?: AuthRateLimitConfig;
+  /** Tests can inject a stub; production talks to the real internal endpoint. */
+  gameServerClient?: GameServerGateway;
 };
 
 const MAX_REQUEST_ID_LENGTH = 128;
@@ -69,11 +80,20 @@ export async function buildServer(options: BuildServerOptions) {
   });
 
   const rateLimitConfig = options.authRateLimit ?? DEFAULT_AUTH_RATE_LIMIT;
+  const adminRateLimitConfig = options.adminRateLimit ?? ADMIN_LOGIN_RATE_LIMIT;
+  const content = new ContentService(options.database, options.logger);
+  const gameServerClient =
+    options.gameServerClient ??
+    new GameServerClient(gameServerInternalUrl(options.env), options.env.INTERNAL_ADMIN_TOKEN);
   const dependencies: RouteDependencies = {
     auth: new AuthService(options.database),
-    characters: new CharacterService(options.database),
+    characters: new CharacterService(options.database, content),
     tickets: new TicketService(options.database),
+    adminAuth: new AdminAuthService(options.database),
+    admin: new AdminService(options.database, content, gameServerClient, options.logger),
+    content,
     rateLimit: createRateLimiter(rateLimitConfig),
+    adminRateLimit: createRateLimiter(adminRateLimitConfig),
     secureCookies: options.env.NODE_ENV === 'production',
   };
 
@@ -113,6 +133,9 @@ export async function buildServer(options: BuildServerOptions) {
   registerAuthRoutes(app, dependencies);
   registerCharacterRoutes(app, dependencies);
   registerGameRoutes(app, dependencies);
+  registerAdminAuthRoutes(app, dependencies);
+  registerAdminRoutes(app, dependencies);
+  registerAdminContentRoutes(app, dependencies);
 
   app.setNotFoundHandler((request, reply) =>
     reply.status(404).send(errorEnvelope('NOT_FOUND', 'Route not found', request.id)),
@@ -122,7 +145,7 @@ export async function buildServer(options: BuildServerOptions) {
     if (error instanceof AppError) {
       return reply
         .status(error.statusCode)
-        .send(errorEnvelope(error.code, error.message, request.id));
+        .send(errorEnvelope(error.code, error.message, request.id, error.details));
     }
 
     const statusCode = error.statusCode ?? 500;

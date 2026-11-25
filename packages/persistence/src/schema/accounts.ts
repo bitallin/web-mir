@@ -13,6 +13,8 @@ export const accounts = pgTable('accounts', {
   usernameNormalized: text('username_normalized').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   status: text('status', { enum: ACCOUNT_STATUSES }).notNull().default('active'),
+  /** Chat mute expiry; null means unmuted. Applied even before rejoining. */
+  mutedUntil: timestamp('muted_until', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

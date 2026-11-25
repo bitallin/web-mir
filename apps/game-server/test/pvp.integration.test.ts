@@ -173,6 +173,7 @@ describe.runIf(databaseUrl !== undefined)('world_map player combat and chat', ()
       GAME_SERVER_PORT: port,
       DATABASE_URL: requireDatabaseUrl(),
       GAME_SERVER_ID: 'game-server-pvp-test',
+      INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
 
     runtime = createGameServer({

@@ -6,14 +6,27 @@ export class AppError extends Error {
     readonly statusCode: number,
     readonly code: ApiErrorCode,
     message: string,
+    readonly details?: string[],
   ) {
     super(message);
     this.name = 'AppError';
   }
 }
 
-export function errorEnvelope(code: ApiErrorCode, message: string, requestId: string): ApiError {
-  return apiErrorSchema.parse({ error: { code, message, requestId } });
+export function errorEnvelope(
+  code: ApiErrorCode,
+  message: string,
+  requestId: string,
+  details?: string[],
+): ApiError {
+  return apiErrorSchema.parse({
+    error: {
+      code,
+      message,
+      requestId,
+      ...(details === undefined || details.length === 0 ? {} : { details }),
+    },
+  });
 }
 
 export function codeForStatus(statusCode: number): ApiErrorCode {

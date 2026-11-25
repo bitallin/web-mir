@@ -3,12 +3,14 @@ import {
   LOOT_EXPIRY_MS,
   LOOT_OWNER_WINDOW_MS,
   type AssetCommandKind,
+  type ContentBundle,
   type EquipmentSlot,
   type InventorySnapshot,
   type ItemView,
   type LootClaimed,
 } from '@web-legend/contracts';
 import {
+  DEFAULT_CONTENT_BUNDLE,
   applyExperience,
   canEquip,
   combatStatsFor,
@@ -21,6 +23,7 @@ import {
   rollLoot,
   statsWithEquipment,
   type CombatStats,
+  type ItemCatalog,
   type Rng,
 } from '@web-legend/game-domain';
 import {
@@ -53,6 +56,8 @@ const DROP_OFFSETS = [
 export type AssetServiceOptions = {
   now?: () => Date;
   rng?: Rng;
+  /** Fixed Room content release; omitted means the shipped baseline (ADR-022). */
+  content?: ContentBundle;
 };
 
 export type LoadedAssets = {
@@ -123,8 +128,8 @@ export type UseInput = {
   vitals: { hp: number; mp: number };
 };
 
-function itemView(row: ItemInstance): ItemView {
-  const definition = requireItem(row.templateId);
+function itemView(row: ItemInstance, catalog: ItemCatalog): ItemView {
+  const definition = requireItem(row.templateId, catalog);
   return {
     itemId: row.id,
     templateId: row.templateId,
@@ -156,6 +161,7 @@ function clamp(value: number, min: number, max: number): number {
 export class AssetService {
   private readonly now: () => Date;
   private readonly rng: Rng;
+  private readonly content: ContentBundle;
 
   constructor(
     private readonly db: Database,
@@ -163,6 +169,7 @@ export class AssetService {
   ) {
     this.now = options.now ?? (() => new Date());
     this.rng = options.rng ?? Math.random;
+    this.content = options.content ?? DEFAULT_CONTENT_BUNDLE;
   }
 
   async loadAssets(characterId: string): Promise<LoadedAssets> {
@@ -174,7 +181,7 @@ export class AssetService {
     const now = this.now();
     const rows = await listOpenWorldDrops(this.db, mapId, now);
     return rows.map(({ drop, item }) => {
-      const definition = requireItem(item.templateId);
+      const definition = requireItem(item.templateId, this.content.items);
       const ownerActive =
         drop.ownerCharacterId !== null &&
         drop.ownerExpiresAt !== null &&
@@ -200,7 +207,7 @@ export class AssetService {
    */
   async grantKillReward(input: KillRewardInput): Promise<KillRewardOutcome | null> {
     const now = this.now();
-    const table = requireLootTable(input.monsterTemplateId);
+    const table = requireLootTable(input.monsterTemplateId, this.content.lootTables);
 
     return this.db.transaction(async (tx) => {
       const claimed = await tx
@@ -229,7 +236,7 @@ export class AssetService {
       const roll = rollLoot(table, this.rng);
       const progression = applyExperience(character.level, character.exp, roll.exp);
       const leveledUp = progression.levelsGained > 0;
-      const base = combatStatsFor(character.classId, progression.level);
+      const base = combatStatsFor(character.classId, progression.level, this.content);
       const hp = leveledUp ? base.maxHp : clamp(character.hp, 0, base.maxHp);
       const mp = leveledUp ? base.maxMp : clamp(character.mp, 0, base.maxMp);
 
@@ -277,7 +284,7 @@ export class AssetService {
 
       const drops: LootDropView[] = [];
       for (const [index, entry] of roll.items.entries()) {
-        const definition = requireItem(entry.templateId);
+        const definition = requireItem(entry.templateId, this.content.items);
         const [item] = await tx
           .insert(itemInstances)
           .values({
@@ -394,17 +401,20 @@ export class AssetService {
       }
 
       const inventory = await listInventoryItems(tx, input.characterId);
-      const placement = findInventoryPlacement({
-        items: inventory.map((entry) => ({
-          itemId: entry.id,
-          templateId: entry.templateId,
-          quantity: entry.quantity,
-          slotIndex: entry.slotIndex ?? 0,
-        })),
-        templateId: item.templateId,
-        quantity: item.quantity,
-        capacity: INVENTORY_CAPACITY,
-      });
+      const placement = findInventoryPlacement(
+        {
+          items: inventory.map((entry) => ({
+            itemId: entry.id,
+            templateId: entry.templateId,
+            quantity: entry.quantity,
+            slotIndex: entry.slotIndex ?? 0,
+          })),
+          templateId: item.templateId,
+          quantity: item.quantity,
+          capacity: INVENTORY_CAPACITY,
+        },
+        this.content.items,
+      );
       if (placement === null) {
         throw new AssetError('INVENTORY_FULL');
       }
@@ -438,7 +448,7 @@ export class AssetService {
           .where(eq(worldDrops.id, drop.id));
       }
 
-      const definition = requireItem(item.templateId);
+      const definition = requireItem(item.templateId, this.content.items);
       const loaded = await this.loadAssetsWithin(tx, input.characterId);
       return {
         snapshot: loaded.snapshot,
@@ -489,7 +499,7 @@ export class AssetService {
         throw new AssetError('ITEM_NOT_FOUND');
       }
 
-      const definition = requireItem(item.templateId);
+      const definition = requireItem(item.templateId, this.content.items);
       const equippable = canEquip(definition, character.classId, character.level);
       if (equippable === 'notEquippable') {
         throw new AssetError('ITEM_NOT_EQUIPPABLE');
@@ -581,17 +591,20 @@ export class AssetService {
       }
 
       const inventory = await listInventoryItems(tx, input.characterId);
-      const placement = findInventoryPlacement({
-        items: inventory.map((entry) => ({
-          itemId: entry.id,
-          templateId: entry.templateId,
-          quantity: entry.quantity,
-          slotIndex: entry.slotIndex ?? 0,
-        })),
-        templateId: equipped.templateId,
-        quantity: equipped.quantity,
-        capacity: INVENTORY_CAPACITY,
-      });
+      const placement = findInventoryPlacement(
+        {
+          items: inventory.map((entry) => ({
+            itemId: entry.id,
+            templateId: entry.templateId,
+            quantity: entry.quantity,
+            slotIndex: entry.slotIndex ?? 0,
+          })),
+          templateId: equipped.templateId,
+          quantity: equipped.quantity,
+          capacity: INVENTORY_CAPACITY,
+        },
+        this.content.items,
+      );
       if (placement === null || placement.kind !== 'slot') {
         throw new AssetError('INVENTORY_FULL');
       }
@@ -643,7 +656,7 @@ export class AssetService {
         throw new AssetError('ITEM_NOT_FOUND');
       }
 
-      const definition = requireItem(item.templateId);
+      const definition = requireItem(item.templateId, this.content.items);
       if (!isConsumable(definition)) {
         throw new AssetError('ITEM_NOT_USABLE');
       }
@@ -653,8 +666,10 @@ export class AssetService {
 
       const equipped = await listEquippedItems(tx, input.characterId);
       const stats = statsWithEquipment(
-        combatStatsFor(character.classId, character.level),
-        equipmentBonuses(equipped.map((entry) => requireItem(entry.templateId))),
+        combatStatsFor(character.classId, character.level, this.content),
+        equipmentBonuses(
+          equipped.map((entry) => requireItem(entry.templateId, this.content.items)),
+        ),
       );
 
       const currentHp = clamp(Math.floor(input.vitals.hp), 0, stats.maxHp);
@@ -733,9 +748,11 @@ export class AssetService {
     const inventory = await listInventoryItems(executor, characterId);
     const equipped = await listEquippedItems(executor, characterId);
     const wallet = await findWallet(executor, characterId);
-    const equippedDefinitions = equipped.map((entry) => requireItem(entry.templateId));
+    const equippedDefinitions = equipped.map((entry) =>
+      requireItem(entry.templateId, this.content.items),
+    );
     const stats = statsWithEquipment(
-      combatStatsFor(character.classId, character.level),
+      combatStatsFor(character.classId, character.level, this.content),
       equipmentBonuses(equippedDefinitions),
     );
     const weapon = equipped.find((entry) => entry.equipSlot === 'weapon');
@@ -754,10 +771,10 @@ export class AssetService {
       attack: stats.attack,
       defense: stats.defense,
       capacity: INVENTORY_CAPACITY,
-      items: inventory.map(itemView),
+      items: inventory.map((entry) => itemView(entry, this.content.items)),
       equipment: {
-        weapon: weapon === undefined ? null : itemView(weapon),
-        armor: armor === undefined ? null : itemView(armor),
+        weapon: weapon === undefined ? null : itemView(weapon, this.content.items),
+        armor: armor === undefined ? null : itemView(armor, this.content.items),
       },
     };
 

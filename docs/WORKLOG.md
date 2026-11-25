@@ -1044,3 +1044,160 @@ pnpm load:world
    小地图/角色面板/音效、聊天过滤/限频、重连。
 2. 验收通过后启动阶段 7：运营后台、RBAC、Outbox、内容 Draft/Release/回滚与审计。
 3. 保持阶段 1–6 测试为回归门禁；阶段 7 前评估独立测试库与数据清理。
+
+---
+
+## 2026-11-25 · 阶段 7：运营后台与内容发布
+
+### 目标
+
+把项目从“开发者能玩”推进到“运营人员可以管理和更新”：交付独立管理员身份与
+RBAC、总览/玩家/Room/审计/运营指令、Kick/Ban/Mute 的审计 + PostgreSQL Outbox
+可靠投递、Game Server 按 commandId 幂等执行，以及内容 Draft → 校验 → 不可变
+Release → 按区服激活/回滚。不进入阶段 8 的压测、部署与恢复。
+
+### 开工前状态
+
+- HEAD `c2ca247`，工作区干净；阶段 0–3 已由用户验收，阶段 4–6 自动化验收完成。
+- 运营后台仍是阶段 0 的静态状态页；没有管理员身份、审计、Outbox、内容 schema
+  或 Release；数值写死在 `game-domain`；Game Server 没有受信内部端点。
+- 结论：阶段 7 目标全部未实现；按用户“继续研发下一阶段”的指示启动，先写
+  ADR-022 固定身份、Outbox、内容发布与版本固定边界。
+
+### 实际改动
+
+1. **ADR 与边界**
+   - 新增 ADR-022：管理员身份分离、RBAC、审计 + Outbox、不可变 Release、
+     Room 创建时固定内容、单活跃区服限制。
+   - AGENTS/ESLint：新增 `content-schema` 包；`game-domain` 允许依赖
+     `content-schema/base`；`admin-web` 仍只依赖 contracts；禁止修改/删除
+     Release、审计与激活历史。
+2. **contracts**
+   - 管理员角色/权限矩阵、登录/会话 DTO、总览/玩家/Room/审计/指令查询、
+     草稿/校验/Release/激活 DTO、内部 Kick/Ban/Mute envelope。
+   - 内容 bundle schema（职业、技能、怪物、物品、掉落表），effect handler
+     白名单；`WorldState` 增加内容版本/checksum；新增 `session.kicked`。
+3. **content-schema（新包）**
+   - 基线 bundle、schema + 引用/范围/刷点校验、稳定 JSON checksum、差异、
+     草稿合并与版本号；12 个测试。
+4. **game-domain / game-application**
+   - 删除写死目录，改为消费 `ContentBundle`；`CombatWorld`、属性、物品、掉落
+     规则和 `AssetService` 支持 Room 注入；默认使用基线。
+   - 新增内容注入测试。
+5. **persistence**
+   - 8 张新表 + `accounts.muted_until`；迁移 0004；迁移 0005 为审计/Release/
+     激活历史增加 append-only 触发器。
+   - 管理员/审计/Outbox/内容仓储、玩家服务端分页、Outbox 状态统计。
+6. **control-api**
+   - 管理员登录/Cookie/RBAC；总览、玩家、Room、审计、运营指令 API。
+   - Kick/Ban/Mute 同事务写审计 + Outbox；Ban/Mute 持久化账号状态；失败也审计。
+   - Outbox dispatcher：SKIP LOCKED、stale 重投、退避、4xx 直接失败。
+   - 内容草稿/校验/发布/激活/回滚，发布与激活写审计；创建角色使用激活内容。
+   - `node:http` 内部客户端避开 87 端口 fetch 限制。
+7. **game-server**
+   - 内容 Store 周期读取激活 Release；Room `onCreate` 固定快照。
+   - 内部状态/命令端点（共享令牌）；commandId 幂等；Kick/Ban/Mute；封禁/禁言
+     在登录时校验；`chatMuted` 指标。
+8. **game-web**
+   - 处理 `session.kicked`，显示被踢/封禁覆盖层与原因。
+9. **admin-web**
+   - 自定义深色运营工作台：登录、总览、玩家、世界/Room、内容工作台、发布中心、
+     审计、运营指令；服务端分页/筛选、危险操作原因与影响、校验问题/差异。
+10. **测试与证据**
+    - 新增契约、content-schema、领域/应用、Control API、Game Server 测试；
+      E2E 新增管理员总览/Kick/审计与内容发布/激活/回滚。
+    - 截图、负载、数据库、指标写入 `docs/phase-reports/phase-07/`。
+11. **文档**
+    - ADR-022、AGENTS、README、PROJECT_STATUS、WORKLOG、阶段 7 报告。
+
+### 关键技术决策
+
+- 管理员身份与玩家账号完全分离；后台 Cookie Path 限定 `/api/v1/admin`。
+- 运营动作先写 PostgreSQL 审计 + Outbox，再由 dispatcher 投递；HTTP 只是传输。
+- Game Server 按 commandId 去重；重复投递返回 duplicate，不重复执行。
+- Ban/Mute 的持久状态由 Control API 事务写入；Kick 只是在线会话动作。
+- 内容 Release 不可变；回滚是新的激活记录；数据库触发器拒绝 UPDATE/DELETE。
+- Game Server 只在 Room 创建时取内容快照；新 Room 用新版本，旧 Room 不变。
+- 内容数据与行为分离：后台只提交结构化数值，effect handler 必须在代码中。
+- 单活跃区服下 Room 未绑定 Realm；阶段 8 必须显式绑定，不能默认多区服可用。
+- Playwright 默认 2 worker，避免软件渲染下的时序抖动；可用环境变量覆盖。
+
+### 执行的命令与结果
+
+```bash
+pnpm install
+pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
+pnpm format
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+PLAYWRIGHT_SKIP_WEBSERVER=true pnpm exec playwright test --workers=2
+pnpm load:world
+```
+
+结果：
+
+- 格式 / lint / typecheck 通过（根配置 + 15 个 workspace）。
+- 53 个测试文件、307 个测试通过（约 12.4s）。
+- 4 个应用构建成功；admin-web bundle 较大（1.36MB，阶段 8 评估拆包）。
+- 20 个 Playwright E2E 通过（2 workers，约 1.9 分钟）。
+- 30 人主城负载：30/30、750 接受、0 拒绝、tick p50 0.1ms、p95 1.13ms、
+  p99 1.67ms、max 1.93ms。
+- 数据库：6 条迁移、19 张表、2131 账号、1989 角色、2359 物品实例、130 钱包、
+  114 条审计（98 成功/16 失败）、24 条 Outbox（全部 applied）、17 个 Release、
+  31 条激活、激活内容 baseline；钱包/流水不一致 0。
+
+### 遇到的问题及解决方法
+
+1. **game-domain 引入 node:crypto**：content-schema 的 checksum 使用
+   `node:crypto`，而 game-domain 没有 Node 类型。拆分 `content-schema/base`
+   子路径，game-domain 只导入基线数据，服务端工具仍留在主入口。
+2. **Zod record 枚举键**：`z.record(characterClassSchema, ...)` 在 Zod 4 中要求
+   所有职业键，正好符合“职业必须完整”的约束；技能/怪物/物品使用 string 键。
+3. **Outbox 状态机**：dispatcher 先标记 dispatched 再 HTTP 投递；崩溃后会卡在
+   dispatched，增加 60 秒 stale 重投。4xx 视为不可重试，网络/5xx 指数退避。
+4. **Ban/Mute 目标**：Outbox 目标使用 account id（Ban/Mute 是账号级），审计目标
+   仍记录角色 id 方便运营理解；Kick 使用角色 id。
+5. **失败审计**：写操作在参数校验/权限/目标校验失败时也写入 failed 审计；服务
+   层集中做 RBAC，避免路由预检查绕过审计。
+6. **Game Server 87 端口**：Control API 不能使用 `fetch`（WHATWG bad port），
+   改用 `node:http` 的内部客户端。
+7. **E2E 角色名超长**：新辅助函数使用 9 字符前缀 + 6 字符 token，超过 12 字符；
+   改为截断到 12。
+8. **AntD 两字按钮可访问名**：`激活` 被渲染为“激 活”，Playwright 精确名称
+   匹配失败；改用正则 `/激\s*活/`。
+9. **抽屉遮挡导航**：Kick 后抽屉仍打开，遮罩拦截导航点击；测试先点抽屉关闭。
+10. **RPC/内容版本测试**：为避免与其它文件共享数据库的激活操作竞争，新增
+    `ContentProvider` 接口，用内存 fake 在 Game Server 集成测试中证明“新 Room
+    使用新快照、旧 Room 保持旧快照”。
+11. **E2E 并行抖动**：7/4 worker 下出现 250ms 可见性 279ms 和攻击循环未击杀；
+    默认降到 2 worker，并把经济测试攻击循环放宽到 20 次/1000ms。未降低断言。
+12. **旧阶段截图被 E2E 重新生成**：执行完整回归会重写阶段 3–6 证据截图；已用
+    `git checkout` 恢复旧证据，只提交阶段 7 证据。
+13. **旧开发进程占用 84–87**：停止上一会话遗留的 Vite/tsx 进程后重新启动
+    84–87；当前栈运行本阶段代码。
+
+### 尚未解决的问题
+
+- 多区服内容未绑定 Room；当前只使用默认活跃区服。
+- 内容工作台是 JSON section 编辑器，不是逐字段表单；无审批流/按人草稿。
+- 独立测试库、审计/Outbox/Release 归档、过期数据清理仍未建立。
+- 后台无 refresh token/MFA；禁言历史与申诉未实现。
+- 正式美术/音效、压测/部署/恢复演练属于阶段 8。
+
+### 阶段提交
+
+- 阶段 7 主提交：待提交后回填
+  主题：`feat(phase-7): deliver admin console, outbox operations and content releases`。
+
+### 下一步计划
+
+1. 用户在 `http://<LAN-IP>:8584/` 与 `http://<LAN-IP>:8585/` 实测阶段 7，并
+   回归阶段 1–6 的游戏行为。
+2. 验收通过后启动阶段 8：生产镜像、HTTPS/WSS、指标告警、50 人 10 分钟压测、
+   备份恢复与故障演练。
+3. 阶段 8 前评估独立测试数据库、Outbox 独立 worker、审计与 Release 归档、
+   多区服内容路由。

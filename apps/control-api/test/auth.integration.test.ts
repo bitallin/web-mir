@@ -143,6 +143,7 @@ describe.runIf(databaseUrl !== undefined)('control API accounts, characters and 
       CONTROL_API_PORT: 3002,
       DATABASE_URL: requireDatabaseUrl(),
       CORS_ORIGINS: ['http://localhost:5173'],
+      INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
 
     app = await buildServer({
@@ -407,6 +408,7 @@ describe.runIf(databaseUrl !== undefined)('control API accounts, characters and 
       CONTROL_API_PORT: 3002,
       DATABASE_URL: requireDatabaseUrl(),
       CORS_ORIGINS: ['http://localhost:5173'],
+      INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
     app = await buildServer({
       env,
@@ -438,6 +440,7 @@ describe.runIf(databaseUrl !== undefined)('control API accounts, characters and 
         CONTROL_API_PORT: 3003,
         DATABASE_URL: requireDatabaseUrl(),
         CORS_ORIGINS: ['http://localhost:5173'],
+        INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
       },
       logger,
       readiness: () => Promise.resolve([{ name: 'database', status: 'ok' }]),

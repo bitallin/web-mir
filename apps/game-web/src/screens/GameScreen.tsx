@@ -865,6 +865,27 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         </div>
       ) : null}
 
+      {state.kicked !== null ? (
+        <div
+          className="connection-overlay"
+          data-testid="kicked-overlay"
+          data-kind={state.kicked.kind}
+          role="alert"
+        >
+          <div className="connection-overlay-card">
+            <p className="eyebrow">
+              {state.kicked.kind === 'banned' ? '账号已封禁' : '连接已被断开'}
+            </p>
+            <strong>{state.kicked.reason}</strong>
+            {state.kicked.kind === 'kicked' ? (
+              <button type="button" className="rejoin" data-testid="kicked-rejoin" onClick={rejoin}>
+                重新加入
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {state.notice !== null ? (
         <div
           className={`notice notice-${state.notice.kind}`}

@@ -4,6 +4,7 @@ import {
   type CharacterClass,
   type CombatEventPayload,
   type CommandRejectionCode,
+  type ContentBundle,
   type MapMonsterSpawn,
   type MonsterStateKind,
   type TilePoint,
@@ -19,8 +20,7 @@ import {
   type Rng,
 } from './combat';
 import {
-  MONSTER_CATALOG,
-  SKILL_CATALOG,
+  DEFAULT_CONTENT_BUNDLE,
   skillsForClass,
   type MonsterDefinition,
   type SkillDefinition,
@@ -137,6 +137,8 @@ export type CombatWorldOptions = {
   /** Test override; defaults to each monster definition's respawn time. */
   monsterRespawnMs?: number;
   playerRespawnMs?: number;
+  /** Fixed content release for this Room (ADR-022); defaults to the baseline. */
+  content?: ContentBundle;
   skills?: Readonly<Record<string, SkillDefinition>>;
   monsters?: Readonly<Record<string, MonsterDefinition>>;
 };
@@ -233,6 +235,7 @@ export class CombatWorld {
   private readonly monsterRespawnMs: number | undefined;
   private readonly playerRespawnMs: number;
   private readonly pvpEnabled: boolean;
+  private readonly content: ContentBundle;
   private readonly skills: Readonly<Record<string, SkillDefinition>>;
   private readonly monstersById: Readonly<Record<string, MonsterDefinition>>;
   private now = 0;
@@ -241,8 +244,9 @@ export class CombatWorld {
     this.grid = options.grid;
     this.pathfinder = options.pathfinder;
     this.rng = options.rng;
-    this.skills = options.skills ?? SKILL_CATALOG;
-    this.monstersById = options.monsters ?? MONSTER_CATALOG;
+    this.content = options.content ?? DEFAULT_CONTENT_BUNDLE;
+    this.skills = options.skills ?? this.content.skills;
+    this.monstersById = options.monsters ?? this.content.monsters;
     this.monsterRespawnMs = options.monsterRespawnMs;
     this.playerRespawnMs = options.playerRespawnMs ?? DEFAULT_PLAYER_RESPAWN_MS;
     this.pvpEnabled = options.pvpEnabled ?? false;
@@ -306,7 +310,7 @@ export class CombatWorld {
     ) {
       throw new RangeError('player position must be non-negative integer unit coordinates');
     }
-    const stats = input.stats ?? combatStatsFor(input.classId, input.level);
+    const stats = input.stats ?? combatStatsFor(input.classId, input.level, this.content);
     const hp = Math.min(Math.max(input.hp, 0), stats.maxHp);
     const mp = Math.min(Math.max(input.mp, 0), stats.maxMp);
     this.players.set(input.id, {
@@ -447,7 +451,7 @@ export class CombatWorld {
       maxHp: player.maxHp,
       mp: player.mp,
       maxMp: player.maxMp,
-      skills: skillsForClass(player.classId)
+      skills: skillsForClass(player.classId, this.skills)
         .filter((skill) => skill.levelRequirement <= player.level)
         .map((skill) => ({
           id: skill.id,

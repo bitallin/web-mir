@@ -74,7 +74,8 @@ web-mir/
 ├─ packages/
 │  ├─ contracts/      API/协议/角色 DTO/健康/错误码，客户端与服务端共享
 │  ├─ auth/           Argon2id 密码、会话令牌与一次性票据令牌（阶段 2 创建）
-│  ├─ game-domain/    战斗纯函数、技能/怪物/物品/掉落目录与内存战斗世界（阶段 4/5）
+│  ├─ content-schema/ 内容 bundle schema、基线内容、校验、checksum 与差异（阶段 7）
+│  ├─ game-domain/    战斗纯函数、技能/怪物/物品/掉落规则与内存战斗世界（阶段 4/5）
 │  ├─ game-application/ 事务用例：击杀奖励、拾取、背包、装备、金币（阶段 5）
 │  ├─ game-simulation/ 固定 tick、移动推进、寻路、AOI（阶段 1/3）
 │  ├─ map-runtime/    Tiled 编译、导航与传送门运行时（阶段 3 创建）
@@ -96,16 +97,22 @@ web-mir/
 创建，承载 Argon2id 密码哈希、会话令牌与票据令牌，只使用 Node 内置 `crypto`，
 不依赖 contracts、数据库或 app。`map-runtime` 已在阶段 3 创建，承载 Tiled 编译、
 checksum、导航格与传送门查询，只依赖 `contracts` 与 Node 内置模块。
-`game-domain` 已在阶段 4 创建，承载战斗纯函数、技能/怪物目录与无 IO 的
-`CombatWorld`；它只依赖 `contracts`，移动格、寻路、RNG 与复活点由调用方注入。
-阶段 5 在同一包内增加物品目录、掉落表、经验曲线与背包/装备纯规则；阶段 6 增加
-玩家目标战斗（PvP）、死亡复活计时与纯函数聊天过滤。安全区由编译地图的
-`pvpMode` 决定，Room 不得从客户端字段推断。
+`content-schema` 已在阶段 7 创建，承载内容 bundle 的 Zod schema、基线内容、
+引用/范围校验、规范化 checksum 与差异；它只依赖 `contracts`（含
+`contracts/maps`），不依赖数据库、app 或 game-domain。
+`game-domain` 已在阶段 4 创建，承载战斗纯函数、技能/怪物/物品/掉落规则与无 IO 的
+`CombatWorld`；阶段 5 增加物品、掉落表、经验曲线与背包/装备纯规则；阶段 6 增加
+玩家目标战斗（PvP）、死亡复活计时与纯函数聊天过滤；阶段 7 改为消费
+`content-schema/base` 的基线 bundle，并允许调用方注入 Room 固定的
+`ContentBundle`。它只依赖 `contracts` 与 `content-schema/base`，移动格、寻路、
+RNG 与复活点由调用方注入。安全区由编译地图的 `pvpMode` 决定，Room 不得从客户端
+字段推断。
 `game-application` 已在阶段 5 创建，承载击杀奖励、拾取、装备、卸下与消耗品使用
-的事务用例，依赖 `contracts`、`game-domain` 与 `persistence`。
+的事务用例，依赖 `contracts`、`game-domain` 与 `persistence`；阶段 7 接受 Room
+注入的内容 bundle。
 
-当前**尚未创建**的包及创建时机（ADR-013）：`content-schema`（阶段 7 内容发布）。
-不要提前创建空壳包。
+ADR-013 中的包均已创建；阶段 8 如需新包必须先有真实消费者、测试与 ADR。
+不要创建空壳包。
 
 强制依赖方向：
 
@@ -113,24 +120,25 @@ checksum、导航格与传送门查询，只依赖 `contracts` 与 Node 内置�
 - `auth` 只依赖 Node 内置模块；不得依赖 contracts、数据库、HTTP 框架或 app。
 - `persistence` 只依赖 `config` 和数据库库，不依赖 app。
 - `game-simulation` 只依赖 `contracts`；不得依赖 Colyseus、Phaser、数据库或 HTTP。
-- `game-domain` 只依赖 `contracts`；不得依赖 game-simulation、map-runtime、
-  Colyseus、Phaser、数据库、HTTP 或 app。导航格、寻路函数与 RNG 通过参数注入。
+- `content-schema` 依赖 `contracts`（含 `contracts/maps`）；不得依赖数据库、
+  Colyseus、Phaser、HTTP、其他领域包或 app。
+- `game-domain` 只依赖 `contracts` 与 `content-schema/base`；不得依赖
+  game-simulation、map-runtime、Colyseus、Phaser、数据库、HTTP 或 app。导航格、
+  寻路函数、RNG 与内容 bundle 通过参数注入。
 - `map-runtime` 只依赖 `contracts` 与 Node 内置模块；不得依赖 Colyseus、数据库、
   HTTP 框架、app 或 `game-simulation`。
 - `game-application` 依赖 `contracts`、`game-domain`、`persistence`；不得导入
   Colyseus、Fastify、Pino、Phaser、`game-simulation`、`map-runtime` 或任何 app。
-- `control-api` 依赖 `auth`、`persistence`、`contracts`（含 `contracts/maps`）与
-  `game-domain`（创建角色时的职业初始物品目录）；不得导入 game-server 或
-  map-runtime。
+- `control-api` 依赖 `auth`、`persistence`、`contracts`（含 `contracts/maps`）、
+  `content-schema` 与 `game-domain`；不得导入 game-server 或 map-runtime。
 - `game-server` 依赖 `auth`、`persistence`、`game-simulation`、`game-domain`、
-  `game-application`、`map-runtime`、`contracts`；不得导入 control-api。
+  `game-application`、`map-runtime`、`content-schema`、`contracts`；不得导入
+  control-api。
 - `game-web` 只能导入 `contracts`（含 `contracts/maps`）、自身表现层与资源
   manifest；不能导入服务端包（含 `game-simulation`、`map-runtime`、`auth`）、
   数据库、Fastify、Colyseus 服务端或 Pino。
 - `admin-web` 只能通过 Control API 访问数据；只能导入 `contracts`，不得导入
-  Phaser、服务端包或数据库。
-- `admin-web` 只能通过 Control API 访问数据；只能导入 `contracts`，不得导入
-  Phaser、服务端包或数据库。
+  Phaser、服务端包（含 `content-schema`）或数据库。
 - `control-api` 与 `game-server` 不得互相导入。
 - 任何 package 不得导入任何 app。
 - 上述规则由 `eslint.config.js` 的 `no-restricted-imports` 在 CI 中强制检查。
@@ -188,6 +196,8 @@ checksum、导航格与传送门查询，只依赖 `contracts` 与 Node 内置�
 - 服务端移动使用权威导航网格；客户端预测必须可被服务端校正。
 - PvP 是否允许只能由 Room 绑定的编译地图 `pvpMode` 决定；不得信任客户端上报的
   区域、坐标或地图字段。主城默认 `none`，野外默认 `open`。
+- 运营指令（Kick/Ban/Mute）只能由 Control API 在审计 + Outbox 事务中写入，经
+  受信内部端点投递；Game Server 必须按 `commandId` 幂等执行，客户端不得触发。
 - 聊天内容必须经过服务端过滤与限频后才能广播；被拦截消息只向发送者返回警告。
 - Room 启动时固定 Content Release 和 Asset Manifest 版本。
 - 私有数据（背包、账号、GM 标记）不得进入公开 Room State。
@@ -279,7 +289,11 @@ pnpm load:world          # 30 人地图负载检查，读取 /metrics 的 tick �
   先确认 watcher 限额。
 - Playwright 官方浏览器在当前系统不可下载；使用预装 Chromium 并通过
   `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指定。普通开发机应删除该变量并运行
-  `pnpm exec playwright install chromium`。
+  `pnpm exec playwright install chromium`。软件渲染下默认限制 2 个 worker
+  （`PLAYWRIGHT_WORKERS` 可覆盖），否则 250ms 可见性与攻击时序断言会抖动。
+- 开发管理员由 `pnpm db:seed` 创建，账号/密码来自 `ADMIN_SEED_USERNAME` /
+  `ADMIN_SEED_PASSWORD`。`INTERNAL_ADMIN_TOKEN` 的默认值只用于本地开发，
+  `NODE_ENV=production` 时必须显式覆盖。
 - Node 的 `fetch`（含 Colyseus SDK 的 matchmaking）拒绝 87 端口（WHATWG
   bad port）。负载脚本因此通过 Vite 的 `/ws` 代理连接实时服务器，并用
   `node:http` 读取 `/metrics`；不要把负载脚本改成直连 `fetch`。
@@ -294,6 +308,7 @@ pnpm load:world          # 30 人地图负载检查，读取 /metrics 的 tick �
 - 把 Redis 当作角色、金币或物品的唯一存储。
 - 绕过 ledger、物品事务或 idempotency key。
 - 后台执行任意 JS、`eval`、动态 import 或任意 SQL。
+- 修改或删除已发布的 Content Release、审计日志与激活历史。
 - 用前端隐藏按钮代替服务端权限。
 - 不经验证直接升级依赖。
 - 一次性生成大量只有目录和接口的空壳模块。

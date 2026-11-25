@@ -6,20 +6,36 @@ Fastify Control API 和 Colyseus 实时服务器。
 
 ## 当前状态
 
-**阶段 6：聊天、PK 和游戏体验完善，实现与自动化验收完成，等待用户在
-8584 实测确认。**
+**阶段 7：运营后台与内容发布，实现与自动化验收完成，等待用户在
+8584 / 8585 实测确认。**
 
-- 阶段 0–3 的工程底座、双人实时切片、账号票据、Tiled 地图/AOI/传送/聊天均已
-  通过用户验收；阶段 4 的战斗、怪物与技能、阶段 5 的掉落/背包/装备/资产事务
-  已交付并通过自动化验收。
-- 阶段 6 交付：编译地图 `pvpMode` 安全区、玩家目标普攻/技能、野外基础 PvP、
-  死亡倒计时与地图复活点、聊天内容过滤、系统消息、小地图、角色面板、玩家头顶
-  HP 条、断线/重连/错误覆盖层与占位合成音效。
-- 尚未实现：红名/爆装/罪恶值与死亡惩罚（MVP 明确不做）、运营后台和内容发布
-  （阶段 7）、压测/部署/恢复演练（阶段 8），以及正式音效与美术资源。
+- 阶段 0–3 已通过用户验收；阶段 4–6 的自动化验收完成，阶段 6 的实测仍待用户
+  确认。
+- 阶段 7 交付：独立管理员身份与 RBAC、总览/玩家/Room/审计/运营指令查询、
+  Kick/Ban/Mute 审计 + PostgreSQL Outbox 投递与 Game Server 幂等执行、
+  内容草稿 → 校验 → 不可变 Release → 按区服激活/回滚，以及自定义运营工作台。
+- 尚未实现：压测/部署/恢复演练（阶段 8）、正式音效与美术资源；聊天持久化、
+  禁言历史查询与多区服内容路由仍待后续阶段。
 - 详细状态见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)，工作记录见
-  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 6 报告见
-  [docs/phase-reports/PHASE_06_REPORT.md](docs/phase-reports/PHASE_06_REPORT.md)。
+  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 7 报告见
+  [docs/phase-reports/PHASE_07_REPORT.md](docs/phase-reports/PHASE_07_REPORT.md)。
+
+## 阶段 7：如何体验运营后台
+
+1. 执行 `pnpm db:migrate` 与 `pnpm db:seed`。`db:seed` 会写入默认区服、开发
+   管理员（`ADMIN_SEED_USERNAME` / `ADMIN_SEED_PASSWORD`，默认 `admin` /
+   `web-legend-admin`）以及基线内容版本 `baseline`。
+2. 启动 `pnpm dev`，访问 <http://localhost:8585/>，用管理员账号登录。
+3. “运行总览”显示在线人数、Room、tick、待投递/失败指令和激活内容版本；“世界与
+   Room”显示每个 Room 固定使用的内容版本与 checksum。
+4. “玩家与账号”按角色名/账号搜索；打开角色详情可查看装备、背包、金币、最近审计
+   和运营指令。Kick/Ban/Mute 必须填写原因，并显示目标与影响范围。
+5. 运营指令写入 PostgreSQL Outbox，Control API 投递到 Game Server；列表展示
+   `pending / dispatched / applied / failed`。被 Kick 的客户端会显示断开原因。
+6. “内容工作台”按内容类型编辑草稿（职业、技能、怪物、物品、掉落表），保存后
+   校验全部草稿并查看差异；发布生成不可变 Release；“发布中心”按区服激活或回滚。
+7. 新 Room 在 Game Server 下一次内容刷新后使用新版本；已有 Room 保持创建时的
+   版本。回滚同样通过激活旧版本完成，不会修改历史 Release。
 
 ## 阶段 6：如何体验
 
@@ -191,7 +207,7 @@ pnpm exec playwright install chromium
 | `pnpm db:up` / `db:down` | 启动 / 停止 PostgreSQL                   |
 | `pnpm db:generate`       | 根据 Drizzle schema 生成迁移             |
 | `pnpm db:migrate`        | 对 `DATABASE_URL` 执行迁移               |
-| `pnpm db:seed`           | 幂等写入默认区服 `classic-01`            |
+| `pnpm db:seed`           | 幂等写入默认区服、开发管理员与基线内容   |
 | `pnpm maps:compile`      | Tiled 源图编译为运行时 manifest          |
 | `pnpm repair:maps`       | 幂等迁移退役地图上的角色                 |
 | `pnpm load:world`        | 30 人地图负载检查并读取 tick 指标        |
@@ -203,9 +219,10 @@ game-server 四个开发服务；如果开发栈已运行，可复用现有服�
 PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
 ```
 
-E2E 使用真实账号、角色与票据，通过开发专用参数为每个场景创建独立 Room；证据
-（认证页、角色页、双人截图、传送与聊天截图、WebSocket 帧日志、可见延迟）写入
-`docs/phase-reports/phase-03/`。若默认端口被其他开发栈占用，可在运行时覆盖端口：
+E2E 使用真实账号、角色与票据，通过开发专用参数为每个场景创建独立 Room；阶段 7
+证据（运营总览、玩家详情、Kick 确认、指令 Outbox、内容校验、发布/回滚、被踢
+客户端）写入 `docs/phase-reports/phase-07/`。软件渲染环境默认使用 2 个 worker，
+可用 `PLAYWRIGHT_WORKERS` 覆盖。若默认端口被其他开发栈占用，可在运行时覆盖端口：
 
 ```bash
 GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=8847 pnpm test:e2e
@@ -217,12 +234,13 @@ GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=88
 apps/
   game-web/       Phaser 4 世界 + React HUD
   admin-web/      React + Ant Design 运营控制台
-  control-api/    Fastify REST、健康检查、未来 Outbox
-  game-server/    Colyseus 运行时与实时适配
+  control-api/    Fastify REST、管理员 RBAC、审计、Outbox dispatcher、内容发布
+  game-server/    Colyseus 运行时、内部管理指令端点与实时适配
 packages/
-  contracts/      协议、账号/角色 DTO、world-state schema、健康检查、错误 envelope
+  contracts/      协议、账号/角色/管理员 DTO、内容 schema、world-state、错误 envelope
   auth/           Argon2id 密码、会话令牌、一次性票据令牌
-  game-domain/    战斗纯函数、技能/怪物/物品/掉落目录、经验曲线、CombatWorld
+  content-schema/ 内容 bundle schema、基线内容、校验、checksum、差异
+  game-domain/    战斗纯函数、技能/怪物/物品/掉落规则、经验曲线、CombatWorld
   game-application/ 击杀奖励、拾取、背包、装备与金币事务用例
   game-simulation/ 固定 tick、路径搜索、移动推进、AOI（纯逻辑）
   map-runtime/    Tiled 编译、checksum、导航格与传送门运行时
@@ -243,12 +261,12 @@ tests/e2e/        Playwright
 ```
 
 `game-simulation` 在阶段 1 创建，`auth` 在阶段 2 创建，`map-runtime` 在阶段 3
-创建，`game-domain` 在阶段 4 创建，`game-application` 在阶段 5 创建。未创建的
-`content-schema` 在阶段 7 出现真实消费者时创建，原因见
-[ADR-013](docs/ADR/ADR-013-package-realization.md)。地图与 AOI 决策见
+创建，`game-domain` 在阶段 4 创建，`game-application` 在阶段 5 创建，
+`content-schema` 在阶段 7 创建。地图与 AOI 决策见
 [ADR-018](docs/ADR/ADR-018-phase3-map-runtime-aoi-transfer.md)，战斗边界见
 [ADR-019](docs/ADR/ADR-019-phase4-combat-domain.md)，资产与事务边界见
-[ADR-020](docs/ADR/ADR-020-phase5-asset-economy.md)。
+[ADR-020](docs/ADR/ADR-020-phase5-asset-economy.md)，后台/Outbox/内容发布边界见
+[ADR-022](docs/ADR/ADR-022-phase7-admin-console-outbox-content-releases.md)。
 
 浏览器通过同源 `/ws` 访问实时服务器：开发环境由 Vite 代理到 `GAME_SERVER_PORT`，
 `/matchmake` HTTP 和 WebSocket upgrade 共用该路径；生产部署需要在反向代理配置

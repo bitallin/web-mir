@@ -8,6 +8,7 @@ import type {
   InventorySnapshot,
   LevelUp,
   LootClaimed,
+  SessionKicked,
   SystemNotice,
   TilePoint,
 } from '@web-legend/contracts';
@@ -72,6 +73,7 @@ export type SessionState = {
   notice: SessionNotice | null;
   /** Client clock deadline for the local player's automatic revival. */
   reviveAt: number | null;
+  kicked: SessionKicked | null;
   sfxMuted: boolean;
 };
 
@@ -109,6 +111,7 @@ function initialState(character: CharacterView): SessionState {
     levelUpNotice: null,
     notice: null,
     reviveAt: null,
+    kicked: null,
     sfxMuted: isSfxMuted(),
   };
 }
@@ -449,6 +452,14 @@ class WorldSession {
             combatLog: [...previous.combatLog, lootLogEntry(claimed, characterId)].slice(
               -MAX_COMBAT_LOG,
             ),
+          }));
+        },
+        onKicked: (notice) => {
+          this.updateState((previous) => ({
+            ...previous,
+            status: 'disconnected',
+            detail: notice.kind === 'banned' ? '账号已被封禁' : '已被管理员移出世界',
+            kicked: notice,
           }));
         },
         onSystemNotice: (notice) => {

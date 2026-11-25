@@ -7,6 +7,34 @@ export {
 export type { CreateAccountInput } from './accounts';
 
 export {
+  findAdminById,
+  findAdminByNormalizedUsername,
+  findAdminSessionByTokenHash,
+  insertAdminSession,
+  insertAdminUser,
+  revokeAdminSessionByTokenHash,
+  touchAdminLogin,
+} from './admin';
+export type {
+  ActiveAdminSession,
+  AdminRoleId,
+  CreateAdminUserInput,
+  InsertAdminSessionInput,
+} from './admin';
+
+export { countAuditForTarget, insertAdminAudit, listAdminAudit } from './audit';
+export type { AdminAuditFilter, AdminAuditPage, InsertAdminAuditInput } from './audit';
+
+export { dashboardCounts, findAdminPlayer, listAdminPlayers } from './adminQueries';
+export type {
+  AdminPlayerFilter,
+  AdminPlayerPage,
+  AdminPlayerRecord,
+  AdminPlayerRow,
+  DashboardCounts,
+} from './adminQueries';
+
+export {
   findCharacterById,
   findCharacterForAccount,
   insertCharacter,
@@ -32,10 +60,49 @@ export {
   releaseCharacterLease,
 } from './characters';
 
+export {
+  activateContentRelease,
+  countReleasesCreatedBetween,
+  deleteContentDraft,
+  findContentDraft,
+  findContentReleaseById,
+  findDefaultActiveRelease,
+  findLatestActivation,
+  findRealmActiveContent,
+  insertContentRelease,
+  listContentActivations,
+  listContentDrafts,
+  listContentReleases,
+  upsertContentDraft,
+} from './content';
+export type {
+  ActivateContentInput,
+  ActiveContentRecord,
+  InsertContentReleaseInput,
+  UpsertContentDraftInput,
+} from './content';
+
 export { findRealmById, listActiveRealms } from './realms';
 
 export { findWallet, listEquippedItems, listInventoryItems, listOpenWorldDrops } from './items';
 export type { OpenWorldDrop } from './items';
+
+export {
+  claimPendingCommands,
+  insertOutboxEvent,
+  listOutboxCommands,
+  markCommandApplied,
+  markCommandFailed,
+  outboxStatusCounts,
+  scheduleCommandRetry,
+} from './outbox';
+export type {
+  AdminCommandFilter,
+  AdminCommandPage,
+  ClaimOptions,
+  InsertOutboxEventInput,
+  OutboxStatusCounts,
+} from './outbox';
 
 export {
   findSessionByAccessHash,

@@ -17,6 +17,7 @@
     "@colyseus/ws-transport": "0.18.5",
     "@web-legend/auth": "workspace:*",
     "@web-legend/config": "workspace:*",
+    "@web-legend/content-schema": "workspace:*",
     "@web-legend/contracts": "workspace:*",
     "@web-legend/game-application": "workspace:*",
     "@web-legend/game-domain": "workspace:*",

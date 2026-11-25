@@ -1,11 +1,10 @@
 import {
-  CHARACTER_CLASS_CATALOG,
   TILE_UNITS,
   normalizeCharacterName,
+  type ContentBundle,
   type CreateCharacterRequest,
 } from '@web-legend/contracts';
 import { STARTER_TOWN_MAP } from '@web-legend/contracts/maps';
-import { STARTER_KIT } from '@web-legend/game-domain';
 import {
   findCharacterForAccount,
   findRealmById,
@@ -26,8 +25,15 @@ export const MAX_CHARACTERS_PER_ACCOUNT = 8;
  * Character creation and ownership checks. Realm and class come from server
  * data; the client supplies only a name, class id and optional realm id.
  */
+export type RealmContentProvider = {
+  bundleForRealm: (realmId: string) => Promise<ContentBundle>;
+};
+
 export class CharacterService {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly content: RealmContentProvider,
+  ) {}
 
   async list(accountId: string): Promise<CharacterWithRealm[]> {
     return listCharactersByAccount(this.db, accountId);
@@ -48,7 +54,10 @@ export class CharacterService {
       );
     }
 
-    const definition = CHARACTER_CLASS_CATALOG[input.classId];
+    // The realm's active content release decides base stats and the starter kit
+    // at creation time (ADR-022).
+    const bundle = await this.content.bundleForRealm(realm.id);
+    const definition = bundle.classes[input.classId];
     const spawn = STARTER_TOWN_MAP.spawnPoints[0];
     if (spawn === undefined) {
       throw new Error('starter town has no spawn point');
@@ -74,7 +83,7 @@ export class CharacterService {
           y: spawn.y * TILE_UNITS + TILE_UNITS / 2,
           facing: 2,
         },
-        STARTER_KIT[definition.id],
+        definition.starterKit,
       );
       return { ...character, realmCode: realm.code };
     } catch (error) {

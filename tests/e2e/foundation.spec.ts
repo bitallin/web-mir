@@ -18,10 +18,13 @@ test('game client boots into the account gate', async ({ page }) => {
   await expect(page.locator('canvas')).toHaveCount(0);
 });
 
-test('admin console renders its custom shell', async ({ page }) => {
+test('admin console boots into its login gate', async ({ page }) => {
   await page.goto(ADMIN_URL);
 
-  await expect(page.getByRole('heading', { name: '工程状态' })).toBeVisible();
-  await expect(page.getByText('运营控制台')).toBeVisible();
-  await expect(page.getByText('阶段 0 交付检查')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '运营控制台' })).toBeVisible();
+  await expect(page.getByTestId('admin-username')).toBeVisible();
+  await expect(page.getByTestId('admin-password')).toBeVisible();
+  await expect(page.getByTestId('admin-login-submit')).toBeVisible();
+  // Admin data is never fetched before an administrator session exists.
+  await expect(page.getByTestId('nav-overview')).toHaveCount(0);
 });

@@ -24,6 +24,7 @@ import {
   combatProfileSchema,
   commandAckSchema,
   commandRejectedSchema,
+  sessionKickedSchema,
   inventoryEquipSchema,
   inventorySnapshotSchema,
   inventoryUnequipSchema,
@@ -37,6 +38,8 @@ import {
   systemNoticeSchema,
   tilePointSchema,
   worldJoinOptionsSchema,
+  type AdminCommandEnvelope,
+  type AdminRoom,
   type AssetCommandKind,
   type AssetResult,
   type CharacterProgress,
@@ -92,6 +95,7 @@ import {
 import {
   acquireCharacterLease,
   consumeGameTicket,
+  findAccountById,
   findCharacterById,
   findRealmById,
   refreshCharacterLeases,
@@ -104,8 +108,10 @@ import type { Logger } from 'pino';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
+import type { AdminCommandHub } from '../admin/commandHub';
 import type { MetricsRegistry, RoomMetrics } from '../metrics';
 import { createCombatRng } from '../world/combatRng';
+import { BASE_ROOM_CONTENT, type ContentProvider, type RoomContent } from '../world/contentStore';
 import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket, type TokenBucket } from '../world/rateLimiter';
 
@@ -115,6 +121,9 @@ export type WorldMapRoomOptions = {
   logger: Logger;
   metrics: MetricsRegistry;
   mapInstance: MapInstance;
+  /** Fixed content snapshot source; omitted in unit fixtures means baseline. */
+  contentStore?: ContentProvider;
+  adminHub?: AdminCommandHub;
   tickHz?: number;
   patchRateMs?: number;
   reconnectGraceSeconds?: number;
@@ -169,6 +178,8 @@ const authDataSchema = z.object({
   maxHp: z.number().int().positive(),
   mp: z.number().int().nonnegative(),
   maxMp: z.number().int().nonnegative(),
+  /** Epoch ms while a moderator mute is active; null when unmuted. */
+  mutedUntil: z.number().int().nonnegative().nullable(),
 });
 
 type WorldAuthData = z.infer<typeof authDataSchema>;
@@ -176,7 +187,9 @@ type WorldAuthData = z.infer<typeof authDataSchema>;
 type SessionRecord = {
   client: Client;
   playerId: string;
+  accountId: string;
   displayName: string;
+  mutedUntil: number | null;
   lastSequence: number;
   recentAcks: Map<string, CommandAck>;
   rateBucket: TokenBucket;
@@ -254,6 +267,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private options!: WorldMapRoomOptions;
   private metrics!: RoomMetrics;
   private map!: MapInstance;
+  private content!: RoomContent;
   private simulation!: WorldSimulation;
   private combat!: CombatWorld;
   private interest!: InterestManager;
@@ -270,6 +284,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   override onCreate(options: WorldMapRoomOptions): void {
     this.options = options;
     this.map = options.mapInstance;
+    // Snapshot once: an activation only affects rooms created afterwards.
+    this.content = options.contentStore?.snapshot() ?? BASE_ROOM_CONTENT;
     this.simulation = new WorldSimulation(this.map.runtime.grid);
     this.interest = new InterestManager({
       cellSize: options.interestCellSize ?? DEFAULT_INTEREST.cellSize,
@@ -286,6 +302,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       pathfinder: findPath,
       rng: options.combatRng ?? createCombatRng(),
       playerRespawnTile: respawnTile,
+      content: this.content.bundle,
       // The immutable compiled map decides safe zones; client intent can never
       // change it (ADR-021).
       pvpEnabled: this.map.runtime.manifest.pvpMode === 'open',
@@ -312,10 +329,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       this.interest.add(monster.id, tileOfUnits(monster));
     }
 
-    this.assets = new AssetService(
-      options.database,
-      options.economyRng === undefined ? {} : { rng: options.economyRng },
-    );
+    this.assets = new AssetService(options.database, {
+      content: this.content.bundle,
+      ...(options.economyRng === undefined ? {} : { rng: options.economyRng }),
+    });
 
     this.metrics = options.metrics.register(this.roomId);
 
@@ -325,6 +342,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     this.state.mapId = this.map.mapId;
     this.state.instanceId = this.map.instanceId;
+    this.state.contentVersion = this.content.version;
+    this.state.contentChecksum = this.content.checksum;
     this.state.tickHz = tickHz;
     this.state.speedUnitsPerSecond = PLAYER_SPEED_UNITS_PER_SECOND;
     this.setPatchRate(patchRateMs);
@@ -372,6 +391,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.clock.setInterval(() => {
       void this.checkpointAll();
     }, this.checkpointIntervalMs);
+
+    options.adminHub?.register({
+      roomId: this.roomId,
+      snapshot: () => this.adminSnapshot(),
+      apply: (command) => this.applyAdminCommand(command),
+    });
 
     options.logger.info(
       {
@@ -492,7 +517,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const session: SessionRecord = {
       client,
       playerId: auth.characterId,
+      accountId: auth.accountId,
       displayName: auth.displayName,
+      mutedUntil: auth.mutedUntil,
       lastSequence: -1,
       recentAcks: new Map(),
       rateBucket: createTokenBucket({
@@ -625,6 +652,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   override async onDispose(): Promise<void> {
+    this.options.adminHub?.unregister(this.roomId);
     const sessionIds = [...this.sessions.keys()];
     await Promise.allSettled(sessionIds.map(async (sessionId) => this.removeSession(sessionId)));
     this.options.metrics.unregister(this.roomId);
@@ -656,6 +684,16 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (realm === undefined || realm.status !== 'active') {
       throw new ServerError(ErrorCode.AUTH_FAILED, '该区服当前不可进入');
     }
+
+    // A ban persists on the account; an already-issued ticket cannot bypass it.
+    const account = await findAccountById(this.options.database, character.accountId);
+    if (account === undefined || account.status !== 'active') {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '该账号已被封禁');
+    }
+    const mutedUntil =
+      account.mutedUntil !== null && account.mutedUntil.getTime() > now.getTime()
+        ? account.mutedUntil.getTime()
+        : null;
 
     // The ticket alone never chooses a map; the persisted character decides,
     // and the room only accepts players whose map matches its instance.
@@ -704,6 +742,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       maxHp: character.maxHp,
       mp: character.mp,
       maxMp: character.maxMp,
+      mutedUntil,
     };
   }
 
@@ -1341,6 +1380,17 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
 
+    const nowMs = Date.now();
+    if (session.mutedUntil !== null && session.mutedUntil > nowMs) {
+      this.metrics.recordChatMuted();
+      const seconds = Math.ceil((session.mutedUntil - nowMs) / 1_000);
+      this.sendSystemNotice(client, 'warning', `你已被管理员禁言，剩余 ${String(seconds)} 秒`);
+      return;
+    }
+    if (session.mutedUntil !== null) {
+      session.mutedUntil = null;
+    }
+
     session.recentChatIds.add(parsed.data.clientMessageId);
     if (session.recentChatIds.size > RECENT_CHAT_WINDOW) {
       const oldest = session.recentChatIds.values().next();
@@ -1392,6 +1442,83 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       serverTime: Date.now(),
     };
     client.send(SERVER_MESSAGES.systemNotice, systemNoticeSchema.parse(notice));
+  }
+
+  private adminSnapshot(): AdminRoom {
+    const tick = this.metrics.snapshot().tick;
+    return {
+      roomId: this.roomId,
+      mapId: this.map.mapId,
+      instanceId: this.map.instanceId,
+      players: this.state.players.size,
+      tickP50Ms: tick.p50Ms,
+      tickP95Ms: tick.p95Ms,
+      tickP99Ms: tick.p99Ms,
+      contentVersion: this.content.version,
+      contentChecksum: this.content.checksum,
+    };
+  }
+
+  /**
+   * Applies a command delivered by the Control API outbox. Operations only
+   * touch this process's live sessions; persisted ban/mute state was already
+   * committed by the Control API (ADR-022).
+   */
+  private applyAdminCommand(command: AdminCommandEnvelope): number {
+    switch (command.type) {
+      case 'kick': {
+        const session = this.findSessionByPlayerId(command.characterId);
+        if (session === undefined) {
+          return 0;
+        }
+        this.kickSession(session, 'kicked', command.reason);
+        return 1;
+      }
+      case 'ban': {
+        const matching = [...this.sessions.values()].filter(
+          (session) => session.accountId === command.accountId,
+        );
+        for (const session of matching) {
+          this.kickSession(session, 'banned', command.reason);
+        }
+        return matching.length;
+      }
+      case 'mute': {
+        const matching = [...this.sessions.values()].filter(
+          (session) => session.accountId === command.accountId,
+        );
+        const until = new Date(command.mutedUntil).getTime();
+        for (const session of matching) {
+          session.mutedUntil = until;
+          this.sendSystemNotice(session.client, 'warning', '你已被管理员禁言');
+        }
+        return matching.length;
+      }
+    }
+  }
+
+  private findSessionByPlayerId(playerId: string): SessionRecord | undefined {
+    const sessionId = this.sessionByPlayer.get(playerId);
+    return sessionId === undefined ? undefined : this.sessions.get(sessionId);
+  }
+
+  private kickSession(session: SessionRecord, kind: 'kicked' | 'banned', reason: string): void {
+    try {
+      session.client.send(
+        SERVER_MESSAGES.sessionKicked,
+        sessionKickedSchema.parse({ reason, kind, serverTime: Date.now() }),
+      );
+    } catch (error) {
+      this.options.logger.warn(
+        { err: error, roomId: this.roomId, characterId: session.playerId },
+        'failed to deliver session kicked notice',
+      );
+    }
+    this.options.logger.info(
+      { roomId: this.roomId, characterId: session.playerId, accountId: session.accountId, kind },
+      'admin disconnected session',
+    );
+    void session.client.leave(4000, reason);
   }
 
   private async restoreLoot(): Promise<void> {

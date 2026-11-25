@@ -13,6 +13,7 @@ const env: ControlApiEnv = {
   CONTROL_API_PORT: 3000,
   DATABASE_URL: 'postgres://user:pass@localhost:5432/web_legend',
   CORS_ORIGINS: ['http://localhost:5173'],
+  INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
 };
 
 const logger = createLogger({

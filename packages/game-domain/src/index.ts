@@ -3,6 +3,7 @@ export type { AttackModifier, AttackRoll, DefenseStats, OffenseStats, Rng } from
 
 export {
   COMBAT_CONTENT_VERSION,
+  DEFAULT_CONTENT_BUNDLE,
   MONSTER_CATALOG,
   SKILL_CATALOG,
   requireMonster,
@@ -43,6 +44,7 @@ export {
   findInventoryPlacement,
   isConsumable,
   requireItem,
+  starterKitFor,
   statsWithEquipment,
 } from './items';
 export type {
@@ -50,6 +52,7 @@ export type {
   EquipmentBonuses,
   InventoryPlacement,
   InventoryStack,
+  ItemCatalog,
   ItemDefinition,
   StarterItem,
 } from './items';
