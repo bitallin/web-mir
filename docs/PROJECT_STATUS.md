@@ -745,7 +745,8 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
   主题：`feat(phase-9): isolate test databases and complete websocket metrics`
 - Alpha 0.1 主提交：`fc9ad63`
   主题：`feat(alpha-01): close the eight P1 debts and add server-authoritative auto attack`
-- Alpha 0.2 切片 1：本轮实现完成，提交哈希在提交后补记
+- Alpha 0.2 切片 1 主提交：`9e0ad74`
+  主题：`feat(alpha-02): add the town merchant and close the gold loop`
 
 ## 11. 当前环境事实
 
