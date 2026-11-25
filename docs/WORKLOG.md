@@ -1035,7 +1035,7 @@ pnpm load:world
 
 ### 阶段提交
 
-- 阶段 6 主提交：`<待提交后填写>`
+- 阶段 6 主提交：`029d2da`
   主题：`feat(phase-6): deliver pvp, safe zones, chat moderation and hud polish`。
 
 ### 下一步计划

@@ -193,7 +193,7 @@ room ...: players=30 tick p50=0.16ms p95=1.03ms p99=1.72ms max=2.27ms samples=23
 
 ## 7. 阶段提交
 
-- 主提交：`<待提交后填写>`
+- 主提交：`029d2da`
   - 主题：`feat(phase-6): deliver pvp, safe zones, chat moderation and hud polish`
-- 文档提交：`<待提交后填写>`
-  - 主题：`docs(phase-6): record the phase commit hash`
+- 阶段提交哈希由主提交后的 `docs(phase-6): record the phase commit hash` 文档提交
+  写入 `PROJECT_STATUS.md` 与 `WORKLOG.md`。

@@ -460,7 +460,7 @@
   主题：`feat(phase-4): deliver monsters, combat and skills`
 - 阶段 5 主提交：`c5cc9e001772b2fa808f16f2a130ea46c5d441cc`
   主题：`feat(phase-5): deliver loot, inventory, equipment and persistent economy`
-- 阶段 6 主提交：`<待提交后填写>`
+- 阶段 6 主提交：`029d2da`
   主题：`feat(phase-6): deliver pvp, safe zones, chat moderation and hud polish`
 
 ## 11. 当前环境事实
