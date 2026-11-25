@@ -563,8 +563,11 @@ test('a character crosses the town wilds portal and returns without duplicates',
     'connected',
     { timeout: 20_000 },
   );
-  await expectPlayers(alice.page, 1);
+  // The wilds map is a shared fixed room; a live player or another suite may be
+  // present. The duplicate rule below is about this character, not total count.
   await expect(self).toHaveCount(1);
+  const wildsCount = Number((await alice.page.getByTestId('player-count').textContent()) ?? '0');
+  expect(wildsCount).toBeGreaterThanOrEqual(1);
   await expect(self).toHaveAttribute('data-tile-x', '2', { timeout: 10_000 });
   await expect(self).toHaveAttribute('data-tile-y', '16');
   expect(await alice.page.evaluate(() => window.__webLegendDebug?.currentMapId() ?? '')).toBe(
