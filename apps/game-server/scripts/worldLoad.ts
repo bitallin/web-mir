@@ -269,6 +269,7 @@ async function main(): Promise<void> {
       // Load clients only measure movement, but the server sends a profile on
       // join; consume it so the SDK does not warn about an unhandled message.
       room.onMessage('combat.profile', () => undefined);
+      room.onMessage('inventory.snapshot', () => undefined);
     }
 
     const startedAt = Date.now();

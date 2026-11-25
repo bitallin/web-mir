@@ -22,6 +22,12 @@ export type RoomMetricsSnapshot = {
   combatEvents: number;
   monsterKills: number;
   playerDeaths: number;
+  assetCommands: number;
+  assetFailures: number;
+  lootSpawned: number;
+  lootPickedUp: number;
+  goldGranted: number;
+  expGranted: number;
   tick: TickStats;
 };
 
@@ -48,6 +54,12 @@ export class RoomMetrics {
   private combatEvents = 0;
   private monsterKills = 0;
   private playerDeaths = 0;
+  private assetCommands = 0;
+  private assetFailures = 0;
+  private lootSpawned = 0;
+  private lootPickedUp = 0;
+  private goldGranted = 0;
+  private expGranted = 0;
   private readonly rejectionsByCode = new Map<string, number>();
 
   constructor(
@@ -95,6 +107,30 @@ export class RoomMetrics {
     this.playerDeaths += 1;
   }
 
+  recordAssetCommand(): void {
+    this.assetCommands += 1;
+  }
+
+  recordAssetFailure(): void {
+    this.assetFailures += 1;
+  }
+
+  recordLootSpawned(count: number): void {
+    this.lootSpawned += count;
+  }
+
+  recordLootPickedUp(): void {
+    this.lootPickedUp += 1;
+  }
+
+  recordGoldGranted(amount: number): void {
+    this.goldGranted += amount;
+  }
+
+  recordExpGranted(amount: number): void {
+    this.expGranted += amount;
+  }
+
   setPlayers(count: number): void {
     this.players = count;
   }
@@ -123,6 +159,12 @@ export class RoomMetrics {
       combatEvents: this.combatEvents,
       monsterKills: this.monsterKills,
       playerDeaths: this.playerDeaths,
+      assetCommands: this.assetCommands,
+      assetFailures: this.assetFailures,
+      lootSpawned: this.lootSpawned,
+      lootPickedUp: this.lootPickedUp,
+      goldGranted: this.goldGranted,
+      expGranted: this.expGranted,
       tick: this.tickStats(),
     };
   }
@@ -142,6 +184,12 @@ export type MetricsSnapshot = {
     combatEvents: number;
     monsterKills: number;
     playerDeaths: number;
+    assetCommands: number;
+    assetFailures: number;
+    lootSpawned: number;
+    lootPickedUp: number;
+    goldGranted: number;
+    expGranted: number;
   };
   timestamp: string;
 };
@@ -157,6 +205,12 @@ export class MetricsRegistry {
   private combatEvents = 0;
   private monsterKills = 0;
   private playerDeaths = 0;
+  private assetCommands = 0;
+  private assetFailures = 0;
+  private lootSpawned = 0;
+  private lootPickedUp = 0;
+  private goldGranted = 0;
+  private expGranted = 0;
 
   register(roomId: string): RoomMetrics {
     const metrics = new RoomMetrics(roomId);
@@ -179,6 +233,12 @@ export class MetricsRegistry {
     this.combatEvents += snapshot.combatEvents;
     this.monsterKills += snapshot.monsterKills;
     this.playerDeaths += snapshot.playerDeaths;
+    this.assetCommands += snapshot.assetCommands;
+    this.assetFailures += snapshot.assetFailures;
+    this.lootSpawned += snapshot.lootSpawned;
+    this.lootPickedUp += snapshot.lootPickedUp;
+    this.goldGranted += snapshot.goldGranted;
+    this.expGranted += snapshot.expGranted;
     this.rooms.delete(roomId);
   }
 
@@ -195,6 +255,12 @@ export class MetricsRegistry {
     const activeCombatEvents = rooms.reduce((total, room) => total + room.combatEvents, 0);
     const activeMonsterKills = rooms.reduce((total, room) => total + room.monsterKills, 0);
     const activePlayerDeaths = rooms.reduce((total, room) => total + room.playerDeaths, 0);
+    const activeAssetCommands = rooms.reduce((total, room) => total + room.assetCommands, 0);
+    const activeAssetFailures = rooms.reduce((total, room) => total + room.assetFailures, 0);
+    const activeLootSpawned = rooms.reduce((total, room) => total + room.lootSpawned, 0);
+    const activeLootPickedUp = rooms.reduce((total, room) => total + room.lootPickedUp, 0);
+    const activeGoldGranted = rooms.reduce((total, room) => total + room.goldGranted, 0);
+    const activeExpGranted = rooms.reduce((total, room) => total + room.expGranted, 0);
 
     return {
       service: 'game-server',
@@ -210,6 +276,12 @@ export class MetricsRegistry {
         combatEvents: this.combatEvents + activeCombatEvents,
         monsterKills: this.monsterKills + activeMonsterKills,
         playerDeaths: this.playerDeaths + activePlayerDeaths,
+        assetCommands: this.assetCommands + activeAssetCommands,
+        assetFailures: this.assetFailures + activeAssetFailures,
+        lootSpawned: this.lootSpawned + activeLootSpawned,
+        lootPickedUp: this.lootPickedUp + activeLootPickedUp,
+        goldGranted: this.goldGranted + activeGoldGranted,
+        expGranted: this.expGranted + activeExpGranted,
       },
       timestamp: new Date().toISOString(),
     };

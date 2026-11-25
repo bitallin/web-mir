@@ -4,19 +4,30 @@ import {
   CLIENT_MESSAGES,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
+  assetResultSchema,
+  characterProgressSchema,
   chatMessageSchema,
   combatEventSchema,
   combatProfileSchema,
   commandAckSchema,
   commandRejectedSchema,
+  inventorySnapshotSchema,
+  levelUpSchema,
+  lootClaimedSchema,
   monsterStateKindFromCode,
   sessionTransferSchema,
   worldRoomNameFor,
+  type AssetResult,
+  type CharacterProgress,
   type ChatMessage,
   type CombatEvent,
   type CombatProfile,
   type CommandAck,
   type CommandRejected,
+  type EquipmentSlot,
+  type InventorySnapshot,
+  type LevelUp,
+  type LootClaimed,
   type MonsterStateKind,
   type TilePoint,
 } from '@web-legend/contracts';
@@ -66,6 +77,18 @@ export type MonsterView = {
   state: MonsterStateKind;
 };
 
+export type LootView = {
+  dropId: string;
+  itemId: string;
+  templateId: string;
+  displayName: string;
+  quantity: number;
+  x: number;
+  y: number;
+  ownerId: string;
+  expiresAt: number;
+};
+
 export type WorldSnapshot = {
   mapId: string;
   instanceId: string;
@@ -73,6 +96,7 @@ export type WorldSnapshot = {
   playerCount: number;
   players: PlayerView[];
   monsters: MonsterView[];
+  loot: LootView[];
 };
 
 export type WorldClientCallbacks = {
@@ -86,6 +110,11 @@ export type WorldClientCallbacks = {
   onCombatEvent: (event: CombatEvent) => void;
   onTransfer: (mapId: string) => void;
   onLatency: (latencyMs: number) => void;
+  onInventory: (snapshot: InventorySnapshot) => void;
+  onAssetResult: (result: AssetResult) => void;
+  onProgress: (progress: CharacterProgress) => void;
+  onLevelUp: (levelUp: LevelUp) => void;
+  onLootClaimed: (claimed: LootClaimed) => void;
 };
 
 export type WorldClientOptions = {
@@ -227,6 +256,66 @@ export class WorldClient {
       clientSequence: this.sequence,
       skillId,
       targetId,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendPickup(dropId: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.lootPickup, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      dropId,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendEquip(itemId: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.inventoryEquip, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      itemId,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendUnequip(slot: EquipmentSlot): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.inventoryUnequip, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      slot,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendUse(itemId: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.inventoryUse, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      itemId,
     });
     this.sequence += 1;
     return true;
@@ -421,6 +510,51 @@ export class WorldClient {
     );
 
     this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.inventorySnapshot, (payload: unknown) => {
+        const parsed = inventorySnapshotSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onInventory(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.assetResult, (payload: unknown) => {
+        const parsed = assetResultSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onAssetResult(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.characterProgress, (payload: unknown) => {
+        const parsed = characterProgressSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onProgress(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.characterLevelUp, (payload: unknown) => {
+        const parsed = levelUpSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onLevelUp(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.lootClaimed, (payload: unknown) => {
+        const parsed = lootClaimedSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onLootClaimed(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
       room.onMessage(SERVER_MESSAGES.sessionTransfer, (payload: unknown) => {
         const parsed = sessionTransferSchema.safeParse(payload);
         if (!parsed.success || this.transferring) {
@@ -516,6 +650,21 @@ export class WorldClient {
       });
     });
 
+    const loot: LootView[] = [];
+    state.loot.forEach((drop) => {
+      loot.push({
+        dropId: drop.dropId,
+        itemId: drop.itemId,
+        templateId: drop.templateId,
+        displayName: drop.displayName,
+        quantity: drop.quantity,
+        x: drop.x,
+        y: drop.y,
+        ownerId: drop.ownerId,
+        expiresAt: drop.expiresAt,
+      });
+    });
+
     this.options.callbacks.onSnapshot({
       mapId: state.mapId,
       instanceId: state.instanceId,
@@ -523,6 +672,7 @@ export class WorldClient {
       playerCount: state.playerCount,
       players,
       monsters,
+      loot,
     });
   }
 

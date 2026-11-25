@@ -26,6 +26,8 @@ const serverPackages = [
   '@web-legend/game-simulation/*',
   '@web-legend/game-domain',
   '@web-legend/game-domain/*',
+  '@web-legend/game-application',
+  '@web-legend/game-application/*',
   '@web-legend/map-runtime',
   '@web-legend/map-runtime/*',
 ];
@@ -179,6 +181,45 @@ export default tseslint.config(
                 '@web-legend/testkit/*',
               ],
               message: 'game-domain depends only on contracts; inject adapters at the call site.',
+            },
+            { group: apps, message: 'Packages must never depend on applications.' },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Transactional use cases compose domain rules and persistence; they must
+    // not reach into transport, simulation or other apps (ADR-020).
+    files: ['packages/game-application/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@web-legend/game-simulation',
+                '@web-legend/game-simulation/*',
+                '@web-legend/map-runtime',
+                '@web-legend/map-runtime/*',
+                '@web-legend/auth',
+                '@web-legend/auth/*',
+                '@web-legend/config',
+                '@web-legend/config/*',
+                '@web-legend/observability',
+                '@web-legend/observability/*',
+                '@web-legend/testkit',
+                '@web-legend/testkit/*',
+                'fastify',
+                'express',
+                'pino',
+                '@colyseus/core',
+                '@colyseus/sdk',
+                'phaser',
+              ],
+              message:
+                'game-application composes contracts, game-domain and persistence only; adapters live in apps.',
             },
             { group: apps, message: 'Packages must never depend on applications.' },
           ],

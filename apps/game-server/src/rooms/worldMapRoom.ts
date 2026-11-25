@@ -9,11 +9,14 @@ import {
   DEFAULT_TICK_HZ,
   FACING,
   MONSTER_STATE_CODES,
+  PICKUP_RANGE_TILES,
   PLAYER_SPEED_UNITS_PER_SECOND,
   PROTOCOL_VERSION,
   SERVER_MESSAGES,
   TILE_UNITS,
+  assetResultSchema,
   characterClassSchema,
+  characterProgressSchema,
   chatMessageSchema,
   chatSendSchema,
   combatBasicAttackSchema,
@@ -21,11 +24,21 @@ import {
   combatProfileSchema,
   commandAckSchema,
   commandRejectedSchema,
+  inventoryEquipSchema,
+  inventorySnapshotSchema,
+  inventoryUnequipSchema,
+  inventoryUseSchema,
+  levelUpSchema,
+  lootClaimedSchema,
+  lootPickupSchema,
   moveToCommandSchema,
   sessionTransferSchema,
   skillCastSchema,
   tilePointSchema,
   worldJoinOptionsSchema,
+  type AssetCommandKind,
+  type AssetResult,
+  type CharacterProgress,
   type ChatMessage,
   type CombatEvent,
   type CombatEventPayload,
@@ -34,19 +47,31 @@ import {
   type CommandRejected,
   type CommandRejectionCode,
   type Facing,
+  type InventorySnapshot,
+  type LevelUp,
   type MapPortal,
   type SessionTransfer,
   type TilePoint,
 } from '@web-legend/contracts';
 import {
+  LootState,
   MonsterState,
   PlayerState,
   WorldState,
+  type LootStateInstance,
   type MonsterStateInstance,
   type PlayerStateInstance,
   type WorldStateInstance,
 } from '@web-legend/contracts/world-state';
-import { CombatWorld, type CombatCommandResult } from '@web-legend/game-domain';
+import {
+  AssetError,
+  AssetService,
+  type KillRewardInput,
+  type KillRewardOutcome,
+  type LoadedAssets,
+  type LootDropView,
+} from '@web-legend/game-application';
+import { CombatWorld, type CombatCommandResult, type CombatStats } from '@web-legend/game-domain';
 import {
   DEFAULT_INTEREST,
   InterestManager,
@@ -94,6 +119,8 @@ export type WorldMapRoomOptions = {
   interestRadiusCells?: number;
   /** Deterministic in tests; production defaults to a crypto-seeded RNG. */
   combatRng?: () => number;
+  /** Deterministic in tests; production defaults to Math.random for loot. */
+  economyRng?: () => number;
   monsterRespawnMs?: number;
   playerRespawnMs?: number;
 };
@@ -107,6 +134,8 @@ const DEFAULT_CHECKPOINT_INTERVAL_MS = 20_000;
 const RECENT_COMMAND_WINDOW = 32;
 const RECENT_CHAT_WINDOW = 32;
 const COLOR_COUNT = 6;
+const LOOT_EXPIRY_CHECK_TICKS = 20;
+const REWARD_RETRY_ATTEMPTS = 3;
 
 /**
  * Leases outlive a single tick and are refreshed in the background. A crashed
@@ -143,6 +172,9 @@ type SessionRecord = {
   chatBucket: TokenBucket;
   recentChatIds: Set<string>;
   recentCombat: Map<string, CombatEvent[]>;
+  recentAssets: Map<string, AssetCommandKind>;
+  /** Last committed private asset state, merged with live vitals on send. */
+  assetSnapshot: InventorySnapshot;
   hp: number;
   mp: number;
   transferring: boolean;
@@ -215,10 +247,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private combat!: CombatWorld;
   private interest!: InterestManager;
   private runner!: FixedStepRunner;
+  private assets!: AssetService;
   private tick = 0;
+  private killSequence = 0;
+  private assetQueue: Promise<void> = Promise.resolve();
   private checkpointIntervalMs = DEFAULT_CHECKPOINT_INTERVAL_MS;
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly sessionByPlayer = new Map<string, string>();
+  private readonly pendingAssets = new Map<string, LoadedAssets>();
 
   override onCreate(options: WorldMapRoomOptions): void {
     this.options = options;
@@ -262,6 +298,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       this.interest.add(monster.id, tileOfUnits(monster));
     }
 
+    this.assets = new AssetService(
+      options.database,
+      options.economyRng === undefined ? {} : { rng: options.economyRng },
+    );
+
     this.metrics = options.metrics.register(this.roomId);
 
     const tickHz = options.tickHz ?? DEFAULT_TICK_HZ;
@@ -298,6 +339,18 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.skillCast, (client, message) => {
       this.handleSkillCast(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.lootPickup, (client, message) => {
+      this.handleLootPickup(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.inventoryEquip, (client, message) => {
+      this.handleInventoryEquip(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.inventoryUnequip, (client, message) => {
+      this.handleInventoryUnequip(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.inventoryUse, (client, message) => {
+      this.handleInventoryUse(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
@@ -318,6 +371,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       },
       'world map room created',
     );
+
+    // Unclaimed drops survive a room restart because the item instance and its
+    // world drop row are committed before the client is told about them.
+    void this.restoreLoot();
   }
 
   override async onAuth(client: Client, rawOptions: unknown): Promise<WorldAuthData> {
@@ -352,9 +409,16 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       throw new ServerError(ErrorCode.AUTH_FAILED, '该角色正在另一台设备上游戏');
     }
 
+    const loaded = this.pendingAssets.get(client.sessionId);
+    this.pendingAssets.delete(client.sessionId);
+    if (loaded === undefined) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '角色资产加载失败，请重新进入');
+    }
+    const snapshot = loaded.snapshot;
+
     // A character that was last checkpointed at 0 HP re-enters at a spawn point
     // with full vitals; combat never persists a dead character in place.
-    const needsRevival = auth.hp <= 0;
+    const needsRevival = snapshot.hp <= 0;
     const spawn: { tile: TilePoint; position?: { x: number; y: number } } = needsRevival
       ? { tile: this.pickSpawnPoint() }
       : this.resolveSpawn(auth);
@@ -373,11 +437,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         id: auth.characterId,
         displayName: auth.displayName,
         classId: auth.classId,
-        level: auth.level,
-        hp: needsRevival ? auth.maxHp : auth.hp,
-        mp: needsRevival ? auth.maxMp : auth.mp,
+        level: snapshot.level,
+        hp: needsRevival ? loaded.stats.maxHp : snapshot.hp,
+        mp: needsRevival ? loaded.stats.maxMp : snapshot.mp,
         x: position?.x ?? 0,
         y: position?.y ?? 0,
+        stats: loaded.stats,
       });
     } catch (error) {
       this.simulation.removePlayer(auth.characterId);
@@ -396,7 +461,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     player.playerId = auth.characterId;
     player.displayName = auth.displayName;
     player.classId = auth.classId;
-    player.level = auth.level;
+    player.level = combatPlayer.level;
     player.colorIndex = colorIndexFor(auth.characterId);
     player.hp = combatPlayer.hp;
     player.maxHp = combatPlayer.maxHp;
@@ -429,6 +494,17 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       }),
       recentChatIds: new Set(),
       recentCombat: new Map(),
+      recentAssets: new Map(),
+      assetSnapshot: {
+        ...snapshot,
+        level: combatPlayer.level,
+        hp: combatPlayer.hp,
+        maxHp: combatPlayer.maxHp,
+        mp: combatPlayer.mp,
+        maxMp: combatPlayer.maxMp,
+        attack: combatPlayer.attack,
+        defense: combatPlayer.defense,
+      },
       hp: combatPlayer.hp,
       mp: combatPlayer.mp,
       transferring: false,
@@ -451,6 +527,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       const session = this.sessions.get(client.sessionId);
       if (session !== undefined) {
         this.sendProfile(session.client, session.playerId);
+        this.sendAssetSnapshot(session.client, session);
       }
     }, 50);
 
@@ -482,11 +559,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     session.recentCombat.clear();
     this.setConnected(session.playerId, true);
     this.combat.setPlayerTargetable(session.playerId, true);
-    const playerId = session.playerId;
     this.clock.setTimeout(() => {
       const current = this.sessions.get(client.sessionId);
       if (current !== undefined) {
-        this.sendProfile(current.client, playerId);
+        this.sendProfile(current.client, current.playerId);
+        this.sendAssetSnapshot(current.client, current);
       }
     }, 50);
 
@@ -500,6 +577,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   override async onLeave(client: Client, code?: number): Promise<void> {
+    this.pendingAssets.delete(client.sessionId);
     const session = this.sessions.get(client.sessionId);
     if (session === undefined) {
       return;
@@ -576,6 +654,21 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (!leaseAcquired) {
       throw new ServerError(ErrorCode.AUTH_FAILED, '该角色正在另一台设备上游戏');
     }
+
+    let assets: LoadedAssets;
+    try {
+      assets = await this.assets.loadAssets(character.id);
+    } catch (error) {
+      await releaseCharacterLease(this.options.database, character.id, client.sessionId).catch(
+        () => undefined,
+      );
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, characterId: character.id },
+        'failed to load character assets',
+      );
+      throw new ServerError(ErrorCode.AUTH_FAILED, '角色资产加载失败，请稍后重试');
+    }
+    this.pendingAssets.set(client.sessionId, assets);
 
     return {
       accountId: character.accountId,
@@ -688,6 +781,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     this.syncPlayers();
     this.syncMonsters();
+    if (this.tick % LOOT_EXPIRY_CHECK_TICKS === 0) {
+      this.expireLoot();
+    }
 
     for (const player of this.simulation.listPlayers()) {
       const sessionId = this.sessionByPlayer.get(player.id);
@@ -762,6 +858,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       statePlayer.x = player.x;
       statePlayer.y = player.y;
       statePlayer.facing = player.facing;
+      statePlayer.level = combatPlayer.level;
       statePlayer.moving = combatPlayer.alive && player.moving;
       statePlayer.hp = combatPlayer.hp;
       statePlayer.maxHp = combatPlayer.maxHp;
@@ -839,8 +936,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
   }
 
-  private stateEntity(entityId: string): PlayerStateInstance | MonsterStateInstance | undefined {
-    return this.state.players.get(entityId) ?? this.state.monsters.get(entityId);
+  private stateEntity(
+    entityId: string,
+  ): PlayerStateInstance | MonsterStateInstance | LootStateInstance | undefined {
+    return (
+      this.state.players.get(entityId) ??
+      this.state.monsters.get(entityId) ??
+      this.state.loot.get(entityId)
+    );
   }
 
   private async beginTransfer(
@@ -1146,6 +1249,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       }
       if (event.entityType === 'monster') {
         this.metrics.recordMonsterKill();
+        this.scheduleKillReward(event);
       } else {
         this.metrics.recordPlayerDeath();
       }
@@ -1224,6 +1328,456 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     this.broadcast(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(message));
     this.metrics.recordChatMessage();
+  }
+
+  private async restoreLoot(): Promise<void> {
+    try {
+      const drops = await this.assets.loadOpenDrops(this.map.mapId);
+      for (const drop of drops) {
+        this.addLootState(drop);
+      }
+      if (drops.length > 0) {
+        this.options.logger.info(
+          { roomId: this.roomId, mapId: this.map.mapId, drops: drops.length },
+          'restored open world drops',
+        );
+      }
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, mapId: this.map.mapId },
+        'failed to restore world drops',
+      );
+    }
+  }
+
+  private addLootState(drop: LootDropView): void {
+    if (this.state.loot.has(drop.dropId)) {
+      return;
+    }
+    const loot = new LootState();
+    loot.dropId = drop.dropId;
+    loot.itemId = drop.itemId;
+    loot.templateId = drop.templateId;
+    loot.displayName = drop.displayName;
+    loot.quantity = drop.quantity;
+    loot.x = drop.x;
+    loot.y = drop.y;
+    loot.ownerId = drop.ownerId;
+    loot.expiresAt = drop.expiresAt;
+    this.state.loot.set(drop.dropId, loot);
+
+    const affected = this.interest.add(drop.dropId, tileOfUnits({ x: drop.x, y: drop.y }));
+    if (affected.length > 0) {
+      this.refreshViews(affected);
+    }
+  }
+
+  private removeLootState(dropId: string): void {
+    if (!this.state.loot.has(dropId)) {
+      return;
+    }
+    const affected = this.interest.remove(dropId);
+    this.state.loot.delete(dropId);
+    if (affected.length > 0) {
+      this.refreshViews(affected);
+    }
+  }
+
+  private expireLoot(): void {
+    const now = Date.now();
+    const expired: string[] = [];
+    this.state.loot.forEach((loot, dropId) => {
+      if (loot.expiresAt <= now) {
+        expired.push(dropId);
+      }
+    });
+    for (const dropId of expired) {
+      this.removeLootState(dropId);
+    }
+  }
+
+  private enqueueAsset<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.assetQueue.then(task, task);
+    this.assetQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private scheduleKillReward(event: { entityId: string; killerId?: string | undefined }): void {
+    const killerId = event.killerId;
+    if (killerId === undefined || !this.state.players.has(killerId)) {
+      return;
+    }
+    const monster = this.combat.getMonster(event.entityId);
+    if (monster === undefined) {
+      return;
+    }
+    const reference = `${this.options.serverId}:${this.roomId}:${monster.id}:${String(
+      ++this.killSequence,
+    )}`;
+    const input: KillRewardInput = {
+      characterId: killerId,
+      mapId: this.map.mapId,
+      reference,
+      monsterTemplateId: monster.templateId,
+      x: monster.x,
+      y: monster.y,
+    };
+    void this.enqueueAsset(() => this.grantRewardWithRetry(input)).catch((error: unknown) => {
+      this.metrics.recordAssetFailure();
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, reference, characterId: killerId },
+        'failed to grant kill reward',
+      );
+    });
+  }
+
+  private async grantRewardWithRetry(input: KillRewardInput): Promise<void> {
+    for (let attempt = 1; attempt <= REWARD_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        const outcome = await this.assets.grantKillReward(input);
+        if (outcome !== null) {
+          this.applyKillReward(input.characterId, outcome);
+        }
+        return;
+      } catch (error) {
+        if (attempt >= REWARD_RETRY_ATTEMPTS) {
+          throw error;
+        }
+        this.options.logger.warn(
+          { err: error, roomId: this.roomId, reference: input.reference, attempt },
+          'kill reward transaction failed; retrying',
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 200 * attempt));
+      }
+    }
+  }
+
+  private applyKillReward(characterId: string, outcome: KillRewardOutcome): void {
+    this.metrics.recordExpGranted(outcome.expGained);
+    this.metrics.recordGoldGranted(outcome.goldGained);
+    this.metrics.recordLootSpawned(outcome.drops.length);
+    for (const drop of outcome.drops) {
+      this.addLootState(drop);
+    }
+
+    this.combat.updatePlayerProgress(characterId, {
+      level: outcome.snapshot.level,
+      stats: outcome.stats,
+      refill: outcome.leveledUp,
+    });
+
+    const sessionId = this.sessionByPlayer.get(characterId);
+    const session = sessionId === undefined ? undefined : this.sessions.get(sessionId);
+    if (session === undefined) {
+      return;
+    }
+    session.assetSnapshot = outcome.snapshot;
+    this.sendProgress(session, outcome.leveledUp);
+    this.sendProfile(session.client, session.playerId);
+  }
+
+  private mergedSnapshot(session: SessionRecord): InventorySnapshot {
+    const player = this.combat.getPlayer(session.playerId);
+    if (player === undefined) {
+      return session.assetSnapshot;
+    }
+    return {
+      ...session.assetSnapshot,
+      level: player.level,
+      hp: player.hp,
+      maxHp: player.maxHp,
+      mp: player.mp,
+      maxMp: player.maxMp,
+      attack: player.attack,
+      defense: player.defense,
+    };
+  }
+
+  private sendAssetSnapshot(client: Client, session: SessionRecord): void {
+    client.send(
+      SERVER_MESSAGES.inventorySnapshot,
+      inventorySnapshotSchema.parse(this.mergedSnapshot(session)),
+    );
+  }
+
+  private sendProgress(session: SessionRecord, leveledUp: boolean): void {
+    const snapshot = this.mergedSnapshot(session);
+    const progress: CharacterProgress = {
+      level: snapshot.level,
+      exp: snapshot.exp,
+      expToNextLevel: snapshot.expToNextLevel,
+      gold: snapshot.gold,
+      hp: snapshot.hp,
+      maxHp: snapshot.maxHp,
+      mp: snapshot.mp,
+      maxMp: snapshot.maxMp,
+      attack: snapshot.attack,
+      defense: snapshot.defense,
+      serverTime: Date.now(),
+    };
+    session.client.send(SERVER_MESSAGES.characterProgress, characterProgressSchema.parse(progress));
+
+    if (leveledUp && snapshot.level >= 2) {
+      const levelUp: LevelUp = {
+        level: snapshot.level,
+        maxHp: snapshot.maxHp,
+        maxMp: snapshot.maxMp,
+        attack: snapshot.attack,
+        defense: snapshot.defense,
+        serverTime: Date.now(),
+      };
+      session.client.send(SERVER_MESSAGES.characterLevelUp, levelUpSchema.parse(levelUp));
+    }
+  }
+
+  private sendAssetResult(
+    client: Client,
+    session: SessionRecord,
+    commandId: string,
+    kind: AssetCommandKind,
+    deduplicated: boolean,
+  ): void {
+    const message: AssetResult = {
+      commandId,
+      kind,
+      deduplicated,
+      snapshot: this.mergedSnapshot(session),
+      serverTime: Date.now(),
+    };
+    client.send(SERVER_MESSAGES.assetResult, assetResultSchema.parse(message));
+  }
+
+  private handleLootPickup(client: Client, raw: unknown): void {
+    const parsed = lootPickupSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    void this.runAssetCommand(
+      client,
+      command,
+      'loot_pickup',
+      (session) => {
+        const drop = this.state.loot.get(command.dropId);
+        if (drop === undefined) {
+          return 'ITEM_NOT_FOUND';
+        }
+        const player = this.combat.getPlayer(session.playerId);
+        if (player === undefined) {
+          return 'INVALID_SESSION';
+        }
+        if (!player.alive) {
+          return 'PLAYER_DEAD';
+        }
+        const distance = Math.hypot(player.x - drop.x, player.y - drop.y) / TILE_UNITS;
+        return distance > PICKUP_RANGE_TILES ? 'OUT_OF_RANGE' : null;
+      },
+      (session) =>
+        this.assets.pickup({
+          characterId: session.playerId,
+          commandId: command.commandId,
+          dropId: command.dropId,
+          mapId: this.map.mapId,
+        }),
+      (_session, outcome) => {
+        if (outcome.claimed !== null) {
+          this.removeLootState(command.dropId);
+          this.broadcast(SERVER_MESSAGES.lootClaimed, lootClaimedSchema.parse(outcome.claimed));
+          this.metrics.recordLootPickedUp();
+        }
+      },
+    );
+  }
+
+  private handleInventoryEquip(client: Client, raw: unknown): void {
+    const parsed = inventoryEquipSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    void this.runAssetCommand(
+      client,
+      command,
+      'inventory_equip',
+      (session) => this.requireAlive(session),
+      (session) =>
+        this.assets.equip({
+          characterId: session.playerId,
+          commandId: command.commandId,
+          itemId: command.itemId,
+        }),
+      (session, outcome) => {
+        this.combat.updatePlayerProgress(session.playerId, {
+          level: outcome.snapshot.level,
+          stats: outcome.stats,
+        });
+        this.sendProfile(session.client, session.playerId);
+      },
+    );
+  }
+
+  private handleInventoryUnequip(client: Client, raw: unknown): void {
+    const parsed = inventoryUnequipSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    void this.runAssetCommand(
+      client,
+      command,
+      'inventory_unequip',
+      (session) => this.requireAlive(session),
+      (session) =>
+        this.assets.unequip({
+          characterId: session.playerId,
+          commandId: command.commandId,
+          slot: command.slot,
+        }),
+      (session, outcome) => {
+        this.combat.updatePlayerProgress(session.playerId, {
+          level: outcome.snapshot.level,
+          stats: outcome.stats,
+        });
+        this.sendProfile(session.client, session.playerId);
+      },
+    );
+  }
+
+  private handleInventoryUse(client: Client, raw: unknown): void {
+    const parsed = inventoryUseSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    void this.runAssetCommand(
+      client,
+      command,
+      'inventory_use',
+      (session) => this.requireAlive(session),
+      (session) => {
+        const player = this.combat.getPlayer(session.playerId);
+        return this.assets.use({
+          characterId: session.playerId,
+          commandId: command.commandId,
+          itemId: command.itemId,
+          vitals: { hp: player?.hp ?? 0, mp: player?.mp ?? 0 },
+        });
+      },
+      (session, outcome) => {
+        if (outcome.vitals !== undefined) {
+          this.combat.setPlayerVitals(session.playerId, outcome.vitals);
+        }
+      },
+    );
+  }
+
+  private requireAlive(session: SessionRecord): CommandRejectionCode | null {
+    const player = this.combat.getPlayer(session.playerId);
+    if (player === undefined) {
+      return 'INVALID_SESSION';
+    }
+    return player.alive ? null : 'PLAYER_DEAD';
+  }
+
+  private async runAssetCommand<
+    T extends { snapshot: InventorySnapshot; stats: CombatStats; deduplicated: boolean },
+  >(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+    kind: AssetCommandKind,
+    validate: (session: SessionRecord) => CommandRejectionCode | null,
+    operation: (session: SessionRecord) => Promise<T>,
+    afterCommit: (session: SessionRecord, outcome: T) => void,
+  ): Promise<void> {
+    const meta = { commandId: command.commandId, clientSequence: command.clientSequence };
+    const session = this.sessions.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, meta, 'INVALID_SESSION');
+      return;
+    }
+    if (session.transferring) {
+      this.sendRejection(client, meta, 'INVALID_SESSION');
+      return;
+    }
+    if (command.protocolVersion !== PROTOCOL_VERSION) {
+      this.sendRejection(client, meta, 'PROTOCOL_MISMATCH');
+      return;
+    }
+    if (session.recentAssets.has(command.commandId)) {
+      this.sendAssetResult(client, session, command.commandId, kind, true);
+      return;
+    }
+    if (command.clientSequence <= session.lastSequence) {
+      this.sendRejection(client, meta, 'STALE_SEQUENCE');
+      return;
+    }
+    if (!session.rateBucket.take(Date.now())) {
+      this.sendRejection(client, meta, 'RATE_LIMITED');
+      return;
+    }
+    const rejection = validate(session);
+    if (rejection !== null) {
+      this.sendRejection(client, meta, rejection);
+      return;
+    }
+
+    session.lastSequence = command.clientSequence;
+    session.recentAssets.set(command.commandId, kind);
+    if (session.recentAssets.size > RECENT_COMMAND_WINDOW) {
+      const oldest = session.recentAssets.keys().next();
+      if (!oldest.done) {
+        session.recentAssets.delete(oldest.value);
+      }
+    }
+    this.metrics.recordAssetCommand();
+
+    let outcome: T;
+    try {
+      outcome = await this.enqueueAsset(() => operation(session));
+    } catch (error) {
+      session.recentAssets.delete(command.commandId);
+      this.metrics.recordAssetFailure();
+      if (error instanceof AssetError) {
+        this.sendRejection(client, meta, error.code);
+        return;
+      }
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, characterId: session.playerId, kind },
+        'asset command failed',
+      );
+      this.sendRejection(client, meta, 'SERVICE_UNAVAILABLE');
+      return;
+    }
+
+    // The transaction has committed. A failure while mirroring the result into
+    // memory or the socket must never be reported as a rejected asset command.
+    session.assetSnapshot = outcome.snapshot;
+    try {
+      afterCommit(session, outcome);
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, characterId: session.playerId, kind },
+        'failed to apply committed asset result',
+      );
+    }
+    if (this.sessions.get(client.sessionId) === session) {
+      try {
+        this.sendAssetResult(client, session, command.commandId, kind, outcome.deduplicated);
+      } catch (error) {
+        this.options.logger.warn(
+          { err: error, roomId: this.roomId, characterId: session.playerId, kind },
+          'failed to deliver asset result',
+        );
+      }
+    }
+    this.metrics.recordAcceptedCommand();
   }
 
   private sendRejection(

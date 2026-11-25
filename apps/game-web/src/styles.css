@@ -1105,3 +1105,260 @@ body {
     flex-wrap: wrap;
   }
 }
+
+/* Phase 5: experience, ground loot and inventory --------------------------- */
+
+.exp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 8px;
+  pointer-events: auto;
+}
+
+.exp-track {
+  width: 190px;
+  height: 7px;
+  border: 1px solid #2d3a2a;
+  background: #1a2118;
+}
+
+.exp-track span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #5f8a4a, #a8cf7f);
+  transition: width 200ms linear;
+}
+
+.exp-label,
+.gold-label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.gold-label {
+  color: var(--gold);
+}
+
+.bag-toggle,
+.panel-close {
+  padding: 3px 10px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.bag-toggle:hover,
+.panel-close:hover {
+  background: rgba(201, 162, 39, 0.12);
+}
+
+.loot-panel ul {
+  margin: 0;
+  padding: 4px 0;
+  max-height: 92px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.loot-panel li.empty {
+  padding: 6px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.loot-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--parchment);
+  font-family: var(--sans);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.loot-row:hover {
+  background: rgba(168, 207, 127, 0.1);
+}
+
+.loot-row span:nth-child(2) {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.loot-action {
+  color: #a8cf7f;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.bag-panel {
+  right: 40px;
+  bottom: 84px;
+  width: 360px;
+  max-height: min(520px, calc(100% - 240px));
+  display: flex;
+  flex-direction: column;
+  z-index: 3;
+  border: 1px solid #2b323a;
+  background: var(--ink-raised);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.bag-panel .panel-heading {
+  gap: 10px;
+}
+
+.equipment-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.equipment-slot {
+  min-height: 74px;
+  padding: 8px 10px;
+  border: 1px dashed #2f3943;
+  background: rgba(16, 20, 25, 0.6);
+}
+
+.slot-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.equipment-slot em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.slot-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.slot-body span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.slot-body button,
+.bag-item button {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.slot-body button:hover,
+.bag-item button:hover {
+  background: rgba(201, 162, 39, 0.12);
+}
+
+.bag-stats {
+  margin: 0;
+  padding: 0 14px 10px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.bag-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0;
+  padding: 0 14px 12px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.bag-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid #2b323a;
+  background: rgba(16, 20, 25, 0.55);
+  font-size: 12px;
+}
+
+.bag-item-name {
+  color: var(--parchment);
+}
+
+.bag-item-qty {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.bag-item-meta {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.bag-hint {
+  margin: 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid #232a32;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.level-up-banner {
+  position: absolute;
+  left: 50%;
+  top: 26%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  padding: 12px 26px;
+  border: 1px solid var(--gold);
+  background: rgba(32, 27, 12, 0.92);
+  color: var(--parchment);
+  font-family: var(--serif);
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+.level-up-banner strong {
+  color: var(--gold);
+}
+
+@media (max-width: 860px) {
+  .bag-panel {
+    left: 20px;
+    right: 20px;
+    bottom: 300px;
+    width: auto;
+  }
+}

@@ -30,7 +30,13 @@ describe('password hashing', () => {
     );
 
     const encoded = await hashPassword('secret', TEST_PARAMS);
-    const tampered = encoded.replace(/.$/u, (char) => (char === 'A' ? 'B' : 'A'));
+    // Flip the first base64 character of the derived key. Changing the last
+    // character can only touch padding bits and decode to the same 32 bytes.
+    const segments = encoded.split('$');
+    const derived = segments[5];
+    expect(derived).toBeDefined();
+    const tamperedKey = `${derived?.[0] === 'A' ? 'B' : 'A'}${derived?.slice(1) ?? ''}`;
+    const tampered = [...segments.slice(0, 5), tamperedKey].join('$');
     await expect(verifyPassword(tampered, 'secret')).resolves.toBe(false);
   });
 });

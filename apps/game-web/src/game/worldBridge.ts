@@ -15,6 +15,7 @@ export type WorldSceneHandle = {
   applyCombatEvent: (event: CombatEvent) => void;
   screenPointForTile: (tile: TilePoint) => ScreenPoint;
   monsterScreenPoint: (monsterId: string) => ScreenPoint | null;
+  lootScreenPoint: (dropId: string) => ScreenPoint | null;
   selectMonster: (monsterId: string) => void;
   restart: () => void;
 };
@@ -32,6 +33,7 @@ export class WorldBridge {
   onAttackRequest: ((targetId: string) => void) | null = null;
   onSkillRequest: ((skillId: string, targetId: string) => void) | null = null;
   onTargetChange: ((targetId: string | null) => void) | null = null;
+  onPickupRequest: ((dropId: string) => void) | null = null;
 
   attach(scene: WorldSceneHandle): void {
     this.scene = scene;
@@ -81,12 +83,20 @@ export class WorldBridge {
     this.onTargetChange?.(targetId);
   }
 
+  requestPickup(dropId: string): void {
+    this.onPickupRequest?.(dropId);
+  }
+
   screenPointForTile(tile: TilePoint): ScreenPoint | null {
     return this.scene?.screenPointForTile(tile) ?? null;
   }
 
   monsterScreenPoint(monsterId: string): ScreenPoint | null {
     return this.scene?.monsterScreenPoint(monsterId) ?? null;
+  }
+
+  lootScreenPoint(dropId: string): ScreenPoint | null {
+    return this.scene?.lootScreenPoint(dropId) ?? null;
   }
 
   selectTarget(monsterId: string): void {

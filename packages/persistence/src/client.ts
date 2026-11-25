@@ -1,9 +1,17 @@
-import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import type { PgTransaction } from 'drizzle-orm/pg-core';
+import {
+  drizzle,
+  type PostgresJsDatabase,
+  type PostgresJsQueryResultHKT,
+} from 'drizzle-orm/postgres-js';
 import postgres, { type Sql } from 'postgres';
 
 import * as schema from './schema/index';
 
 export type Database = PostgresJsDatabase<typeof schema>;
+
+/** Either the pool-backed database or one open transaction on it. */
+export type DbExecutor = Database | PgTransaction<PostgresJsQueryResultHKT, typeof schema>;
 
 export type DatabaseHandle = {
   db: Database;

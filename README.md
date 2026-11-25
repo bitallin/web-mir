@@ -6,20 +6,24 @@ Fastify Control API 和 Colyseus 实时服务器。
 
 ## 当前状态
 
-**阶段 4：怪物、战斗和技能，实现与自动化验收完成，等待用户在 8584 实测确认。**
+**阶段 5：掉落、背包、装备和资产持久化，实现与自动化验收完成，等待用户在
+8584 实测确认。**
 
 - 阶段 0–3 的工程底座、双人实时切片、账号票据、Tiled 地图/AOI/传送/聊天均已
-  通过用户验收。
+  通过用户验收；阶段 4 的战斗、怪物与技能已交付并通过自动化验收。
 - 阶段 4 交付：`game-domain` 战斗纯函数与 `CombatWorld`、两种怪物与六处刷点、
   怪物 FSM/追击/攻击/死亡/重生、三职业技能、服务端 RNG、CombatEvent、
   目标选择/伤害数字/战斗日志、玩家死亡复活与双浏览器战斗测试。
-- 尚未实现：经验与等级成长、掉落、背包、装备、金币、PK、安全区、运营后台和
-  内容发布（阶段 5–7）。
+- 阶段 5 交付：`game-application` 事务用例、物品/掉落/经验目录、地面掉落、
+  拾取归属与过期、24 格背包、武器/护甲装备、金币钱包与流水、击杀经验与升级、
+  新角色初始装备、重登资产恢复、双浏览器拾取/装备 E2E。
+- 尚未实现：PK、安全区、聊天过滤、运营后台和内容发布（阶段 6–7），以及压测、
+  部署与恢复演练（阶段 8）。
 - 详细状态见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)，工作记录见
-  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 4 报告见
-  [docs/phase-reports/PHASE_04_REPORT.md](docs/phase-reports/PHASE_04_REPORT.md)。
+  [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 5 报告见
+  [docs/phase-reports/PHASE_05_REPORT.md](docs/phase-reports/PHASE_05_REPORT.md)。
 
-## 阶段 4：如何体验
+## 阶段 5：如何体验
 
 1. 按“从零启动”启动 PostgreSQL、执行迁移与 `pnpm db:seed`，再运行 `pnpm dev`。
    阶段 2 的旧角色可用 `pnpm repair:maps` 迁移到主城出生点。
@@ -31,10 +35,17 @@ Fastify Control API 和 Colyseus 实时服务器。
    或点击技能栏施放本职业技能。伤害、暴击、冷却和法力都由服务端裁定。
 6. 两名玩家同时攻击同一怪物时，两端看到同一个权威 HP；怪物死亡后约 8 秒在
    原刷点满 HP 重生。
-7. 在左下角地图频道聊天；刷新页面后在宽限期内恢复原座位；同一角色不能在两个
-   窗口同时进入世界。
-8. 战斗 HUD 显示目标、附近怪物、技能冷却和战斗记录；角色倒下后 3 秒在原地图
-   出生点满状态复活（阶段 4 的 MVP 策略）。
+7. 击杀怪物后，地面出现掉落（击杀者 30 秒优先拾取，2 分钟后消失）。两端都能
+   看到掉落；点击“附近掉落”中的条目或场景中的掉落标记即可拾取。
+8. 顶部显示经验条与金币；击杀获得经验、金币与材料，经验足够时升级并回满
+   HP/MP。
+9. 新角色自带职业武器与药水。按 `B` 或点击“背包 B”打开背包/装备面板：装备武器
+   或护甲会立即改变服务端权威攻击/防御；药水按服务器当前 HP/MP 结算。
+10. 在左下角地图频道聊天；刷新页面后在宽限期内恢复原座位；同一角色不能在两个
+    窗口同时进入世界。
+11. 战斗 HUD 显示目标、附近怪物、掉落、技能冷却和战斗记录；角色倒下后 3 秒在
+    原地图出生点满状态复活（阶段 4 的 MVP 策略）。
+12. 退出世界再进入，背包、装备、经验、金币和已拾取物品保持不变。
 
 账号身份只来自服务端签发的会话 Cookie 与一次性票据（ADR-017），地图归属只由
 服务端持久档案决定（ADR-018）。开发环境保留 `?fresh=1`（新建房间）与
@@ -205,7 +216,8 @@ apps/
 packages/
   contracts/      协议、账号/角色 DTO、world-state schema、健康检查、错误 envelope
   auth/           Argon2id 密码、会话令牌、一次性票据令牌
-  game-domain/    战斗纯函数、技能/怪物目录、无 IO 的 CombatWorld
+  game-domain/    战斗纯函数、技能/怪物/物品/掉落目录、经验曲线、CombatWorld
+  game-application/ 击杀奖励、拾取、背包、装备与金币事务用例
   game-simulation/ 固定 tick、路径搜索、移动推进、AOI（纯逻辑）
   map-runtime/    Tiled 编译、checksum、导航格与传送门运行时
   config/         Zod 环境变量与 .env 加载
@@ -225,11 +237,12 @@ tests/e2e/        Playwright
 ```
 
 `game-simulation` 在阶段 1 创建，`auth` 在阶段 2 创建，`map-runtime` 在阶段 3
-创建，`game-domain` 在阶段 4 创建。未创建的包（`game-application`、
-`content-schema`）在出现真实消费者时创建，原因见
+创建，`game-domain` 在阶段 4 创建，`game-application` 在阶段 5 创建。未创建的
+`content-schema` 在阶段 7 出现真实消费者时创建，原因见
 [ADR-013](docs/ADR/ADR-013-package-realization.md)。地图与 AOI 决策见
 [ADR-018](docs/ADR/ADR-018-phase3-map-runtime-aoi-transfer.md)，战斗边界见
-[ADR-019](docs/ADR/ADR-019-phase4-combat-domain.md)。
+[ADR-019](docs/ADR/ADR-019-phase4-combat-domain.md)，资产与事务边界见
+[ADR-020](docs/ADR/ADR-020-phase5-asset-economy.md)。
 
 浏览器通过同源 `/ws` 访问实时服务器：开发环境由 Vite 代理到 `GAME_SERVER_PORT`，
 `/matchmake` HTTP 和 WebSocket upgrade 共用该路径；生产部署需要在反向代理配置
@@ -294,3 +307,6 @@ pnpm test:e2e
 - [PHASE_00_REPORT.md](docs/phase-reports/PHASE_00_REPORT.md)：阶段 0 验收报告
 - [PHASE_01_REPORT.md](docs/phase-reports/PHASE_01_REPORT.md)：阶段 1 验收报告
 - [PHASE_02_REPORT.md](docs/phase-reports/PHASE_02_REPORT.md)：阶段 2 验收报告
+- [PHASE_03_REPORT.md](docs/phase-reports/PHASE_03_REPORT.md)：阶段 3 验收报告
+- [PHASE_04_REPORT.md](docs/phase-reports/PHASE_04_REPORT.md)：阶段 4 验收报告
+- [PHASE_05_REPORT.md](docs/phase-reports/PHASE_05_REPORT.md)：阶段 5 验收报告

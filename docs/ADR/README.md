@@ -24,5 +24,6 @@
 | [ADR-017](ADR-017-accounts-sessions-game-tickets.md)  | 账号会话、一次性游戏票据与角色租约     | Accepted              |
 | [ADR-018](ADR-018-phase3-map-runtime-aoi-transfer.md) | 阶段 3 地图运行时、AOI 与传送          | Accepted              |
 | [ADR-019](ADR-019-phase4-combat-domain.md)            | 阶段 4 战斗领域与怪物运行时            | Accepted              |
+| [ADR-020](ADR-020-phase5-asset-economy.md)            | 阶段 5 资产模型与事务化经济            | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

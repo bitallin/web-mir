@@ -5,10 +5,11 @@ import {
   type CreateCharacterRequest,
 } from '@web-legend/contracts';
 import { STARTER_TOWN_MAP } from '@web-legend/contracts/maps';
+import { STARTER_KIT } from '@web-legend/game-domain';
 import {
   findCharacterForAccount,
   findRealmById,
-  insertCharacter,
+  insertCharacterWithItems,
   isUniqueViolation,
   listActiveRealms,
   listCharactersByAccount,
@@ -54,23 +55,27 @@ export class CharacterService {
     }
 
     try {
-      const character = await insertCharacter(this.db, {
-        accountId,
-        realmId: realm.id,
-        name: input.name,
-        nameNormalized: normalizeCharacterName(input.name),
-        classId: definition.id,
-        level: 1,
-        exp: 0,
-        hp: definition.baseMaxHp,
-        maxHp: definition.baseMaxHp,
-        mp: definition.baseMaxMp,
-        maxMp: definition.baseMaxMp,
-        mapId: STARTER_TOWN_MAP.mapId,
-        x: spawn.x * TILE_UNITS + TILE_UNITS / 2,
-        y: spawn.y * TILE_UNITS + TILE_UNITS / 2,
-        facing: 2,
-      });
+      const character = await insertCharacterWithItems(
+        this.db,
+        {
+          accountId,
+          realmId: realm.id,
+          name: input.name,
+          nameNormalized: normalizeCharacterName(input.name),
+          classId: definition.id,
+          level: 1,
+          exp: 0,
+          hp: definition.baseMaxHp,
+          maxHp: definition.baseMaxHp,
+          mp: definition.baseMaxMp,
+          maxMp: definition.baseMaxMp,
+          mapId: STARTER_TOWN_MAP.mapId,
+          x: spawn.x * TILE_UNITS + TILE_UNITS / 2,
+          y: spawn.y * TILE_UNITS + TILE_UNITS / 2,
+          facing: 2,
+        },
+        STARTER_KIT[definition.id],
+      );
       return { ...character, realmCode: realm.code };
     } catch (error) {
       if (isUniqueViolation(error)) {

@@ -1,0 +1,2 @@
+DROP INDEX "item_instances_equipment_slot_unique";--> statement-breakpoint
+CREATE INDEX "item_instances_equipment_slot_idx" ON "item_instances" USING btree ("character_id","equip_slot") WHERE "item_instances"."container" = 'equipment';

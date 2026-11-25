@@ -10,6 +10,7 @@ export {
   findCharacterById,
   findCharacterForAccount,
   insertCharacter,
+  insertCharacterWithItems,
   listCharactersByAccount,
   relocateCharactersFromMap,
   saveCharacterCheckpoint,
@@ -22,6 +23,7 @@ export type {
   CharacterWithRealm,
   CreateCharacterInput,
   RelocateCharactersInput,
+  StarterItemInput,
 } from './characters';
 export {
   acquireCharacterLease,
@@ -31,6 +33,9 @@ export {
 } from './characters';
 
 export { findRealmById, listActiveRealms } from './realms';
+
+export { findWallet, listEquippedItems, listInventoryItems, listOpenWorldDrops } from './items';
+export type { OpenWorldDrop } from './items';
 
 export {
   findSessionByAccessHash,

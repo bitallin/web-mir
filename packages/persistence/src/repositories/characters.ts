@@ -4,6 +4,7 @@ import type { Database } from '../client';
 import {
   characters,
   characterSessions,
+  itemInstances,
   realms,
   type Character,
   type CharacterClassId,
@@ -39,6 +40,37 @@ export async function insertCharacter(
     throw new Error('character insert returned no row');
   }
   return character;
+}
+
+export type StarterItemInput = { templateId: string; quantity: number };
+
+/**
+ * Creates the character and its starter inventory in one transaction, so a new
+ * character can never exist with a partially provisioned bag.
+ */
+export async function insertCharacterWithItems(
+  db: Database,
+  input: CreateCharacterInput,
+  items: readonly StarterItemInput[],
+): Promise<Character> {
+  return db.transaction(async (tx) => {
+    const [character] = await tx.insert(characters).values(input).returning();
+    if (character === undefined) {
+      throw new Error('character insert returned no row');
+    }
+    if (items.length > 0) {
+      await tx.insert(itemInstances).values(
+        items.map((item, index) => ({
+          templateId: item.templateId,
+          characterId: character.id,
+          container: 'inventory' as const,
+          slotIndex: index,
+          quantity: item.quantity,
+        })),
+      );
+    }
+    return character;
+  });
 }
 
 export async function listCharactersByAccount(

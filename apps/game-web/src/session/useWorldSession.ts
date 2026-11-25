@@ -1,8 +1,13 @@
 import type {
   CharacterView,
+  CharacterProgress,
   ChatMessage,
   CombatEvent,
   CombatProfile,
+  EquipmentSlot,
+  InventorySnapshot,
+  LevelUp,
+  LootClaimed,
   TilePoint,
 } from '@web-legend/contracts';
 import type Phaser from 'phaser';
@@ -15,6 +20,7 @@ import { loadRoomPreference } from '../lib/identity';
 import {
   WorldClient,
   type ConnectionStatus,
+  type LootView,
   type MonsterView,
   type PlayerView,
 } from '../net/worldClient';
@@ -39,6 +45,7 @@ export type SessionState = {
   instanceId: string;
   players: PlayerView[];
   monsters: MonsterView[];
+  loot: LootView[];
   selfId: string;
   latencyMs: number | null;
   commandCount: number;
@@ -50,6 +57,8 @@ export type SessionState = {
   combatLog: CombatLogEntry[];
   selectedTargetId: string | null;
   skillCooldowns: Record<string, number>;
+  inventory: InventorySnapshot | null;
+  levelUpNotice: LevelUp | null;
   notice: SessionNotice | null;
 };
 
@@ -69,6 +78,7 @@ function initialState(character: CharacterView): SessionState {
     instanceId: '1',
     players: [],
     monsters: [],
+    loot: [],
     selfId: character.id,
     latencyMs: null,
     commandCount: 0,
@@ -80,7 +90,40 @@ function initialState(character: CharacterView): SessionState {
     combatLog: [],
     selectedTargetId: null,
     skillCooldowns: {},
+    inventory: null,
+    levelUpNotice: null,
     notice: null,
+  };
+}
+
+function withProgress(
+  snapshot: InventorySnapshot | null,
+  progress: CharacterProgress,
+): InventorySnapshot | null {
+  if (snapshot === null) {
+    return null;
+  }
+  return {
+    ...snapshot,
+    level: progress.level,
+    exp: progress.exp,
+    expToNextLevel: progress.expToNextLevel,
+    gold: progress.gold,
+    hp: progress.hp,
+    maxHp: progress.maxHp,
+    mp: progress.mp,
+    maxMp: progress.maxMp,
+    attack: progress.attack,
+    defense: progress.defense,
+  };
+}
+
+function lootLogEntry(claimed: LootClaimed, characterId: string): CombatLogEntry {
+  return {
+    id: `loot-${claimed.dropId}`,
+    text: `${claimed.claimerName} 拾取了 ${claimed.name} ×${String(claimed.quantity)}`,
+    tone: claimed.claimerId === characterId ? 'self' : 'other',
+    at: Date.now(),
   };
 }
 
@@ -176,6 +219,9 @@ class WorldSession {
   private mapId: string;
   private commandCount = 0;
   private debugInstalled = false;
+  private latestLoot: LootView[] = [];
+  private inventory: InventorySnapshot | null = null;
+  private levelBannerTimer: number | null = null;
 
   constructor(
     container: HTMLElement,
@@ -199,6 +245,9 @@ class WorldSession {
     };
     this.bridge.onTargetChange = (targetId) => {
       this.updateState((previous) => ({ ...previous, selectedTargetId: targetId }));
+    };
+    this.bridge.onPickupRequest = (dropId) => {
+      this.pickup(dropId);
     };
   }
 
@@ -230,12 +279,14 @@ class WorldSession {
               }
             }
           }
+          this.latestLoot = snapshot.loot;
           this.updateState((previous) => ({
             ...previous,
             mapId: snapshot.mapId,
             instanceId: snapshot.instanceId,
             players: snapshot.players,
             monsters: snapshot.monsters,
+            loot: snapshot.loot,
             serverTick: snapshot.tick,
             roomPlayerCount: snapshot.playerCount,
             selfId: characterId,
@@ -315,6 +366,58 @@ class WorldSession {
         onLatency: (latencyMs) => {
           this.updateState((previous) => ({ ...previous, latencyMs }));
         },
+        onInventory: (snapshot) => {
+          this.inventory = snapshot;
+          this.updateState((previous) => ({ ...previous, inventory: snapshot }));
+        },
+        onAssetResult: (result) => {
+          this.inventory = result.snapshot;
+          if (import.meta.env.DEV) {
+            const debug = window.__webLegendDebug;
+            if (debug !== undefined) {
+              debug.lastAssetResultAt = Date.now();
+            }
+          }
+          this.updateState((previous) => ({ ...previous, inventory: result.snapshot }));
+        },
+        onProgress: (progress) => {
+          const next = withProgress(this.inventory, progress);
+          this.inventory = next;
+          this.updateState((previous) => ({
+            ...previous,
+            inventory: next ?? previous.inventory,
+          }));
+        },
+        onLevelUp: (levelUp) => {
+          if (this.levelBannerTimer !== null) {
+            window.clearTimeout(this.levelBannerTimer);
+          }
+          this.updateState((previous) => ({
+            ...previous,
+            levelUpNotice: levelUp,
+            combatLog: [
+              ...previous.combatLog,
+              {
+                id: `level-${String(levelUp.level)}-${String(levelUp.serverTime)}`,
+                text: `你升到了 Lv.${String(levelUp.level)}，生命与法力已恢复`,
+                tone: 'system' as const,
+                at: Date.now(),
+              },
+            ].slice(-MAX_COMBAT_LOG),
+          }));
+          this.levelBannerTimer = window.setTimeout(() => {
+            this.levelBannerTimer = null;
+            this.updateState((previous) => ({ ...previous, levelUpNotice: null }));
+          }, 3_500);
+        },
+        onLootClaimed: (claimed) => {
+          this.updateState((previous) => ({
+            ...previous,
+            combatLog: [...previous.combatLog, lootLogEntry(claimed, characterId)].slice(
+              -MAX_COMBAT_LOG,
+            ),
+          }));
+        },
       },
     });
 
@@ -362,6 +465,42 @@ class WorldSession {
     return sent;
   }
 
+  pickup(dropId: string): boolean {
+    const sent = this.client?.sendPickup(dropId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  equip(itemId: string): boolean {
+    const sent = this.client?.sendEquip(itemId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  unequip(slot: EquipmentSlot): boolean {
+    const sent = this.client?.sendUnequip(slot) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  consumeItem(itemId: string): boolean {
+    const sent = this.client?.sendUse(itemId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
   sendChat(text: string): boolean {
     return this.client?.sendChat(text) ?? false;
   }
@@ -396,6 +535,10 @@ class WorldSession {
 
   async dispose(): Promise<void> {
     this.removeDebugHooks();
+    if (this.levelBannerTimer !== null) {
+      window.clearTimeout(this.levelBannerTimer);
+      this.levelBannerTimer = null;
+    }
     const client = this.client;
     this.client = null;
     if (client !== null) {
@@ -415,12 +558,14 @@ class WorldSession {
       mapId,
       players: [],
       monsters: [],
+      loot: [],
       messages: [],
       roomPlayerCount: 0,
       combatProfile: null,
       combatLog: [],
       selectedTargetId: null,
       skillCooldowns: {},
+      levelUpNotice: null,
     }));
     this.switchMap(mapId);
     if (this.client !== null) {
@@ -455,6 +600,13 @@ class WorldSession {
       attackMonster: (monsterId) => this.attack(monsterId),
       castSkill: (skillId, targetId) => this.castSkill(skillId, targetId),
       monsterScreenPoint: (monsterId) => this.bridge.monsterScreenPoint(monsterId),
+      pickupDrop: (dropId) => this.pickup(dropId),
+      equipItem: (itemId) => this.equip(itemId),
+      unequipSlot: (slot) => this.unequip(slot),
+      useItem: (itemId) => this.consumeItem(itemId),
+      lootDrops: () => this.latestLoot,
+      lootScreenPoint: (dropId) => this.bridge.lootScreenPoint(dropId),
+      inventoryState: () => this.inventory,
     };
     this.debugInstalled = true;
   }
@@ -474,6 +626,10 @@ export type WorldSessionControls = {
   castSkill: (skillId: string, targetId: string) => boolean;
   selectTarget: (monsterId: string) => void;
   attack: (targetId: string) => boolean;
+  pickup: (dropId: string) => boolean;
+  equip: (itemId: string) => boolean;
+  unequip: (slot: EquipmentSlot) => boolean;
+  consumeItem: (itemId: string) => boolean;
 };
 
 /**
@@ -532,6 +688,27 @@ export function useWorldSession(
     (targetId: string) => sessionRef.current?.attack(targetId) ?? false,
     [],
   );
+  const pickup = useCallback((dropId: string) => sessionRef.current?.pickup(dropId) ?? false, []);
+  const equip = useCallback((itemId: string) => sessionRef.current?.equip(itemId) ?? false, []);
+  const unequip = useCallback(
+    (slot: EquipmentSlot) => sessionRef.current?.unequip(slot) ?? false,
+    [],
+  );
+  const consumeItem = useCallback(
+    (itemId: string) => sessionRef.current?.consumeItem(itemId) ?? false,
+    [],
+  );
 
-  return { state, rejoin, sendChat, castSkill, selectTarget, attack };
+  return {
+    state,
+    rejoin,
+    sendChat,
+    castSkill,
+    selectTarget,
+    attack,
+    pickup,
+    equip,
+    unequip,
+    consumeItem,
+  };
 }

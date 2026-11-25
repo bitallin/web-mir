@@ -2,6 +2,8 @@ import { TILE_UNITS, type CombatEventPayload } from '@web-legend/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { MONSTER_CATALOG, requireMonster } from './content';
+import { equipmentBonuses, requireItem, statsWithEquipment } from './items';
+import { combatStatsFor } from './stats';
 import {
   DEFAULT_SLIME_SPAWN,
   advance,
@@ -367,3 +369,54 @@ function advanceEvent(
   }
   return events;
 }
+
+describe('CombatWorld equipment and vitals', () => {
+  it('uses injected equipment-adjusted stats and clamps vitals to them', () => {
+    const world = createTestWorld();
+    const baseline = combatStatsFor('warrior', 1);
+    const equipped = statsWithEquipment(
+      baseline,
+      equipmentBonuses([requireItem('warrior_sword'), requireItem('cloth_armor')]),
+    );
+    world.addPlayer(warrior({ hp: 999, mp: 999, stats: equipped }));
+
+    const player = world.getPlayer('player-1');
+    expect(player?.maxHp).toBe(baseline.maxHp);
+    expect(player?.hp).toBe(baseline.maxHp);
+    expect(player?.mp).toBe(baseline.maxMp);
+    expect(player?.attack).toBe(baseline.attack + 6);
+    expect(player?.defense).toBe(baseline.defense + 2);
+  });
+
+  it('applies a level-up refill and clamps vitals after an equipment downgrade', () => {
+    const world = createTestWorld();
+    world.addPlayer(warrior({ hp: 40, mp: 5 }));
+
+    const levelTwo = combatStatsFor('warrior', 2);
+    expect(
+      world.updatePlayerProgress('player-1', { level: 2, stats: levelTwo, refill: true }),
+    ).toBe(true);
+    expect(world.getPlayer('player-1')?.hp).toBe(levelTwo.maxHp);
+    expect(world.getPlayer('player-1')?.mp).toBe(levelTwo.maxMp);
+    expect(world.getPlayer('player-1')?.level).toBe(2);
+
+    const noBonus = combatStatsFor('warrior', 1);
+    world.updatePlayerProgress('player-1', { level: 1, stats: noBonus });
+    expect(world.getPlayer('player-1')?.hp).toBe(noBonus.maxHp);
+    expect(world.getPlayer('player-1')?.maxHp).toBe(noBonus.maxHp);
+  });
+
+  it('applies server-decided consumable vitals', () => {
+    const world = createTestWorld();
+    world.addPlayer(warrior({ hp: 20, mp: 0 }));
+
+    expect(world.setPlayerVitals('player-1', { hp: 60, mp: 10 })).toBe(true);
+    expect(world.getPlayer('player-1')?.hp).toBe(60);
+    expect(world.getPlayer('player-1')?.mp).toBe(10);
+    expect(world.getPlayer('player-1')?.alive).toBe(true);
+
+    world.setPlayerVitals('player-1', { hp: 9_999, mp: 9_999 });
+    expect(world.getPlayer('player-1')?.hp).toBe(120);
+    expect(world.getPlayer('player-1')?.mp).toBe(30);
+  });
+});

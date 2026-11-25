@@ -133,6 +133,47 @@ export {
 export type { AssetCharacter, AssetManifest, AssetTile, AssetTileset } from './assets';
 
 export {
+  ECONOMY_CONTENT_VERSION,
+  EQUIPMENT_SLOTS,
+  INVENTORY_CAPACITY,
+  ITEM_KINDS,
+  LOOT_EXPIRY_MS,
+  LOOT_OWNER_WINDOW_MS,
+  PICKUP_RANGE_TILES,
+  assetCommandKindSchema,
+  assetResultSchema,
+  characterProgressSchema,
+  equipmentSlotSchema,
+  equipmentViewSchema,
+  inventoryEquipSchema,
+  inventorySnapshotSchema,
+  inventoryUnequipSchema,
+  inventoryUseSchema,
+  itemKindSchema,
+  itemViewSchema,
+  itemsBySlot,
+  levelUpSchema,
+  lootClaimedSchema,
+  lootPickupSchema,
+} from './economy';
+export type {
+  AssetCommandKind,
+  AssetResult,
+  CharacterProgress,
+  EquipmentSlot,
+  EquipmentView,
+  InventoryEquip,
+  InventorySnapshot,
+  InventoryUnequip,
+  InventoryUse,
+  ItemKind,
+  ItemView,
+  LevelUp,
+  LootClaimed,
+  LootPickup,
+} from './economy';
+
+export {
   MAP_RUNTIME_SCHEMA_VERSION,
   STARTER_TOWN_MAP_ID,
   STARTER_WILDS_MAP_ID,

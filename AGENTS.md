@@ -74,7 +74,8 @@ web-mir/
 ├─ packages/
 │  ├─ contracts/      API/协议/角色 DTO/健康/错误码，客户端与服务端共享
 │  ├─ auth/           Argon2id 密码、会话令牌与一次性票据令牌（阶段 2 创建）
-│  ├─ game-domain/    战斗纯函数、技能/怪物目录与内存战斗世界（阶段 4 创建）
+│  ├─ game-domain/    战斗纯函数、技能/怪物/物品/掉落目录与内存战斗世界（阶段 4/5）
+│  ├─ game-application/ 事务用例：击杀奖励、拾取、背包、装备、金币（阶段 5）
 │  ├─ game-simulation/ 固定 tick、移动推进、寻路、AOI（阶段 1/3）
 │  ├─ map-runtime/    Tiled 编译、导航与传送门运行时（阶段 3 创建）
 │  ├─ config/         Zod 环境变量校验与 .env 加载
@@ -97,9 +98,12 @@ web-mir/
 checksum、导航格与传送门查询，只依赖 `contracts` 与 Node 内置模块。
 `game-domain` 已在阶段 4 创建，承载战斗纯函数、技能/怪物目录与无 IO 的
 `CombatWorld`；它只依赖 `contracts`，移动格、寻路、RNG 与复活点由调用方注入。
+阶段 5 在同一包内增加物品目录、掉落表、经验曲线与背包/装备纯规则。
+`game-application` 已在阶段 5 创建，承载击杀奖励、拾取、装备、卸下与消耗品使用
+的事务用例，依赖 `contracts`、`game-domain` 与 `persistence`。
 
-当前**尚未创建**的包及创建时机（ADR-013）：`content-schema`（阶段 7 内容发布）、
-`game-application`（阶段 5 事务用例）。不要提前创建空壳包。
+当前**尚未创建**的包及创建时机（ADR-013）：`content-schema`（阶段 7 内容发布）。
+不要提前创建空壳包。
 
 强制依赖方向：
 
@@ -111,10 +115,13 @@ checksum、导航格与传送门查询，只依赖 `contracts` 与 Node 内置�
   Colyseus、Phaser、数据库、HTTP 或 app。导航格、寻路函数与 RNG 通过参数注入。
 - `map-runtime` 只依赖 `contracts` 与 Node 内置模块；不得依赖 Colyseus、数据库、
   HTTP 框架、app 或 `game-simulation`。
-- `control-api` 依赖 `auth`、`persistence`、`contracts`（含 `contracts/maps`）；
-  不得导入 game-server 或 map-runtime。
+- `game-application` 依赖 `contracts`、`game-domain`、`persistence`；不得导入
+  Colyseus、Fastify、Pino、Phaser、`game-simulation`、`map-runtime` 或任何 app。
+- `control-api` 依赖 `auth`、`persistence`、`contracts`（含 `contracts/maps`）与
+  `game-domain`（创建角色时的职业初始物品目录）；不得导入 game-server 或
+  map-runtime。
 - `game-server` 依赖 `auth`、`persistence`、`game-simulation`、`game-domain`、
-  `map-runtime`、`contracts`；不得导入 control-api。
+  `game-application`、`map-runtime`、`contracts`；不得导入 control-api。
 - `game-web` 只能导入 `contracts`（含 `contracts/maps`）、自身表现层与资源
   manifest；不能导入服务端包（含 `game-simulation`、`map-runtime`、`auth`）、
   数据库、Fastify、Colyseus 服务端或 Pino。

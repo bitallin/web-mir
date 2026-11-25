@@ -43,6 +43,8 @@ export type AuthControls = {
   register: (credentials: Credentials) => Promise<boolean>;
   logout: () => Promise<void>;
   createCharacter: (input: CreateCharacterRequest) => Promise<CharacterView | null>;
+  /** Re-reads /me so map, position and level are current after leaving a world. */
+  refreshCharacters: () => Promise<void>;
   clearError: () => void;
 };
 
@@ -149,9 +151,23 @@ export function useAuth(): AuthControls {
     [],
   );
 
+  const refreshCharacters = useCallback(async (): Promise<void> => {
+    try {
+      const response = await fetchMe();
+      setState((previous) => ({
+        ...previous,
+        account: response.account,
+        characters: response.characters,
+      }));
+    } catch {
+      // Keep the last known list; entering a stale map fails in the server's
+      // own validation and is reported to the player.
+    }
+  }, []);
+
   const clearError = useCallback(() => {
     setState((previous) => ({ ...previous, error: null }));
   }, []);
 
-  return { state, login, register, logout, createCharacter, clearError };
+  return { state, login, register, logout, createCharacter, refreshCharacters, clearError };
 }

@@ -22,7 +22,8 @@ function Splash() {
 }
 
 export function App() {
-  const { state, login, register, logout, createCharacter, clearError } = useAuth();
+  const { state, login, register, logout, createCharacter, refreshCharacters, clearError } =
+    useAuth();
   const [selected, setSelected] = useState<CharacterView | null>(null);
 
   useEffect(() => {
@@ -57,7 +58,11 @@ export function App() {
       <GameScreen
         character={selected}
         onExit={() => {
-          setSelected(null);
+          // The world may have changed map, level or position; re-read the
+          // character list before the player can enter again.
+          void refreshCharacters().finally(() => {
+            setSelected(null);
+          });
         }}
       />
     );

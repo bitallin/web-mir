@@ -1,0 +1,19 @@
+{
+  "name": "@web-legend/game-application",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@web-legend/contracts": "workspace:*",
+    "@web-legend/game-domain": "workspace:*",
+    "@web-legend/persistence": "workspace:*",
+    "drizzle-orm": "0.45.4"
+  }
+}

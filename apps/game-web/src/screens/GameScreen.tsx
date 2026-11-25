@@ -37,6 +37,13 @@ function hpPercent(hp: number, maxHp: number): number {
   return Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)));
 }
 
+function expPercent(exp: number, expToNextLevel: number): number {
+  if (expToNextLevel <= 0) {
+    return 100;
+  }
+  return Math.max(0, Math.min(100, Math.round((exp / expToNextLevel) * 100)));
+}
+
 export type GameScreenProps = {
   character: CharacterView;
   onExit: () => void;
@@ -46,17 +53,26 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatDraft, setChatDraft] = useState('');
   const [now, setNow] = useState(() => Date.now());
+  const [bagOpen, setBagOpen] = useState(false);
   const requestTicket = useCallback(async () => {
     const response = await issueGameTicket(character.id);
     return response.ticket;
   }, [character.id]);
-  const { state, rejoin, sendChat, castSkill, selectTarget, attack } = useWorldSession(
-    containerRef,
-    {
-      character,
-      requestTicket,
-    },
-  );
+  const {
+    state,
+    rejoin,
+    sendChat,
+    castSkill,
+    selectTarget,
+    attack,
+    pickup,
+    equip,
+    unequip,
+    consumeItem,
+  } = useWorldSession(containerRef, {
+    character,
+    requestTicket,
+  });
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -78,6 +94,13 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const profileSkills = state.combatProfile?.skills;
   const skills = useMemo(() => profileSkills ?? [], [profileSkills]);
   const isDead = self?.alive === false;
+  const inventory = state.inventory;
+  const equipment = inventory?.equipment;
+  const items = inventory?.items ?? [];
+  const level = inventory?.level ?? state.combatProfile?.level ?? character.level;
+  const exp = inventory?.exp ?? character.exp;
+  const expToNextLevel = inventory?.expToNextLevel ?? 0;
+  const gold = inventory?.gold ?? 0;
 
   const triggerSkill = useCallback(
     (skill: SkillView) => {
@@ -98,6 +121,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         targetElement instanceof HTMLTextAreaElement ||
         targetElement instanceof HTMLButtonElement
       ) {
+        return;
+      }
+      if (event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        setBagOpen((open) => !open);
         return;
       }
       const skill = skills.find((candidate) => candidate.hotkey === event.key);
@@ -132,9 +160,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <p className="eyebrow">浏览器原生 · 实时多人</p>
           <h1>Web Legend</h1>
           <p className="phase">
-            {character.name} · {classDefinition.name} Lv.
-            {state.combatProfile?.level ?? character.level}
-            <span>阶段 4</span>
+            {character.name} · {classDefinition.name} Lv.{level}
+            <span>阶段 5</span>
           </p>
           <p className="vitals" data-testid="vitals">
             HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
@@ -142,6 +169,33 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               法力 {self?.mp ?? character.mp}/{self?.maxMp ?? character.maxMp}
             </span>
           </p>
+          <div
+            className="exp-row"
+            data-testid="exp-bar"
+            data-exp={exp}
+            data-exp-next={expToNextLevel}
+          >
+            <div className="exp-track" aria-hidden="true">
+              <span style={{ width: `${String(expPercent(exp, expToNextLevel))}%` }} />
+            </div>
+            <span className="exp-label">
+              经验 {exp}/{expToNextLevel}
+            </span>
+            <span className="gold-label" data-testid="gold">
+              金币 {gold}
+            </span>
+            <button
+              type="button"
+              className="bag-toggle"
+              data-testid="inventory-toggle"
+              aria-expanded={bagOpen}
+              onClick={() => {
+                setBagOpen((open) => !open);
+              }}
+            >
+              背包 B
+            </button>
+          </div>
         </div>
 
         <section className={`connection connection-${state.status}`} aria-live="polite">
@@ -284,6 +338,35 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           </ul>
         </section>
 
+        <section className="loot-panel" aria-label="地面掉落">
+          <div className="panel-heading">
+            <h2>附近掉落</h2>
+            <span data-testid="loot-count">{state.loot.length}</span>
+          </div>
+          <ul data-testid="loot-list">
+            {state.loot.map((drop) => (
+              <li key={drop.dropId}>
+                <button
+                  type="button"
+                  className="loot-row"
+                  data-testid="loot-row"
+                  data-drop-id={drop.dropId}
+                  data-template-id={drop.templateId}
+                  data-owner-id={drop.ownerId}
+                  onClick={() => {
+                    pickup(drop.dropId);
+                  }}
+                >
+                  <span>{drop.displayName}</span>
+                  <span>×{drop.quantity}</span>
+                  <span className="loot-action">拾取</span>
+                </button>
+              </li>
+            ))}
+            {state.loot.length === 0 ? <li className="empty">击败怪物后会掉落物品</li> : null}
+          </ul>
+        </section>
+
         <section className="skill-bar" aria-label="技能">
           <div className="panel-heading">
             <h2>技能</h2>
@@ -379,6 +462,142 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           </button>
         </form>
       </aside>
+
+      {bagOpen && inventory !== null ? (
+        <aside className="hud bag-panel" data-testid="inventory-panel" aria-label="背包与装备">
+          <div className="panel-heading">
+            <h2>背包与装备</h2>
+            <span>
+              {items.length}/{inventory.capacity}
+            </span>
+            <button
+              type="button"
+              className="panel-close"
+              onClick={() => {
+                setBagOpen(false);
+              }}
+            >
+              关闭
+            </button>
+          </div>
+
+          <div className="equipment-grid">
+            <div
+              className="equipment-slot"
+              data-testid="equipment-weapon"
+              data-item-id={equipment?.weapon?.itemId ?? ''}
+              data-template-id={equipment?.weapon?.templateId ?? ''}
+            >
+              <span className="slot-label">武器</span>
+              {equipment?.weapon !== null && equipment?.weapon !== undefined ? (
+                <div className="slot-body">
+                  <strong>{equipment.weapon.name}</strong>
+                  <span>+{equipment.weapon.attackBonus} 攻击</span>
+                  <button
+                    type="button"
+                    data-testid="unequip-weapon"
+                    onClick={() => {
+                      unequip('weapon');
+                    }}
+                  >
+                    卸下
+                  </button>
+                </div>
+              ) : (
+                <em>空</em>
+              )}
+            </div>
+            <div
+              className="equipment-slot"
+              data-testid="equipment-armor"
+              data-item-id={equipment?.armor?.itemId ?? ''}
+              data-template-id={equipment?.armor?.templateId ?? ''}
+            >
+              <span className="slot-label">护甲</span>
+              {equipment?.armor !== null && equipment?.armor !== undefined ? (
+                <div className="slot-body">
+                  <strong>{equipment.armor.name}</strong>
+                  <span>+{equipment.armor.defenseBonus} 防御</span>
+                  <button
+                    type="button"
+                    data-testid="unequip-armor"
+                    onClick={() => {
+                      unequip('armor');
+                    }}
+                  >
+                    卸下
+                  </button>
+                </div>
+              ) : (
+                <em>空</em>
+              )}
+            </div>
+          </div>
+
+          <p className="bag-stats">
+            攻击 {inventory.attack} · 防御 {inventory.defense} · 金币 {inventory.gold}
+          </p>
+
+          <ul className="bag-grid" data-testid="inventory-items">
+            {items.map((item) => (
+              <li
+                key={item.itemId}
+                className="bag-item"
+                data-testid="inventory-item"
+                data-item-id={item.itemId}
+                data-template-id={item.templateId}
+                data-quantity={item.quantity}
+                data-kind={item.kind}
+              >
+                <span className="bag-item-name">{item.name}</span>
+                <span className="bag-item-qty">×{item.quantity}</span>
+                <span className="bag-item-meta">
+                  {item.kind === 'weapon'
+                    ? `+${String(item.attackBonus)} 攻击`
+                    : item.kind === 'armor'
+                      ? `+${String(item.defenseBonus)} 防御`
+                      : item.kind === 'consumable'
+                        ? `回复 ${item.healHp > 0 ? `${String(item.healHp)} HP` : ''}${
+                            item.healMp > 0 ? ` ${String(item.healMp)} MP` : ''
+                          }`.trim()
+                        : '材料'}
+                </span>
+                {item.kind === 'weapon' || item.kind === 'armor' ? (
+                  <button
+                    type="button"
+                    data-testid="equip-item"
+                    onClick={() => {
+                      equip(item.itemId);
+                    }}
+                  >
+                    装备
+                  </button>
+                ) : null}
+                {item.kind === 'consumable' ? (
+                  <button
+                    type="button"
+                    data-testid="use-item"
+                    onClick={() => {
+                      consumeItem(item.itemId);
+                    }}
+                  >
+                    使用
+                  </button>
+                ) : null}
+              </li>
+            ))}
+            {items.length === 0 ? <li className="empty">背包是空的</li> : null}
+          </ul>
+          <p className="bag-hint">装备与使用由服务器事务确认；金币与经验在击杀结算后写入数据库。</p>
+        </aside>
+      ) : null}
+
+      {state.levelUpNotice !== null ? (
+        <div className="level-up-banner" data-testid="level-up-banner" role="status">
+          <strong>升级！</strong> Lv.{state.levelUpNotice.level} · 生命 {state.levelUpNotice.maxHp}{' '}
+          · 攻击 {state.levelUpNotice.attack}
+        </div>
+      ) : null}
 
       {isDead ? (
         <div className="death-banner" data-testid="player-dead" role="status">

@@ -57,6 +57,30 @@ export const MonsterState = schema(
 
 export type MonsterStateInstance = InstanceType<typeof MonsterState>;
 
+/**
+ * Public ground drop. The item instance behind it already has a unique owner
+ * row in PostgreSQL; this collection only mirrors the visible subset for AOI
+ * rendering. Quantity and display data are server-decided.
+ */
+export const LootState = schema(
+  {
+    dropId: t.string(),
+    itemId: t.string(),
+    templateId: t.string(),
+    displayName: t.string(),
+    quantity: t.uint16().default(1),
+    x: t.number().default(0),
+    y: t.number().default(0),
+    /** Character id allowed to claim first; empty string means free for all. */
+    ownerId: t.string().default(''),
+    /** Epoch milliseconds; the room removes the drop when it passes. */
+    expiresAt: t.number().default(0),
+  },
+  'LootState',
+);
+
+export type LootStateInstance = InstanceType<typeof LootState>;
+
 export const WorldState = schema(
   {
     mapId: t.string().default(''),
@@ -70,6 +94,8 @@ export const WorldState = schema(
     players: t.map(PlayerState).view(),
     // Monsters share the same AOI cells and view filtering (ADR-019).
     monsters: t.map(MonsterState).view(),
+    // Ground drops are public but filtered by the same AOI (ADR-020).
+    loot: t.map(LootState).view(),
   },
   'WorldState',
 );

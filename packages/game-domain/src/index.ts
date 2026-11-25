@@ -34,3 +34,28 @@ export type {
 
 export { combatStatsFor, MAX_COMBAT_LEVEL } from './stats';
 export type { CombatStats } from './stats';
+
+export {
+  ITEM_CATALOG,
+  STARTER_KIT,
+  canEquip,
+  equipmentBonuses,
+  findInventoryPlacement,
+  isConsumable,
+  requireItem,
+  statsWithEquipment,
+} from './items';
+export type {
+  EquippedItem,
+  EquipmentBonuses,
+  InventoryPlacement,
+  InventoryStack,
+  ItemDefinition,
+  StarterItem,
+} from './items';
+
+export { MONSTER_LOOT_TABLES, requireLootTable, rollLoot } from './loot';
+export type { LootEntry, LootRoll, LootTable, RolledLootItem } from './loot';
+
+export { MAX_CHARACTER_LEVEL, applyExperience, experienceForNextLevel } from './progression';
+export type { ExperienceResult } from './progression';

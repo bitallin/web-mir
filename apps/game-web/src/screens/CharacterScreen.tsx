@@ -96,6 +96,7 @@ export function CharacterScreen({
                   data-testid="character-card"
                   data-character-id={character.id}
                   data-character-name={character.name}
+                  data-map-id={character.mapId}
                 >
                   <div className="character-emblem" aria-hidden="true">
                     {CHARACTER_CLASS_CATALOG[character.classId].name.slice(0, 1)}

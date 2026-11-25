@@ -1,0 +1,498 @@
+import { randomUUID } from 'node:crypto';
+
+import { INVENTORY_CAPACITY } from '@web-legend/contracts';
+import { STARTER_KIT, combatStatsFor, requireItem } from '@web-legend/game-domain';
+import {
+  characters,
+  createDatabase,
+  currencyLedger,
+  insertAccount,
+  insertCharacterWithItems,
+  itemInstances,
+  realms,
+  type Character,
+  type CharacterClassId,
+  type Database,
+  type DatabaseHandle,
+} from '@web-legend/persistence';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { AssetError, AssetService } from '../src/index';
+
+const databaseUrl = process.env.DATABASE_URL;
+const PASSWORD_HASH = 'phase-five-test-hash';
+const REALM_CODE = 'classic-01';
+
+function requireDatabaseUrl(): string {
+  if (databaseUrl === undefined || databaseUrl.length === 0) {
+    throw new Error('DATABASE_URL is required for asset application integration tests');
+  }
+  return databaseUrl;
+}
+
+let sequence = 0;
+
+function suffix(): string {
+  sequence += 1;
+  return `${randomUUID().replace(/-/gu, '').slice(0, 6)}${sequence.toString(36)}`;
+}
+
+async function createCharacter(
+  db: Database,
+  classId: CharacterClassId,
+  options: { level?: number; exp?: number; hp?: number; mp?: number } = {},
+): Promise<Character> {
+  const [realm] = await db.select().from(realms).where(eq(realms.code, REALM_CODE)).limit(1);
+  if (realm === undefined) {
+    throw new Error('test realm is missing');
+  }
+  const token = suffix();
+  const account = await insertAccount(db, {
+    username: `asset_${token}`.slice(0, 24),
+    usernameNormalized: `asset_${token}`.slice(0, 24),
+    passwordHash: PASSWORD_HASH,
+  });
+  const level = options.level ?? 1;
+  const stats = combatStatsFor(classId, level);
+  const character = await insertCharacterWithItems(
+    db,
+    {
+      accountId: account.id,
+      realmId: realm.id,
+      name: `A${token}`.slice(0, 12),
+      nameNormalized: `a${token}`.slice(0, 12).toLowerCase(),
+      classId,
+      level,
+      exp: options.exp ?? 0,
+      hp: options.hp ?? stats.maxHp,
+      maxHp: stats.maxHp,
+      mp: options.mp ?? stats.maxMp,
+      maxMp: stats.maxMp,
+      mapId: 'starter_wilds',
+      x: 7_500,
+      y: 15_500,
+      facing: 2,
+    },
+    STARTER_KIT[classId],
+  );
+  return character;
+}
+
+async function inventoryItem(
+  db: Database,
+  characterId: string,
+  templateId: string,
+): Promise<{ id: string; slotIndex: number | null; quantity: number }> {
+  const rows = await db
+    .select()
+    .from(itemInstances)
+    .where(eq(itemInstances.characterId, characterId));
+  const row = rows.find(
+    (entry) => entry.templateId === templateId && entry.container === 'inventory',
+  );
+  if (row === undefined) {
+    throw new Error(`no inventory item "${templateId}"`);
+  }
+  return { id: row.id, slotIndex: row.slotIndex, quantity: row.quantity };
+}
+
+async function ownerDrops(service: AssetService, mapId = 'starter_wilds') {
+  const drops = await service.loadOpenDrops(mapId);
+  return drops;
+}
+
+describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => {
+  let handle: DatabaseHandle;
+  let db: Database;
+  let service: AssetService;
+  let clock: Date;
+
+  beforeAll(async () => {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Refusing to run database-mutating tests with NODE_ENV=production');
+    }
+    handle = createDatabase(requireDatabaseUrl(), { max: 10 });
+    db = handle.db;
+    await db
+      .insert(realms)
+      .values({ code: REALM_CODE, name: '经典一区', status: 'active' })
+      .onConflictDoNothing({ target: realms.code });
+    clock = new Date('2026-11-25T00:00:00.000Z');
+    service = new AssetService(db, { now: () => clock, rng: () => 0 });
+  });
+
+  afterAll(async () => {
+    await handle?.close();
+  });
+
+  it('grants kill rewards once and writes wallet plus ledger atomically', async () => {
+    const character = await createCharacter(db, 'warrior');
+    const reference = `test-kill-${randomUUID()}`;
+
+    const outcome = await service.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    expect(outcome).not.toBeNull();
+    expect(outcome?.expGained).toBe(12);
+    expect(outcome?.goldGained).toBe(2);
+    expect(outcome?.leveledUp).toBe(false);
+    expect(outcome?.snapshot.exp).toBe(12);
+    expect(outcome?.snapshot.gold).toBe(2);
+    expect(outcome?.drops.map((drop) => drop.templateId).sort()).toEqual([
+      'slime_gel',
+      'small_hp_potion',
+    ]);
+
+    const repeat = await service.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    expect(repeat).toBeNull();
+
+    const loaded = await service.loadAssets(character.id);
+    expect(loaded.snapshot.exp).toBe(12);
+    expect(loaded.snapshot.gold).toBe(2);
+
+    const ledger = await db
+      .select()
+      .from(currencyLedger)
+      .where(eq(currencyLedger.characterId, character.id));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]?.delta).toBe(2);
+    expect(ledger[0]?.balanceAfter).toBe(2);
+    expect(ledger[0]?.idempotencyKey).toBe(`kill:${reference}:gold`);
+  });
+
+  it('levels up, refills vitals and recomputes max hp from the level', async () => {
+    const character = await createCharacter(db, 'warrior', { exp: 25, hp: 40, mp: 10 });
+
+    const outcome = await service.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference: `test-level-${randomUUID()}`,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+
+    const levelTwo = combatStatsFor('warrior', 2);
+    expect(outcome?.leveledUp).toBe(true);
+    expect(outcome?.snapshot.level).toBe(2);
+    expect(outcome?.snapshot.exp).toBe(7);
+    expect(outcome?.snapshot.maxHp).toBe(levelTwo.maxHp);
+    expect(outcome?.snapshot.hp).toBe(levelTwo.maxHp);
+    expect(outcome?.stats.maxHp).toBe(levelTwo.maxHp);
+
+    const [stored] = await db.select().from(characters).where(eq(characters.id, character.id));
+    expect(stored?.level).toBe(2);
+    expect(stored?.hp).toBe(levelTwo.maxHp);
+  });
+
+  it('reserves drops for the killer, then lets another player claim them', async () => {
+    const killer = await createCharacter(db, 'warrior');
+    const other = await createCharacter(db, 'warrior');
+    const reference = `test-owner-${randomUUID()}`;
+    const outcome = await service.grantKillReward({
+      characterId: killer.id,
+      mapId: 'starter_wilds',
+      reference,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    const drop = outcome?.drops[0];
+    expect(drop).toBeDefined();
+
+    await expect(
+      service.pickup({
+        characterId: other.id,
+        commandId: randomUUID(),
+        dropId: drop!.dropId,
+        mapId: 'starter_wilds',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_OWNER' } satisfies Partial<AssetError>);
+
+    clock = new Date(clock.getTime() + 31_000);
+    const claimed = await service.pickup({
+      characterId: other.id,
+      commandId: randomUUID(),
+      dropId: drop!.dropId,
+      mapId: 'starter_wilds',
+    });
+    expect(claimed.deduplicated).toBe(false);
+    expect(claimed.claimed?.claimerId).toBe(other.id);
+    expect(claimed.snapshot.items.some((item) => item.templateId === drop!.templateId)).toBe(true);
+  });
+
+  it('settles concurrent pickups of one drop exactly once', async () => {
+    const first = await createCharacter(db, 'warrior');
+    const second = await createCharacter(db, 'warrior');
+    const reference = `test-race-${randomUUID()}`;
+    const outcome = await service.grantKillReward({
+      characterId: first.id,
+      mapId: 'starter_wilds',
+      reference,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    const drop = outcome?.drops[0];
+    clock = new Date(clock.getTime() + 31_000);
+
+    const results = await Promise.allSettled([
+      service.pickup({
+        characterId: first.id,
+        commandId: randomUUID(),
+        dropId: drop!.dropId,
+        mapId: 'starter_wilds',
+      }),
+      service.pickup({
+        characterId: second.id,
+        commandId: randomUUID(),
+        dropId: drop!.dropId,
+        mapId: 'starter_wilds',
+      }),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const reason = (rejected[0] as PromiseRejectedResult).reason as AssetError;
+    expect(reason).toBeInstanceOf(AssetError);
+    expect(['ALREADY_CLAIMED', 'ITEM_NOT_FOUND']).toContain(reason.code);
+  });
+
+  it('keeps a drop on the ground when the bag is full', async () => {
+    const character = await createCharacter(db, 'warrior');
+    const reference = `test-full-${randomUUID()}`;
+    const outcome = await service.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    const drop = outcome?.drops.find((entry) => entry.templateId === 'slime_gel');
+    expect(drop).toBeDefined();
+
+    const fillers = Array.from({ length: INVENTORY_CAPACITY }, (_, index) => ({
+      templateId: 'wolf_pelt',
+      characterId: character.id,
+      container: 'inventory' as const,
+      slotIndex: index,
+      quantity: 1,
+    }));
+    await db.delete(itemInstances).where(eq(itemInstances.characterId, character.id));
+    await db.insert(itemInstances).values(fillers);
+
+    await expect(
+      service.pickup({
+        characterId: character.id,
+        commandId: randomUUID(),
+        dropId: drop!.dropId,
+        mapId: 'starter_wilds',
+      }),
+    ).rejects.toMatchObject({ code: 'INVENTORY_FULL' } satisfies Partial<AssetError>);
+
+    const open = await ownerDrops(service);
+    expect(open.some((entry) => entry.dropId === drop!.dropId)).toBe(true);
+  });
+
+  it('equips, swaps and enforces class and level rules with committed stats', async () => {
+    const warrior = await createCharacter(db, 'warrior');
+    const sword = await inventoryItem(db, warrior.id, 'warrior_sword');
+
+    const equipped = await service.equip({
+      characterId: warrior.id,
+      commandId: randomUUID(),
+      itemId: sword.id,
+    });
+    expect(equipped.snapshot.equipment.weapon?.itemId).toBe(sword.id);
+    expect(equipped.snapshot.attack).toBe(combatStatsFor('warrior', 1).attack + 6);
+    expect(equipped.snapshot.items.some((item) => item.itemId === sword.id)).toBe(false);
+
+    const [secondSword] = await db
+      .insert(itemInstances)
+      .values({
+        templateId: 'warrior_sword',
+        characterId: warrior.id,
+        container: 'inventory',
+        slotIndex: 10,
+        quantity: 1,
+      })
+      .returning();
+    const swapped = await service.equip({
+      characterId: warrior.id,
+      commandId: randomUUID(),
+      itemId: secondSword!.id,
+    });
+    expect(swapped.snapshot.equipment.weapon?.itemId).toBe(secondSword!.id);
+    expect(swapped.snapshot.items.find((item) => item.itemId === sword.id)?.slotIndex).toBe(
+      secondSword!.slotIndex,
+    );
+
+    const mage = await createCharacter(db, 'mage');
+    const [wrongClass] = await db
+      .insert(itemInstances)
+      .values({
+        templateId: 'warrior_sword',
+        characterId: mage.id,
+        container: 'inventory',
+        slotIndex: 10,
+        quantity: 1,
+      })
+      .returning();
+    await expect(
+      service.equip({ characterId: mage.id, commandId: randomUUID(), itemId: wrongClass!.id }),
+    ).rejects.toMatchObject({ code: 'CLASS_RESTRICTED' } satisfies Partial<AssetError>);
+
+    const [heavyArmor] = await db
+      .insert(itemInstances)
+      .values({
+        templateId: 'leather_armor',
+        characterId: mage.id,
+        container: 'inventory',
+        slotIndex: 11,
+        quantity: 1,
+      })
+      .returning();
+    await expect(
+      service.equip({ characterId: mage.id, commandId: randomUUID(), itemId: heavyArmor!.id }),
+    ).rejects.toMatchObject({ code: 'LEVEL_TOO_LOW' } satisfies Partial<AssetError>);
+
+    const unequipped = await service.unequip({
+      characterId: warrior.id,
+      commandId: randomUUID(),
+      slot: 'weapon',
+    });
+    expect(unequipped.snapshot.equipment.weapon).toBeNull();
+    expect(unequipped.snapshot.items.some((item) => item.itemId === secondSword!.id)).toBe(true);
+  });
+
+  it('refuses to unequip into a full bag', async () => {
+    const warrior = await createCharacter(db, 'warrior');
+    const sword = await inventoryItem(db, warrior.id, 'warrior_sword');
+    await service.equip({ characterId: warrior.id, commandId: randomUUID(), itemId: sword.id });
+
+    const rows = await db
+      .select()
+      .from(itemInstances)
+      .where(eq(itemInstances.characterId, warrior.id));
+    const used = new Set(rows.map((row) => row.slotIndex));
+    const fillers = Array.from({ length: INVENTORY_CAPACITY }, (_, index) => index)
+      .filter((slot) => !used.has(slot))
+      .map((slot) => ({
+        templateId: 'wolf_pelt',
+        characterId: warrior.id,
+        container: 'inventory' as const,
+        slotIndex: slot,
+        quantity: 1,
+      }));
+    await db.insert(itemInstances).values(fillers);
+
+    await expect(
+      service.unequip({
+        characterId: warrior.id,
+        commandId: randomUUID(),
+        slot: 'weapon',
+      }),
+    ).rejects.toMatchObject({ code: 'INVENTORY_FULL' } satisfies Partial<AssetError>);
+  });
+
+  it('consumes a potion idempotently and persists the healed vitals', async () => {
+    const warrior = await createCharacter(db, 'warrior', { hp: 40, mp: 0 });
+    const potion = await inventoryItem(db, warrior.id, 'small_hp_potion');
+    const commandId = randomUUID();
+
+    const used = await service.use({
+      characterId: warrior.id,
+      commandId,
+      itemId: potion.id,
+      vitals: { hp: 40, mp: 0 },
+    });
+    expect(used.vitals).toEqual({ hp: 80, mp: 0 });
+    expect(used.snapshot.hp).toBe(80);
+    const remaining = used.snapshot.items.find((item) => item.itemId === potion.id);
+    expect(remaining?.quantity).toBe(2);
+
+    const repeat = await service.use({
+      characterId: warrior.id,
+      commandId,
+      itemId: potion.id,
+      vitals: { hp: 40, mp: 0 },
+    });
+    expect(repeat.deduplicated).toBe(true);
+    expect(repeat.snapshot.items.find((item) => item.itemId === potion.id)?.quantity).toBe(2);
+
+    const [stored] = await db.select().from(characters).where(eq(characters.id, warrior.id));
+    expect(stored?.hp).toBe(80);
+  });
+
+  it('refuses a potion at full health and an item that is not consumable', async () => {
+    const warrior = await createCharacter(db, 'warrior');
+    const potion = await inventoryItem(db, warrior.id, 'small_hp_potion');
+    const armor = requireItem('cloth_armor');
+    const [armorRow] = await db
+      .insert(itemInstances)
+      .values({
+        templateId: armor.id,
+        characterId: warrior.id,
+        container: 'inventory',
+        slotIndex: 10,
+        quantity: 1,
+      })
+      .returning();
+
+    await expect(
+      service.use({
+        characterId: warrior.id,
+        commandId: randomUUID(),
+        itemId: potion.id,
+        vitals: { hp: combatStatsFor('warrior', 1).maxHp, mp: 30 },
+      }),
+    ).rejects.toMatchObject({ code: 'ITEM_NOT_USABLE' } satisfies Partial<AssetError>);
+
+    await expect(
+      service.use({
+        characterId: warrior.id,
+        commandId: randomUUID(),
+        itemId: armorRow!.id,
+        vitals: { hp: 50, mp: 30 },
+      }),
+    ).rejects.toMatchObject({ code: 'ITEM_NOT_USABLE' } satisfies Partial<AssetError>);
+  });
+
+  it('reloads the committed bag, equipment and progress for a relogin', async () => {
+    const warrior = await createCharacter(db, 'warrior');
+    const sword = await inventoryItem(db, warrior.id, 'warrior_sword');
+    await service.equip({ characterId: warrior.id, commandId: randomUUID(), itemId: sword.id });
+    const reference = `test-relogin-${randomUUID()}`;
+    await service.grantKillReward({
+      characterId: warrior.id,
+      mapId: 'starter_wilds',
+      reference,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+
+    const reloaded = await new AssetService(handle.db).loadAssets(warrior.id);
+    expect(reloaded.snapshot.equipment.weapon?.templateId).toBe('warrior_sword');
+    expect(reloaded.snapshot.gold).toBeGreaterThan(0);
+    expect(reloaded.snapshot.exp).toBe(12);
+    expect(reloaded.snapshot.items.length).toBeGreaterThan(0);
+    expect(reloaded.stats.attack).toBe(combatStatsFor('warrior', 1).attack + 6);
+  });
+});

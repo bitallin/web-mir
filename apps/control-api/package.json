@@ -16,6 +16,7 @@
     "@web-legend/auth": "workspace:*",
     "@web-legend/config": "workspace:*",
     "@web-legend/contracts": "workspace:*",
+    "@web-legend/game-domain": "workspace:*",
     "@web-legend/observability": "workspace:*",
     "@web-legend/persistence": "workspace:*",
     "drizzle-orm": "0.45.4",

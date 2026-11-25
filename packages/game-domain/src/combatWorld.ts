@@ -50,6 +50,11 @@ export type CombatPlayerInput = {
   mp: number;
   x: number;
   y: number;
+  /**
+   * Equipment-adjusted stats loaded from the asset snapshot. When omitted the
+   * class/level baseline is used. The Room never computes them itself.
+   */
+  stats?: CombatStats;
 };
 
 export type CombatPlayerSnapshot = {
@@ -295,7 +300,7 @@ export class CombatWorld {
     ) {
       throw new RangeError('player position must be non-negative integer unit coordinates');
     }
-    const stats = combatStatsFor(input.classId, input.level);
+    const stats = input.stats ?? combatStatsFor(input.classId, input.level);
     const hp = Math.min(Math.max(input.hp, 0), stats.maxHp);
     const mp = Math.min(Math.max(input.mp, 0), stats.maxMp);
     this.players.set(input.id, {
@@ -329,6 +334,52 @@ export class CombatWorld {
     if (player !== undefined) {
       player.targetable = targetable;
     }
+  }
+
+  /**
+   * Applies a committed level or equipment change. `refill` is used for level
+   * ups (classic full restore); otherwise current vitals are clamped to the
+   * new maximum without healing or hurting the player.
+   */
+  updatePlayerProgress(
+    playerId: string,
+    input: { level: number; stats: CombatStats; refill?: boolean },
+  ): boolean {
+    const player = this.players.get(playerId);
+    if (player === undefined) {
+      return false;
+    }
+    player.level = input.level;
+    player.stats = input.stats;
+    player.maxHp = input.stats.maxHp;
+    player.maxMp = input.stats.maxMp;
+    player.attack = input.stats.attack;
+    player.defense = input.stats.defense;
+    if (input.refill === true) {
+      player.hp = player.maxHp;
+      player.mp = player.maxMp;
+      player.alive = true;
+      player.reviveAt = 0;
+    } else {
+      player.hp = Math.min(player.hp, player.maxHp);
+      player.mp = Math.min(player.mp, player.maxMp);
+    }
+    return true;
+  }
+
+  /** Applies committed consumable results; HP/MP stay server-authoritative. */
+  setPlayerVitals(playerId: string, vitals: { hp: number; mp: number }): boolean {
+    const player = this.players.get(playerId);
+    if (player === undefined) {
+      return false;
+    }
+    player.hp = Math.min(Math.max(Math.floor(vitals.hp), 0), player.maxHp);
+    player.mp = Math.min(Math.max(Math.floor(vitals.mp), 0), player.maxMp);
+    player.alive = player.hp > 0;
+    if (!player.alive) {
+      player.reviveAt = this.now + this.playerRespawnMs;
+    }
+    return true;
   }
 
   getPlayer(playerId: string): CombatPlayerSnapshot | undefined {

@@ -18,6 +18,10 @@ export const CLIENT_MESSAGES = {
   chatSend: 'chat.send',
   combatBasicAttack: 'combat.basicAttack',
   skillCast: 'skill.cast',
+  lootPickup: 'loot.pickup',
+  inventoryEquip: 'inventory.equip',
+  inventoryUnequip: 'inventory.unequip',
+  inventoryUse: 'inventory.use',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -28,6 +32,11 @@ export const SERVER_MESSAGES = {
   combatProfile: 'combat.profile',
   sessionTransfer: 'session.transfer',
   systemNotice: 'system.notice',
+  inventorySnapshot: 'inventory.snapshot',
+  assetResult: 'asset.result',
+  characterProgress: 'character.progress',
+  characterLevelUp: 'character.levelUp',
+  lootClaimed: 'loot.claimed',
 } as const;
 
 export const FACING = {
@@ -142,6 +151,17 @@ export const COMMAND_REJECTION_CODES = [
   'INSUFFICIENT_RESOURCE',
   'TARGET_DEAD',
   'PLAYER_DEAD',
+  'ITEM_NOT_FOUND',
+  'INVENTORY_FULL',
+  'ITEM_NOT_USABLE',
+  'ITEM_NOT_EQUIPPABLE',
+  'CLASS_RESTRICTED',
+  'LEVEL_TOO_LOW',
+  'SLOT_EMPTY',
+  'NOT_OWNER',
+  'DROP_EXPIRED',
+  'ALREADY_CLAIMED',
+  'SERVICE_UNAVAILABLE',
 ] as const;
 
 export const commandRejectionCodeSchema = z.enum(COMMAND_REJECTION_CODES);
@@ -160,6 +180,17 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   INSUFFICIENT_RESOURCE: '法力不足',
   TARGET_DEAD: '目标已经死亡',
   PLAYER_DEAD: '角色已经倒下',
+  ITEM_NOT_FOUND: '物品或掉落不存在',
+  INVENTORY_FULL: '背包已满',
+  ITEM_NOT_USABLE: '该物品现在无法使用',
+  ITEM_NOT_EQUIPPABLE: '该物品不能装备',
+  CLASS_RESTRICTED: '该物品不适合你的职业',
+  LEVEL_TOO_LOW: '等级不足，无法使用该物品',
+  SLOT_EMPTY: '该装备槽为空',
+  NOT_OWNER: '该掉落暂不属于你',
+  DROP_EXPIRED: '掉落已经消失',
+  ALREADY_CLAIMED: '掉落已被拾取',
+  SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 
 export const commandAckSchema = z

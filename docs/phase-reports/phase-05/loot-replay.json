@@ -1,0 +1,36 @@
+{
+  "content": "phase5.1",
+  "generatedAt": "2026-11-25T02:53:15.681Z",
+  "results": [
+    {
+      "monsterTemplateId": "wild_slime",
+      "seed": 7,
+      "deterministic": true,
+      "roll": {
+        "exp": 12,
+        "gold": 3,
+        "items": [
+          {
+            "templateId": "slime_gel",
+            "quantity": 2
+          }
+        ]
+      }
+    },
+    {
+      "monsterTemplateId": "forest_wolf",
+      "seed": 11,
+      "deterministic": true,
+      "roll": {
+        "exp": 22,
+        "gold": 7,
+        "items": [
+          {
+            "templateId": "wolf_pelt",
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  ]
+}

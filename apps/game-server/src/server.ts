@@ -24,6 +24,7 @@ export type WorldRoomTuning = {
   interestCellSize?: number;
   interestRadiusCells?: number;
   combatRng?: () => number;
+  economyRng?: () => number;
   monsterRespawnMs?: number;
   playerRespawnMs?: number;
 };

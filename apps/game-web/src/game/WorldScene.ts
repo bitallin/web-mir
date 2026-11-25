@@ -10,6 +10,7 @@ import {
 import type { PlayerView } from '../net/worldClient';
 import { createProjection, TILE_HEIGHT, TILE_WIDTH, type ScreenPoint } from './projection';
 import type { MapBundle } from './mapCatalog';
+import { LootVisual } from './LootVisual';
 import { MonsterVisual } from './MonsterVisual';
 import type { SceneSnapshot, WorldBridge, WorldSceneHandle } from './worldBridge';
 
@@ -174,6 +175,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private readonly projection: ReturnType<typeof createProjection>;
   private readonly visuals = new Map<string, PlayerVisual>();
   private readonly monsterVisuals = new Map<string, MonsterVisual>();
+  private readonly lootVisuals = new Map<string, LootVisual>();
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private targetRing!: Phaser.GameObjects.Graphics;
   private selfId: string | null = null;
@@ -206,6 +208,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
     this.visuals.clear();
     this.monsterVisuals.clear();
+    this.lootVisuals.clear();
     this.selfId = null;
     this.selectedTargetId = null;
     this.predicted = null;
@@ -311,6 +314,23 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         if (this.selectedTargetId === monsterId) {
           this.clearSelection();
         }
+      }
+    }
+
+    const seenLoot = new Set<string>();
+    for (const drop of data.snapshot.loot) {
+      seenLoot.add(drop.dropId);
+      let visual = this.lootVisuals.get(drop.dropId);
+      if (visual === undefined) {
+        visual = new LootVisual(this, drop);
+        this.lootVisuals.set(drop.dropId, visual);
+      }
+      visual.setPosition(this.projection.toScreen(drop.x, drop.y));
+    }
+    for (const [dropId, visual] of this.lootVisuals) {
+      if (!seenLoot.has(dropId)) {
+        visual.destroy();
+        this.lootVisuals.delete(dropId);
       }
     }
   }
@@ -501,6 +521,34 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     }
     this.targetRing.lineStyle(2, 0xc9a227, 0.9);
     this.targetRing.strokeEllipse(visual.current.x, visual.current.y, 38, 18);
+  }
+
+  lootScreenPoint(dropId: string): ScreenPoint | null {
+    const visual = this.lootVisuals.get(dropId);
+    if (visual === undefined) {
+      return null;
+    }
+    const camera = this.cameras.main;
+    return {
+      x: visual.current.x - camera.scrollX,
+      y: visual.current.y - camera.scrollY - 10,
+    };
+  }
+
+  private lootAt(worldX: number, worldY: number): string | null {
+    let best: string | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const [dropId, visual] of this.lootVisuals) {
+      const distance = Math.hypot(
+        worldX - visual.current.x,
+        (worldY - (visual.current.y - 10)) * 1.2,
+      );
+      if (distance < 24 && distance < bestDistance) {
+        best = dropId;
+        bestDistance = distance;
+      }
+    }
+    return best;
   }
 
   private monsterAt(worldX: number, worldY: number): string | null {
@@ -815,10 +863,18 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   }
 
   private readonly handlePointerDown = (pointer: Phaser.Input.Pointer): void => {
+    // A living monster wins over a drop that lies underneath it; the loot list
+    // in the HUD can always claim the drop without a precise click.
     const monsterId = this.monsterAt(pointer.worldX, pointer.worldY);
     if (monsterId !== null) {
       this.selectMonster(monsterId);
       this.bridge.requestAttack(monsterId);
+      return;
+    }
+
+    const dropId = this.lootAt(pointer.worldX, pointer.worldY);
+    if (dropId !== null) {
+      this.bridge.requestPickup(dropId);
       return;
     }
 

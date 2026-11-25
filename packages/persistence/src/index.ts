@@ -1,32 +1,48 @@
 export { createDatabase } from './client';
 export { pingDatabase } from './health';
-export type { CreateDatabaseOptions, Database, DatabaseHandle } from './client';
+export type { CreateDatabaseOptions, Database, DatabaseHandle, DbExecutor } from './client';
 export { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from './migrator';
 
 export {
   ACCOUNT_STATUSES,
+  EQUIPMENT_SLOT_IDS,
+  ITEM_CONTAINERS,
+  REALM_STATUSES,
   accounts,
   accountSessions,
+  assetCommands,
   CHARACTER_CLASS_IDS,
   characters,
   characterSessions,
+  currencyLedger,
   gameTickets,
-  REALM_STATUSES,
+  itemInstances,
   realms,
+  wallets,
+  worldDrops,
 } from './schema/index';
 export type {
   Account,
   AccountSession,
   AccountStatus,
+  AssetCommand,
   Character,
   CharacterClassId,
   CharacterSession,
+  CurrencyLedgerEntry,
+  EquipmentSlotId,
   GameTicket,
+  ItemContainer,
+  ItemInstance,
   NewAccount,
   NewCharacter,
+  NewItemInstance,
   NewRealm,
+  NewWorldDrop,
   Realm,
   RealmStatus,
+  Wallet,
+  WorldDrop,
 } from './schema/index';
 
 export {
@@ -40,13 +56,18 @@ export {
   findRealmById,
   findSessionByAccessHash,
   findSessionByRefreshHash,
+  findWallet,
   insertAccount,
   insertCharacter,
+  insertCharacterWithItems,
   insertGameTicket,
   insertSession,
   isUniqueViolation,
   listActiveRealms,
   listCharactersByAccount,
+  listEquippedItems,
+  listInventoryItems,
+  listOpenWorldDrops,
   refreshCharacterLeases,
   releaseCharacterLease,
   relocateCharactersFromMap,
@@ -66,6 +87,8 @@ export type {
   CreateCharacterInput,
   CreateGameTicketInput,
   CreateSessionInput,
+  OpenWorldDrop,
   RelocateCharactersInput,
   SessionTokenSet,
+  StarterItemInput,
 } from './repositories/index';

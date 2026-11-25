@@ -1,3 +1,7 @@
+import type { EquipmentSlot, InventorySnapshot } from '@web-legend/contracts';
+
+import type { LootView } from './net/worldClient';
+
 export {};
 
 declare global {
@@ -19,6 +23,13 @@ declare global {
       attackMonster: (monsterId: string) => boolean;
       castSkill: (skillId: string, targetId: string) => boolean;
       monsterScreenPoint: (monsterId: string) => { x: number; y: number } | null;
+      pickupDrop: (dropId: string) => boolean;
+      equipItem: (itemId: string) => boolean;
+      unequipSlot: (slot: EquipmentSlot) => boolean;
+      useItem: (itemId: string) => boolean;
+      lootDrops: () => LootView[];
+      lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
+      inventoryState: () => InventorySnapshot | null;
       /** Diagnostics for the E2E visibility measurement. */
       lastMoveIntentAt?: number;
       lastAckAt?: number;
@@ -26,6 +37,7 @@ declare global {
       lastMovingSnapshotAt?: number;
       lastAttackIntentAt?: number;
       lastCombatEventAt?: number;
+      lastAssetResultAt?: number;
     };
   }
 }
