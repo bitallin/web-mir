@@ -9,10 +9,10 @@
 ### 当前状态
 
 - **版本/阶段**：Alpha 0.2 进行中。S1 主城商店已完成并提交（`9e0ad74`）；
-  S2 任务 1 服务端法力回复已完成（本轮，待提交）；S2 剩余技能/外观待开始。
+  S2 任务 1 服务端法力回复已完成并提交（`f767fb3`）；S2 剩余技能/外观待开始。
 - **最近里程碑**：Alpha 0.1 关闭 8 项 P1（`fc9ad63`）；Alpha 0.2 S1 商店上线；
-  S1 独立审查修复 4 项；S2 法力回复上线。
-- **正在工作**：本轮文档治理与法力回复；提交后工作区应保持干净。
+  S1 独立审查修复 4 项（`db57b94`）；S2 法力回复上线；治理文档落地（`83f750e`）。
+- **正在工作**：无未提交代码；工作区干净。
 - **未完成/阻塞**：50 人 × 10 分钟容量回归未在最新代码上复跑；远端 CI 未执行；
   开发栈 84–87 仍运行 Alpha 0.1 服务端代码，需重启并发布新内容 Release 后商店
   与法力回复才在 8584 可见；阶段 7/8 的人工试玩确认仍待用户完成。
@@ -828,6 +828,12 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
   主题：`feat(alpha-01): close the eight P1 debts and add server-authoritative auto attack`
 - Alpha 0.2 切片 1 主提交：`9e0ad74`
   主题：`feat(alpha-02): add the town merchant and close the gold loop`
+- Alpha 0.2 S1 审查修复：`db57b94`
+  主题：`fix(alpha-02): close the town merchant review findings`
+- Alpha 0.2 S2 法力回复：`f767fb3`
+  主题：`feat(alpha-02): add server-authoritative mana regeneration`
+- 治理与交接文档：`83f750e`
+  主题：`docs: establish the project evolution and handover system`
 
 ## 11. 当前环境事实
 
