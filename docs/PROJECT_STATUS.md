@@ -514,7 +514,7 @@ Outbox + Game Server 幂等执行、内容草稿/校验/不可变 Release/按区
 - 阶段 4 主提交：`cb3617bc5a1396df89661f206a0b9e0562fbe23e`
 - 阶段 5 主提交：`c5cc9e001772b2fa808f16f2a130ea46c5d441cc`
 - 阶段 6 主提交：`029d2da`
-- 阶段 7 主提交：`待提交后回填`
+- 阶段 7 主提交：`23ee461c0d196217cf2b192e3893fb59db8a6bea`
   主题：`feat(phase-7): deliver admin console, outbox operations and content releases`
 
 ## 11. 当前环境事实
