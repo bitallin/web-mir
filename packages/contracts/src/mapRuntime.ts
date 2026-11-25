@@ -8,7 +8,7 @@ import { tilePointSchema } from './map';
  * are authored in Tiled and compiled by `@web-legend/map-runtime`; this schema
  * is the immutable runtime contract, not the editable source.
  */
-export const MAP_RUNTIME_SCHEMA_VERSION = 1 as const;
+export const MAP_RUNTIME_SCHEMA_VERSION = 2 as const;
 
 export const STARTER_TOWN_MAP_ID = 'starter_town';
 export const STARTER_WILDS_MAP_ID = 'starter_wilds';
@@ -80,6 +80,12 @@ export const mapRuntimeManifestSchema = z
     mapId: mapIdSchema,
     name: z.string().min(1).max(64),
     kind: z.enum(['town', 'wilds']),
+    /**
+     * Server-enforced player-combat rule for this map. The browser renders the
+     * badge from the same manifest, but only the server copy decides whether a
+     * player attack is legal (ADR-021).
+     */
+    pvpMode: z.enum(['none', 'open']),
     width: z.number().int().min(4).max(256),
     height: z.number().int().min(4).max(256),
     tileWidth: z.number().int().min(8).max(256),
@@ -169,6 +175,12 @@ export const mapRuntimeManifestSchema = z
   });
 
 export type MapRuntimeManifest = z.infer<typeof mapRuntimeManifestSchema>;
+
+export type MapPvpMode = MapRuntimeManifest['pvpMode'];
+
+export function isPvpEnabled(map: Pick<MapRuntimeManifest, 'pvpMode'>): boolean {
+  return map.pvpMode === 'open';
+}
 
 export function isMapPointInside(
   map: Pick<MapRuntimeManifest, 'width' | 'height'>,

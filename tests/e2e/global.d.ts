@@ -13,8 +13,11 @@ declare global {
       currentMapId: () => string;
       moveToTile: (tileX: number, tileY: number) => boolean;
       attackMonster: (monsterId: string) => boolean;
+      attackPlayer: (playerId: string) => boolean;
       castSkill: (skillId: string, targetId: string) => boolean;
       monsterScreenPoint: (monsterId: string) => { x: number; y: number } | null;
+      playerScreenPoint: (playerId: string) => { x: number; y: number } | null;
+      sendChat: (text: string) => boolean;
       pickupDrop: (dropId: string) => boolean;
       equipItem: (itemId: string) => boolean;
       unequipSlot: (slot: 'weapon' | 'armor') => boolean;

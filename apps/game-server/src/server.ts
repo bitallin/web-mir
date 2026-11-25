@@ -2,6 +2,7 @@ import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { healthResponseSchema, readinessResponseSchema } from '@web-legend/contracts';
 import { MAP_MANIFESTS } from '@web-legend/contracts/maps';
+import type { ChatFilter } from '@web-legend/game-domain';
 import { pingDatabase, type Database } from '@web-legend/persistence';
 import type { Logger } from 'pino';
 
@@ -20,6 +21,7 @@ export type WorldRoomTuning = {
   commandRateRefillPerSecond?: number;
   chatRateCapacity?: number;
   chatRateRefillPerSecond?: number;
+  chatFilter?: ChatFilter;
   checkpointIntervalMs?: number;
   interestCellSize?: number;
   interestRadiusCells?: number;

@@ -73,6 +73,8 @@ describe('Tiled map compilation', () => {
     const wilds = compiled.find((map) => map.mapId === 'starter_wilds');
     expect(town?.portals[0]?.targetMapId).toBe('starter_wilds');
     expect(wilds?.portals[0]?.targetMapId).toBe('starter_town');
+    expect(town?.pvpMode).toBe('none');
+    expect(wilds?.pvpMode).toBe('open');
     expect(town?.npcPoints).toHaveLength(2);
     expect(town?.monsterSpawns).toHaveLength(0);
     expect(wilds?.monsterSpawns).toHaveLength(6);

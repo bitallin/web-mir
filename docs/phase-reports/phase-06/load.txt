@@ -1,0 +1,5 @@
+$ pnpm --filter @web-legend/game-server load:world
+$ tsx scripts/worldLoad.ts
+load: 30 players, 10s, room world_map:starter_town, client ws://127.0.0.1:84/ws, metrics http://127.0.0.1:87
+joined 30/30 clients accepted=750 rejected=0
+room qzH66t3xA: players=30 tick p50=0.16ms p95=1.03ms p99=1.72ms max=2.27ms samples=233

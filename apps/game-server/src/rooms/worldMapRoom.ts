@@ -34,6 +34,7 @@ import {
   moveToCommandSchema,
   sessionTransferSchema,
   skillCastSchema,
+  systemNoticeSchema,
   tilePointSchema,
   worldJoinOptionsSchema,
   type AssetCommandKind,
@@ -51,6 +52,7 @@ import {
   type LevelUp,
   type MapPortal,
   type SessionTransfer,
+  type SystemNotice,
   type TilePoint,
 } from '@web-legend/contracts';
 import {
@@ -71,7 +73,13 @@ import {
   type LoadedAssets,
   type LootDropView,
 } from '@web-legend/game-application';
-import { CombatWorld, type CombatCommandResult, type CombatStats } from '@web-legend/game-domain';
+import {
+  CombatWorld,
+  defaultChatFilter,
+  type ChatFilter,
+  type CombatCommandResult,
+  type CombatStats,
+} from '@web-legend/game-domain';
 import {
   DEFAULT_INTEREST,
   InterestManager,
@@ -114,6 +122,8 @@ export type WorldMapRoomOptions = {
   commandRateRefillPerSecond?: number;
   chatRateCapacity?: number;
   chatRateRefillPerSecond?: number;
+  /** Replaces the built-in moderation rules; tests inject a narrow rule set. */
+  chatFilter?: ChatFilter;
   checkpointIntervalMs?: number;
   interestCellSize?: number;
   interestRadiusCells?: number;
@@ -166,6 +176,7 @@ type WorldAuthData = z.infer<typeof authDataSchema>;
 type SessionRecord = {
   client: Client;
   playerId: string;
+  displayName: string;
   lastSequence: number;
   recentAcks: Map<string, CommandAck>;
   rateBucket: TokenBucket;
@@ -275,6 +286,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       pathfinder: findPath,
       rng: options.combatRng ?? createCombatRng(),
       playerRespawnTile: respawnTile,
+      // The immutable compiled map decides safe zones; client intent can never
+      // change it (ADR-021).
+      pvpEnabled: this.map.runtime.manifest.pvpMode === 'open',
       ...(options.monsterRespawnMs === undefined
         ? {}
         : { monsterRespawnMs: options.monsterRespawnMs }),
@@ -478,6 +492,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const session: SessionRecord = {
       client,
       playerId: auth.characterId,
+      displayName: auth.displayName,
       lastSequence: -1,
       recentAcks: new Map(),
       rateBucket: createTokenBucket({
@@ -528,6 +543,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       if (session !== undefined) {
         this.sendProfile(session.client, session.playerId);
         this.sendAssetSnapshot(session.client, session);
+        this.broadcastSystemNotice(
+          'info',
+          `${auth.displayName} 来到了 ${this.map.runtime.manifest.name}`,
+        );
       }
     }, 50);
 
@@ -1250,9 +1269,27 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       if (event.entityType === 'monster') {
         this.metrics.recordMonsterKill();
         this.scheduleKillReward(event);
-      } else {
-        this.metrics.recordPlayerDeath();
+        continue;
       }
+
+      this.metrics.recordPlayerDeath();
+      const victimName = this.state.players.get(event.entityId)?.displayName ?? '一名玩家';
+      const killerId = event.killerId;
+      const killerName =
+        killerId === undefined
+          ? undefined
+          : (this.state.players.get(killerId)?.displayName ??
+            this.combat.getMonster(killerId)?.displayName);
+      if (killerId !== undefined && this.state.players.has(killerId)) {
+        this.metrics.recordPvpKill();
+      }
+      const reviveSeconds = Math.max(1, Math.ceil((event.reviveInMs ?? 3_000) / 1_000));
+      this.broadcastSystemNotice(
+        'warning',
+        killerName === undefined
+          ? `${victimName} 倒下了，${String(reviveSeconds)} 秒后复活`
+          : `${victimName} 被 ${killerName} 击败，${String(reviveSeconds)} 秒后复活`,
+      );
     }
   }
 
@@ -1313,21 +1350,48 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     const statePlayer = this.state.players.get(session.playerId);
-    const message: ChatMessage = {
-      messageId: randomUUID(),
-      playerId: session.playerId,
-      displayName: statePlayer?.displayName ?? '',
-      message: parsed.data.message.trim().slice(0, CHAT_MESSAGE_MAX_LENGTH),
-      channel: 'map',
-      serverTime: Date.now(),
-    };
-    if (message.displayName.length === 0) {
+    const displayName = statePlayer?.displayName ?? '';
+    if (displayName.length === 0) {
       this.sendRejection(client, {}, 'INVALID_SESSION');
       return;
     }
 
+    const filter = this.options.chatFilter ?? defaultChatFilter;
+    const filtered = filter(parsed.data.message);
+    if (!filtered.accepted) {
+      this.metrics.recordChatFiltered();
+      this.sendSystemNotice(client, 'warning', filtered.reason);
+      return;
+    }
+
+    const message: ChatMessage = {
+      messageId: randomUUID(),
+      playerId: session.playerId,
+      displayName,
+      message: filtered.text.slice(0, CHAT_MESSAGE_MAX_LENGTH),
+      channel: 'map',
+      serverTime: Date.now(),
+    };
     this.broadcast(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(message));
     this.metrics.recordChatMessage();
+  }
+
+  private broadcastSystemNotice(kind: SystemNotice['kind'], message: string): void {
+    const notice: SystemNotice = {
+      kind,
+      message: message.slice(0, 200),
+      serverTime: Date.now(),
+    };
+    this.broadcast(SERVER_MESSAGES.systemNotice, systemNoticeSchema.parse(notice));
+  }
+
+  private sendSystemNotice(client: Client, kind: SystemNotice['kind'], message: string): void {
+    const notice: SystemNotice = {
+      kind,
+      message: message.slice(0, 200),
+      serverTime: Date.now(),
+    };
+    client.send(SERVER_MESSAGES.systemNotice, systemNoticeSchema.parse(notice));
   }
 
   private async restoreLoot(): Promise<void> {
@@ -1477,6 +1541,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     session.assetSnapshot = outcome.snapshot;
     this.sendProgress(session, outcome.leveledUp);
     this.sendProfile(session.client, session.playerId);
+    if (outcome.leveledUp) {
+      this.broadcastSystemNotice(
+        'info',
+        `${session.displayName} 升到了 Lv.${String(outcome.snapshot.level)}`,
+      );
+    }
   }
 
   private mergedSnapshot(session: SessionRecord): InventorySnapshot {
@@ -1838,6 +1908,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     const player = this.simulation.getPlayer(session.playerId);
     const combatPlayer = this.combat.getPlayer(session.playerId);
+    const displayName = session.displayName;
     this.sessions.delete(sessionId);
     this.sessionByPlayer.delete(session.playerId);
 
@@ -1879,6 +1950,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           'failed to release character lease',
         );
       }
+    }
+
+    if (!session.transferring && this.sessions.size > 0) {
+      this.broadcastSystemNotice('info', `${displayName} 离开了地图`);
     }
 
     this.options.logger.info(

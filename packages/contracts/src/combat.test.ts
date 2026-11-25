@@ -124,6 +124,14 @@ describe('combat events', () => {
       },
       {
         ...base,
+        kind: 'death',
+        entityId: 'player-2',
+        entityType: 'player',
+        killerId: 'player-1',
+        reviveInMs: 3_000,
+      },
+      {
+        ...base,
         kind: 'spawn',
         entityId: 'wilds_slime_1',
         entityType: 'monster',
@@ -182,6 +190,8 @@ describe('combat profile and monster states', () => {
       defense: 8,
       attackIntervalMs: 900,
       attackRangeTiles: 1.4,
+      pvpEnabled: true,
+      reviveMs: 3_000,
       hp: 120,
       maxHp: 120,
       mp: 30,
@@ -201,6 +211,27 @@ describe('combat profile and monster states', () => {
       ],
     });
     expect(profile.skills).toHaveLength(1);
+    expect(profile.pvpEnabled).toBe(true);
+    expect(profile.reviveMs).toBe(3_000);
+  });
+
+  it('requires the server-decided pvp rule in a profile', () => {
+    expect(
+      combatProfileSchema.safeParse({
+        characterId: '0190f2b4-7c1e-7a3c-9f2e-1b2c3d4e5f60',
+        classId: 'warrior',
+        level: 1,
+        attack: 12,
+        defense: 8,
+        attackIntervalMs: 900,
+        attackRangeTiles: 1.4,
+        hp: 120,
+        maxHp: 120,
+        mp: 30,
+        maxMp: 30,
+        skills: [],
+      }).success,
+    ).toBe(false);
   });
 
   it('round-trips every monster state code', () => {

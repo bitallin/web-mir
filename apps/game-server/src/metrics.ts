@@ -17,11 +17,13 @@ export type RoomMetricsSnapshot = {
   rejectedCommands: number;
   rejectionsByCode: Record<string, number>;
   chatMessages: number;
+  chatFiltered: number;
   transfers: number;
   combatCommands: number;
   combatEvents: number;
   monsterKills: number;
   playerDeaths: number;
+  pvpKills: number;
   assetCommands: number;
   assetFailures: number;
   lootSpawned: number;
@@ -49,11 +51,13 @@ export class RoomMetrics {
   private acceptedCommands = 0;
   private rejectedCommands = 0;
   private chatMessages = 0;
+  private chatFiltered = 0;
   private transfers = 0;
   private combatCommands = 0;
   private combatEvents = 0;
   private monsterKills = 0;
   private playerDeaths = 0;
+  private pvpKills = 0;
   private assetCommands = 0;
   private assetFailures = 0;
   private lootSpawned = 0;
@@ -87,6 +91,10 @@ export class RoomMetrics {
     this.chatMessages += 1;
   }
 
+  recordChatFiltered(): void {
+    this.chatFiltered += 1;
+  }
+
   recordTransfer(): void {
     this.transfers += 1;
   }
@@ -105,6 +113,10 @@ export class RoomMetrics {
 
   recordPlayerDeath(): void {
     this.playerDeaths += 1;
+  }
+
+  recordPvpKill(): void {
+    this.pvpKills += 1;
   }
 
   recordAssetCommand(): void {
@@ -154,11 +166,13 @@ export class RoomMetrics {
       rejectedCommands: this.rejectedCommands,
       rejectionsByCode: Object.fromEntries(this.rejectionsByCode),
       chatMessages: this.chatMessages,
+      chatFiltered: this.chatFiltered,
       transfers: this.transfers,
       combatCommands: this.combatCommands,
       combatEvents: this.combatEvents,
       monsterKills: this.monsterKills,
       playerDeaths: this.playerDeaths,
+      pvpKills: this.pvpKills,
       assetCommands: this.assetCommands,
       assetFailures: this.assetFailures,
       lootSpawned: this.lootSpawned,
@@ -179,11 +193,13 @@ export type MetricsSnapshot = {
     acceptedCommands: number;
     rejectedCommands: number;
     chatMessages: number;
+    chatFiltered: number;
     transfers: number;
     combatCommands: number;
     combatEvents: number;
     monsterKills: number;
     playerDeaths: number;
+    pvpKills: number;
     assetCommands: number;
     assetFailures: number;
     lootSpawned: number;
@@ -200,11 +216,13 @@ export class MetricsRegistry {
   private acceptedCommands = 0;
   private rejectedCommands = 0;
   private chatMessages = 0;
+  private chatFiltered = 0;
   private transfers = 0;
   private combatCommands = 0;
   private combatEvents = 0;
   private monsterKills = 0;
   private playerDeaths = 0;
+  private pvpKills = 0;
   private assetCommands = 0;
   private assetFailures = 0;
   private lootSpawned = 0;
@@ -228,11 +246,13 @@ export class MetricsRegistry {
     this.acceptedCommands += snapshot.acceptedCommands;
     this.rejectedCommands += snapshot.rejectedCommands;
     this.chatMessages += snapshot.chatMessages;
+    this.chatFiltered += snapshot.chatFiltered;
     this.transfers += snapshot.transfers;
     this.combatCommands += snapshot.combatCommands;
     this.combatEvents += snapshot.combatEvents;
     this.monsterKills += snapshot.monsterKills;
     this.playerDeaths += snapshot.playerDeaths;
+    this.pvpKills += snapshot.pvpKills;
     this.assetCommands += snapshot.assetCommands;
     this.assetFailures += snapshot.assetFailures;
     this.lootSpawned += snapshot.lootSpawned;
@@ -250,11 +270,13 @@ export class MetricsRegistry {
     const activeAccepted = rooms.reduce((total, room) => total + room.acceptedCommands, 0);
     const activeRejected = rooms.reduce((total, room) => total + room.rejectedCommands, 0);
     const activeChat = rooms.reduce((total, room) => total + room.chatMessages, 0);
+    const activeChatFiltered = rooms.reduce((total, room) => total + room.chatFiltered, 0);
     const activeTransfers = rooms.reduce((total, room) => total + room.transfers, 0);
     const activeCombatCommands = rooms.reduce((total, room) => total + room.combatCommands, 0);
     const activeCombatEvents = rooms.reduce((total, room) => total + room.combatEvents, 0);
     const activeMonsterKills = rooms.reduce((total, room) => total + room.monsterKills, 0);
     const activePlayerDeaths = rooms.reduce((total, room) => total + room.playerDeaths, 0);
+    const activePvpKills = rooms.reduce((total, room) => total + room.pvpKills, 0);
     const activeAssetCommands = rooms.reduce((total, room) => total + room.assetCommands, 0);
     const activeAssetFailures = rooms.reduce((total, room) => total + room.assetFailures, 0);
     const activeLootSpawned = rooms.reduce((total, room) => total + room.lootSpawned, 0);
@@ -271,11 +293,13 @@ export class MetricsRegistry {
         acceptedCommands: this.acceptedCommands + activeAccepted,
         rejectedCommands: this.rejectedCommands + activeRejected,
         chatMessages: this.chatMessages + activeChat,
+        chatFiltered: this.chatFiltered + activeChatFiltered,
         transfers: this.transfers + activeTransfers,
         combatCommands: this.combatCommands + activeCombatCommands,
         combatEvents: this.combatEvents + activeCombatEvents,
         monsterKills: this.monsterKills + activeMonsterKills,
         playerDeaths: this.playerDeaths + activePlayerDeaths,
+        pvpKills: this.pvpKills + activePvpKills,
         assetCommands: this.assetCommands + activeAssetCommands,
         assetFailures: this.assetFailures + activeAssetFailures,
         lootSpawned: this.lootSpawned + activeLootSpawned,

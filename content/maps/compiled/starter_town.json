@@ -1,8 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "mapId": "starter_town",
   "name": "晨曦主城",
   "kind": "town",
+  "pvpMode": "none",
   "width": 40,
   "height": 30,
   "tileWidth": 32,
@@ -250,5 +251,5 @@
   ],
   "monsterSpawns": [],
   "assetManifestVersion": "phase3.1",
-  "checksum": "d39f5b74bb207d2f76997bf924fd0adbc8794c4426dab8d634e60929dc3bd13c"
+  "checksum": "6baf19748531f7f527eca380d4f2b55541f9ea9ef6a70d0bbc4c0b72c57ddad2"
 }

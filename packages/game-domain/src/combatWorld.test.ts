@@ -420,3 +420,134 @@ describe('CombatWorld equipment and vitals', () => {
     expect(world.getPlayer('player-1')?.mp).toBe(30);
   });
 });
+
+describe('CombatWorld player combat', () => {
+  // Away from the default slime spawn (5,5) so monster aggro cannot interfere
+  // with a duel.
+  function addDuelists(world: ReturnType<typeof createTestWorld>, targetHp = 120): void {
+    world.addPlayer(warrior(center({ x: 12, y: 12 })));
+    world.addPlayer({
+      id: 'player-2',
+      displayName: 'Bob',
+      classId: 'warrior',
+      level: 1,
+      hp: targetHp,
+      mp: 30,
+      ...center({ x: 13, y: 12 }),
+    });
+  }
+
+  it('rejects player attacks on a safe-zone map without changing hp', () => {
+    const world = createTestWorld({ pvpEnabled: false });
+    addDuelists(world);
+
+    const attack = world.basicAttack('player-1', 'player-2');
+    expect(attack.accepted).toBe(false);
+    expect(attack.rejection?.code).toBe('SAFE_ZONE');
+    const skill = world.castSkill('player-1', 'warrior_heavy_strike', 'player-2');
+    expect(skill.rejection?.code).toBe('SAFE_ZONE');
+    expect(world.getPlayer('player-2')?.hp).toBe(120);
+    expect(world.getPlayer('player-1')?.mp).toBe(30);
+  });
+
+  it('deals damage, kills another player and revives them at the respawn point', () => {
+    const world = createTestWorld({ pvpEnabled: true, playerRespawnMs: 500 });
+    addDuelists(world, 10);
+
+    const events: CombatEventPayload[] = [];
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const result = world.basicAttack('player-1', 'player-2');
+      expect(result.accepted).toBe(true);
+      events.push(...result.events);
+      const target = world.getPlayer('player-2');
+      if (target?.alive === false) {
+        break;
+      }
+      expect(target?.hp).toBeLessThanOrEqual(10);
+      advance(world, 900);
+    }
+
+    const death = events.find((event) => event.kind === 'death');
+    expect(death?.kind).toBe('death');
+    if (death?.kind !== 'death') {
+      return;
+    }
+    expect(death.entityId).toBe('player-2');
+    expect(death.entityType).toBe('player');
+    expect(death.killerId).toBe('player-1');
+    expect(death.reviveInMs).toBe(500);
+    expect(world.getPlayer('player-2')?.alive).toBe(false);
+
+    advance(world, 500);
+    const resurrected = world.getPlayer('player-2');
+    expect(resurrected?.alive).toBe(true);
+    expect(resurrected?.hp).toBe(resurrected?.maxHp);
+    const respawnPosition = center({ x: 1, y: 1 });
+    expect(resurrected?.x).toBe(respawnPosition.x);
+    expect(resurrected?.y).toBe(respawnPosition.y);
+  });
+
+  it('rejects self, dead, disconnected and out-of-range player targets', () => {
+    const world = createTestWorld({ pvpEnabled: true });
+    addDuelists(world, 10);
+
+    expect(world.basicAttack('player-1', 'player-1').rejection?.code).toBe('INVALID_TARGET');
+
+    world.setPlayerTargetable('player-2', false);
+    expect(world.basicAttack('player-1', 'player-2').rejection?.code).toBe('INVALID_TARGET');
+    world.setPlayerTargetable('player-2', true);
+
+    const farWorld = createTestWorld({ pvpEnabled: true });
+    farWorld.addPlayer(warrior(center({ x: 1, y: 1 })));
+    farWorld.addPlayer({
+      id: 'player-2',
+      displayName: 'Bob',
+      classId: 'warrior',
+      level: 1,
+      hp: 120,
+      mp: 30,
+      ...center({ x: 10, y: 10 }),
+    });
+    expect(farWorld.basicAttack('player-1', 'player-2').rejection?.code).toBe('OUT_OF_RANGE');
+
+    // Kill the adjacent target once, then a dead player can no longer be hit.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      world.basicAttack('player-1', 'player-2');
+      if (world.getPlayer('player-2')?.alive === false) {
+        break;
+      }
+      advance(world, 900);
+    }
+    expect(world.getPlayer('player-2')?.alive).toBe(false);
+    expect(world.basicAttack('player-1', 'player-2').rejection?.code).toBe('TARGET_DEAD');
+  });
+
+  it('applies a damage skill to another player and spends its mana', () => {
+    const world = createTestWorld({ pvpEnabled: true });
+    world.addPlayer(warrior(center({ x: 12, y: 12 })));
+    world.addPlayer({
+      id: 'player-2',
+      displayName: 'Bob',
+      classId: 'warrior',
+      level: 1,
+      hp: 120,
+      mp: 30,
+      ...center({ x: 13, y: 12 }),
+    });
+
+    const cast = world.castSkill('player-1', 'warrior_heavy_strike', 'player-2');
+    expect(cast.accepted).toBe(true);
+    expect(cast.events[0]?.kind).toBe('attack');
+    expect(world.getPlayer('player-1')?.mp).toBe(24);
+    const target = world.getPlayer('player-2');
+    expect(target?.hp).toBeLessThan(120);
+  });
+
+  it('reports the room pvp rule and revive time in the combat profile', () => {
+    const world = createTestWorld({ pvpEnabled: true, playerRespawnMs: 2_500 });
+    addDuelists(world);
+    const profile = world.getProfile('player-1');
+    expect(profile?.pvpEnabled).toBe(true);
+    expect(profile?.reviveMs).toBe(2_500);
+  });
+});

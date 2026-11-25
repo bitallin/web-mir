@@ -16,6 +16,7 @@ import {
   lootClaimedSchema,
   monsterStateKindFromCode,
   sessionTransferSchema,
+  systemNoticeSchema,
   worldRoomNameFor,
   type AssetResult,
   type CharacterProgress,
@@ -29,6 +30,7 @@ import {
   type LevelUp,
   type LootClaimed,
   type MonsterStateKind,
+  type SystemNotice,
   type TilePoint,
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
@@ -115,6 +117,7 @@ export type WorldClientCallbacks = {
   onProgress: (progress: CharacterProgress) => void;
   onLevelUp: (levelUp: LevelUp) => void;
   onLootClaimed: (claimed: LootClaimed) => void;
+  onSystemNotice: (notice: SystemNotice) => void;
 };
 
 export type WorldClientOptions = {
@@ -550,6 +553,15 @@ export class WorldClient {
         const parsed = lootClaimedSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onLootClaimed(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.systemNotice, (payload: unknown) => {
+        const parsed = systemNoticeSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onSystemNotice(parsed.data);
         }
       }),
     );

@@ -107,6 +107,8 @@ export type CombatProfileData = {
   defense: number;
   attackIntervalMs: number;
   attackRangeTiles: number;
+  pvpEnabled: boolean;
+  reviveMs: number;
   hp: number;
   maxHp: number;
   mp: number;
@@ -130,6 +132,8 @@ export type CombatWorldOptions = {
   pathfinder: Pathfinder;
   rng: Rng;
   playerRespawnTile: TilePoint;
+  /** Player-versus-player is allowed only on maps whose compiled rule is open. */
+  pvpEnabled?: boolean;
   /** Test override; defaults to each monster definition's respawn time. */
   monsterRespawnMs?: number;
   playerRespawnMs?: number;
@@ -228,6 +232,7 @@ export class CombatWorld {
   private readonly playerRespawnPosition: UnitPoint;
   private readonly monsterRespawnMs: number | undefined;
   private readonly playerRespawnMs: number;
+  private readonly pvpEnabled: boolean;
   private readonly skills: Readonly<Record<string, SkillDefinition>>;
   private readonly monstersById: Readonly<Record<string, MonsterDefinition>>;
   private now = 0;
@@ -240,6 +245,7 @@ export class CombatWorld {
     this.monstersById = options.monsters ?? MONSTER_CATALOG;
     this.monsterRespawnMs = options.monsterRespawnMs;
     this.playerRespawnMs = options.playerRespawnMs ?? DEFAULT_PLAYER_RESPAWN_MS;
+    this.pvpEnabled = options.pvpEnabled ?? false;
     this.playerRespawnPosition = tileCenter(options.playerRespawnTile);
 
     if (!this.isWalkable(options.playerRespawnTile)) {
@@ -435,6 +441,8 @@ export class CombatWorld {
       defense: player.defense,
       attackIntervalMs: player.stats.attackIntervalMs,
       attackRangeTiles: player.stats.attackRangeTiles,
+      pvpEnabled: this.pvpEnabled,
+      reviveMs: this.playerRespawnMs,
       hp: player.hp,
       maxHp: player.maxHp,
       mp: player.mp,
@@ -465,16 +473,53 @@ export class CombatWorld {
     }
 
     const monster = this.monsters.get(targetId);
-    if (monster === undefined) {
+    if (monster !== undefined) {
+      if (monster.state === 'dead') {
+        return reject('TARGET_DEAD');
+      }
+      if (this.now < player.nextBasicAttackAt) {
+        return reject('COOLDOWN', undefined, player.nextBasicAttackAt - this.now);
+      }
+      if (distanceInTiles(player, monster) > player.stats.attackRangeTiles) {
+        return reject('OUT_OF_RANGE');
+      }
+
+      player.nextBasicAttackAt = this.now + player.stats.attackIntervalMs;
+      const events: CombatEventPayload[] = [
+        {
+          kind: 'attack',
+          sourceId: player.id,
+          sourceType: 'player',
+          targetId: monster.id,
+          targetType: 'monster',
+        },
+      ];
+      this.resolveAttack(player, monster, BASIC_ATTACK_MODIFIER, events);
+      return { accepted: true, events };
+    }
+
+    const target = this.players.get(targetId);
+    if (target === undefined) {
       return reject('INVALID_TARGET');
     }
-    if (monster.state === 'dead') {
+    // Safe-zone rejection comes before cooldown/range so a town click always
+    // reports the map rule rather than a confusing cooldown error.
+    if (!this.pvpEnabled) {
+      return reject('SAFE_ZONE');
+    }
+    if (target.id === player.id) {
+      return reject('INVALID_TARGET', '不能攻击自己');
+    }
+    if (!target.alive) {
       return reject('TARGET_DEAD');
+    }
+    if (!target.targetable) {
+      return reject('INVALID_TARGET', '目标当前不可攻击');
     }
     if (this.now < player.nextBasicAttackAt) {
       return reject('COOLDOWN', undefined, player.nextBasicAttackAt - this.now);
     }
-    if (distanceInTiles(player, monster) > player.stats.attackRangeTiles) {
+    if (distanceInTiles(player, target) > player.stats.attackRangeTiles) {
       return reject('OUT_OF_RANGE');
     }
 
@@ -484,11 +529,11 @@ export class CombatWorld {
         kind: 'attack',
         sourceId: player.id,
         sourceType: 'player',
-        targetId: monster.id,
-        targetType: 'monster',
+        targetId: target.id,
+        targetType: 'player',
       },
     ];
-    this.resolveAttack(player, monster, BASIC_ATTACK_MODIFIER, events);
+    this.resolvePlayerAttack(player, target, BASIC_ATTACK_MODIFIER, events);
     return { accepted: true, events };
   }
 
@@ -546,14 +591,52 @@ export class CombatWorld {
       return { accepted: true, events };
     }
 
+    const modifier = {
+      multiplier: skill.effect.multiplier,
+      flatDamage: skill.effect.flatDamage,
+      canCrit: skill.effect.canCrit,
+    };
+
     const monster = this.monsters.get(targetId);
-    if (monster === undefined) {
+    if (monster !== undefined) {
+      if (monster.state === 'dead') {
+        return reject('TARGET_DEAD');
+      }
+      if (distanceInTiles(player, monster) > skill.rangeTiles) {
+        return reject('OUT_OF_RANGE');
+      }
+
+      player.mp -= skill.mpCost;
+      player.cooldowns.set(skill.id, this.now + skill.cooldownMs);
+      events.push({
+        kind: 'attack',
+        sourceId: player.id,
+        sourceType: 'player',
+        targetId: monster.id,
+        targetType: 'monster',
+        skillId: skill.id,
+      });
+      this.resolveAttack(player, monster, modifier, events);
+      return { accepted: true, events };
+    }
+
+    const target = this.players.get(targetId);
+    if (target === undefined) {
       return reject('INVALID_TARGET');
     }
-    if (monster.state === 'dead') {
+    if (!this.pvpEnabled) {
+      return reject('SAFE_ZONE');
+    }
+    if (target.id === player.id) {
+      return reject('INVALID_TARGET', '不能攻击自己');
+    }
+    if (!target.alive) {
       return reject('TARGET_DEAD');
     }
-    if (distanceInTiles(player, monster) > skill.rangeTiles) {
+    if (!target.targetable) {
+      return reject('INVALID_TARGET', '目标当前不可攻击');
+    }
+    if (distanceInTiles(player, target) > skill.rangeTiles) {
       return reject('OUT_OF_RANGE');
     }
 
@@ -563,20 +646,11 @@ export class CombatWorld {
       kind: 'attack',
       sourceId: player.id,
       sourceType: 'player',
-      targetId: monster.id,
-      targetType: 'monster',
+      targetId: target.id,
+      targetType: 'player',
       skillId: skill.id,
     });
-    this.resolveAttack(
-      player,
-      monster,
-      {
-        multiplier: skill.effect.multiplier,
-        flatDamage: skill.effect.flatDamage,
-        canCrit: skill.effect.canCrit,
-      },
-      events,
-    );
+    this.resolvePlayerAttack(player, target, modifier, events);
     return { accepted: true, events };
   }
 
@@ -868,6 +942,7 @@ export class CombatWorld {
         entityId: player.id,
         entityType: 'player',
         killerId: monster.id,
+        reviveInMs: this.playerRespawnMs,
       });
     }
   }
@@ -920,6 +995,56 @@ export class CombatWorld {
         entityId: monster.id,
         entityType: 'monster',
         killerId: player.id,
+      });
+    }
+  }
+
+  private resolvePlayerAttack(
+    attacker: PlayerRuntime,
+    target: PlayerRuntime,
+    modifier: AttackModifier,
+    events: CombatEventPayload[],
+  ): void {
+    const roll = rollAttack(
+      combatStatsAsOffense(attacker.stats),
+      { defense: target.stats.defense },
+      this.rng,
+      modifier,
+    );
+
+    if (!roll.hit) {
+      events.push({
+        kind: 'miss',
+        sourceId: attacker.id,
+        sourceType: 'player',
+        targetId: target.id,
+        targetType: 'player',
+      });
+      return;
+    }
+
+    target.hp = Math.max(0, target.hp - roll.damage);
+    events.push({
+      kind: 'hit',
+      sourceId: attacker.id,
+      sourceType: 'player',
+      targetId: target.id,
+      targetType: 'player',
+      damage: roll.damage,
+      critical: roll.critical,
+      targetHp: target.hp,
+      targetMaxHp: target.maxHp,
+    });
+
+    if (target.hp === 0) {
+      target.alive = false;
+      target.reviveAt = this.now + this.playerRespawnMs;
+      events.push({
+        kind: 'death',
+        entityId: target.id,
+        entityType: 'player',
+        killerId: attacker.id,
+        reviveInMs: this.playerRespawnMs,
       });
     }
   }

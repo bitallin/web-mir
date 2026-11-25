@@ -9,7 +9,12 @@ import {
   STARTER_WILDS_MAP,
   findMapManifest,
 } from './maps';
-import { mapIdFromRoomName, mapRuntimeManifestSchema, worldRoomNameFor } from './mapRuntime';
+import {
+  isPvpEnabled,
+  mapIdFromRoomName,
+  mapRuntimeManifestSchema,
+  worldRoomNameFor,
+} from './mapRuntime';
 import { chatSendSchema, sessionTransferSchema } from './realtime';
 
 describe('compiled maps', () => {
@@ -19,6 +24,13 @@ describe('compiled maps', () => {
     expect(findMapManifest('missing_map')).toBeUndefined();
     expect(STARTER_TOWN_MAP.portals[0]?.targetMapId).toBe(STARTER_WILDS_MAP.mapId);
     expect(STARTER_WILDS_MAP.portals[0]?.targetMapId).toBe(STARTER_TOWN_MAP.mapId);
+  });
+
+  it('compiles the town as a safe zone and the wilds as open pvp', () => {
+    expect(STARTER_TOWN_MAP.pvpMode).toBe('none');
+    expect(STARTER_WILDS_MAP.pvpMode).toBe('open');
+    expect(isPvpEnabled(STARTER_TOWN_MAP)).toBe(false);
+    expect(isPvpEnabled(STARTER_WILDS_MAP)).toBe(true);
   });
 
   it('rejects layer sizes that do not match the map', () => {
@@ -42,6 +54,11 @@ describe('compiled maps', () => {
 
   it('rejects a checksum with the wrong shape', () => {
     const broken = { ...STARTER_TOWN_MAP, checksum: 'not-a-digest' };
+    expect(mapRuntimeManifestSchema.safeParse(broken).success).toBe(false);
+  });
+
+  it('rejects an unknown pvp mode', () => {
+    const broken = { ...STARTER_TOWN_MAP, pvpMode: 'duel-everywhere' };
     expect(mapRuntimeManifestSchema.safeParse(broken).success).toBe(false);
   });
 });

@@ -9,9 +9,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { issueGameTicket } from '../api/client';
-import { mapNameFor } from '../game/mapCatalog';
+import { mapBundleFor, mapNameFor } from '../game/mapCatalog';
 import type { ConnectionStatus } from '../net/worldClient';
 import { useWorldSession } from '../session/useWorldSession';
+import { Minimap } from './Minimap';
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   connecting: '连接中',
@@ -54,6 +55,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const [chatDraft, setChatDraft] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
+  const [characterOpen, setCharacterOpen] = useState(false);
   const requestTicket = useCallback(async () => {
     const response = await issueGameTicket(character.id);
     return response.ticket;
@@ -69,6 +71,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     equip,
     unequip,
     consumeItem,
+    toggleSfx,
   } = useWorldSession(containerRef, {
     character,
     requestTicket,
@@ -87,10 +90,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const self = state.players.find((player) => player.playerId === state.selfId);
   const selfName = self?.displayName;
   const mapName = mapNameFor(state.mapId);
-  const target =
+  const targetMonster =
     state.selectedTargetId === null
       ? undefined
       : state.monsters.find((monster) => monster.monsterId === state.selectedTargetId);
+  const targetPlayer =
+    state.selectedTargetId === null
+      ? undefined
+      : state.players.find((player) => player.playerId === state.selectedTargetId);
   const profileSkills = state.combatProfile?.skills;
   const skills = useMemo(() => profileSkills ?? [], [profileSkills]);
   const isDead = self?.alive === false;
@@ -101,6 +108,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const exp = inventory?.exp ?? character.exp;
   const expToNextLevel = inventory?.expToNextLevel ?? 0;
   const gold = inventory?.gold ?? 0;
+  const mapBundle = useMemo(() => mapBundleFor(state.mapId), [state.mapId]);
+  const pvpEnabled = state.combatProfile?.pvpEnabled ?? mapBundle.manifest.pvpMode === 'open';
+  const reviveSeconds =
+    state.reviveAt === null ? null : Math.max(0, Math.ceil((state.reviveAt - now) / 1_000));
 
   const triggerSkill = useCallback(
     (skill: SkillView) => {
@@ -128,6 +139,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         setBagOpen((open) => !open);
         return;
       }
+      if (event.key.toLowerCase() === 'c') {
+        event.preventDefault();
+        setCharacterOpen((open) => !open);
+        return;
+      }
       const skill = skills.find((candidate) => candidate.hotkey === event.key);
       if (skill === undefined) {
         return;
@@ -140,6 +156,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       window.removeEventListener('keydown', handler);
     };
   }, [skills, triggerSkill]);
+
+  const attackEntity = useCallback(
+    (entityId: string) => {
+      selectTarget(entityId);
+      attack(entityId);
+    },
+    [attack, selectTarget],
+  );
 
   const submitChat = useCallback(() => {
     const draft = chatDraft;
@@ -161,13 +185,21 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <h1>Web Legend</h1>
           <p className="phase">
             {character.name} · {classDefinition.name} Lv.{level}
-            <span>阶段 5</span>
+            <span>阶段 6</span>
           </p>
           <p className="vitals" data-testid="vitals">
             HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
             <span>
               法力 {self?.mp ?? character.mp}/{self?.maxMp ?? character.maxMp}
             </span>
+          </p>
+          <p
+            className="pvp-badge"
+            data-testid="pvp-mode"
+            data-pvp={pvpEnabled ? 'open' : 'safe'}
+            data-map-id={state.mapId}
+          >
+            {pvpEnabled ? '野外 · 可自由 PK' : '主城安全区 · 禁止 PK'}
           </p>
           <div
             className="exp-row"
@@ -194,6 +226,27 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               }}
             >
               背包 B
+            </button>
+            <button
+              type="button"
+              className="bag-toggle"
+              data-testid="character-toggle"
+              aria-expanded={characterOpen}
+              onClick={() => {
+                setCharacterOpen((open) => !open);
+              }}
+            >
+              角色 C
+            </button>
+            <button
+              type="button"
+              className="bag-toggle"
+              data-testid="sfx-toggle"
+              data-muted={state.sfxMuted ? 'true' : 'false'}
+              aria-pressed={!state.sfxMuted}
+              onClick={toggleSfx}
+            >
+              音效 {state.sfxMuted ? '关' : '开'}
             </button>
           </div>
         </div>
@@ -232,6 +285,13 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       </header>
 
       <aside className="hud players-panel" aria-label="在线玩家">
+        <Minimap
+          mapId={state.mapId}
+          selfId={state.selfId}
+          players={state.players}
+          monsters={state.monsters}
+          loot={state.loot}
+        />
         <div className="panel-heading">
           <h2>附近玩家</h2>
           <span>
@@ -257,6 +317,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 data-connected={player.connected ? 'true' : 'false'}
                 data-moving={player.moving ? 'true' : 'false'}
                 data-alive={player.alive ? 'true' : 'false'}
+                data-hp={player.hp}
+                data-max-hp={player.maxHp}
               >
                 <span
                   className="swatch"
@@ -269,11 +331,24 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   {isSelf ? <em>你</em> : null}
                 </span>
                 <span className="player-coords">
-                  {tile.x},{tile.y}
+                  {player.hp}/{player.maxHp}
                 </span>
                 <span className={`player-state ${player.alive ? '' : 'offline'}`}>
                   {!player.alive ? '倒下' : player.connected ? '在线' : '断线'}
                 </span>
+                {!isSelf && player.alive ? (
+                  <button
+                    type="button"
+                    className="player-attack"
+                    data-testid="player-attack"
+                    data-player-id={player.playerId}
+                    onClick={() => {
+                      attackEntity(player.playerId);
+                    }}
+                  >
+                    攻击
+                  </button>
+                ) : null}
               </li>
             );
           })}
@@ -287,26 +362,79 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             <h2>当前目标</h2>
             <span data-testid="monster-count">附近怪物 {state.monsters.length}</span>
           </div>
-          {target === undefined ? (
-            <p className="target-empty">点击附近的怪物发起攻击</p>
-          ) : (
+          {targetMonster === undefined && targetPlayer === undefined ? (
+            <p className="target-empty">点击附近的怪物或其他玩家发起攻击</p>
+          ) : targetMonster !== undefined ? (
             <>
               <div className="target-heading">
-                <strong data-testid="target-name">{target.displayName}</strong>
-                <span>Lv.{target.level}</span>
-                <span data-testid="target-state">{MONSTER_STATE_LABELS[target.state] ?? ''}</span>
+                <strong data-testid="target-name">{targetMonster.displayName}</strong>
+                <span>Lv.{targetMonster.level}</span>
+                <span data-testid="target-kind" data-kind="monster">
+                  怪物
+                </span>
+                <span data-testid="target-state">
+                  {MONSTER_STATE_LABELS[targetMonster.state] ?? ''}
+                </span>
               </div>
               <div className="hp-track">
                 <span
                   className="hp-fill"
-                  style={{ width: `${String(hpPercent(target.hp, target.maxHp))}%` }}
+                  style={{ width: `${String(hpPercent(targetMonster.hp, targetMonster.maxHp))}%` }}
                 />
               </div>
-              <p className="target-hp" data-testid="target-hp">
-                {target.hp}/{target.maxHp}
-              </p>
+              <div className="target-footer">
+                <p className="target-hp" data-testid="target-hp">
+                  {targetMonster.hp}/{targetMonster.maxHp}
+                </p>
+                <button
+                  type="button"
+                  className="target-attack"
+                  data-testid="target-attack"
+                  onClick={() => {
+                    attackEntity(targetMonster.monsterId);
+                  }}
+                >
+                  攻击
+                </button>
+              </div>
             </>
-          )}
+          ) : targetPlayer !== undefined ? (
+            <>
+              <div className="target-heading">
+                <strong data-testid="target-name">{targetPlayer.displayName}</strong>
+                <span>Lv.{targetPlayer.level}</span>
+                <span data-testid="target-kind" data-kind="player">
+                  玩家
+                </span>
+                <span data-testid="target-state">
+                  {!targetPlayer.alive ? '倒下' : targetPlayer.connected ? '在线' : '断线'}
+                </span>
+              </div>
+              <div className="hp-track">
+                <span
+                  className="hp-fill"
+                  style={{ width: `${String(hpPercent(targetPlayer.hp, targetPlayer.maxHp))}%` }}
+                />
+              </div>
+              <div className="target-footer">
+                <p className="target-hp" data-testid="target-hp">
+                  {targetPlayer.hp}/{targetPlayer.maxHp}
+                </p>
+                <button
+                  type="button"
+                  className="target-attack"
+                  data-testid="target-attack"
+                  disabled={!pvpEnabled || !targetPlayer.alive}
+                  title={pvpEnabled ? '攻击玩家' : '安全区内禁止攻击玩家'}
+                  onClick={() => {
+                    attackEntity(targetPlayer.playerId);
+                  }}
+                >
+                  {pvpEnabled ? '攻击玩家' : '安全区'}
+                </button>
+              </div>
+            </>
+          ) : null}
         </section>
 
         <section className="monster-list-panel" aria-label="附近怪物">
@@ -425,6 +553,16 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <h2>地图频道</h2>
           <span>{mapName}</span>
         </div>
+        {state.systemMessages.length > 0 ? (
+          <ul className="system-log" data-testid="system-log">
+            {state.systemMessages.slice(-8).map((entry) => (
+              <li key={entry.id} data-testid="system-message" data-kind={entry.kind}>
+                <span className="system-tag">系统</span>
+                <span>{entry.message}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <ul data-testid="chat-log">
           {state.messages.length === 0 ? (
             <li className="empty">同地图的玩家都能看到这里的消息</li>
@@ -592,6 +730,85 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         </aside>
       ) : null}
 
+      {characterOpen ? (
+        <aside className="hud character-panel" data-testid="character-panel" aria-label="角色面板">
+          <div className="panel-heading">
+            <h2>角色面板</h2>
+            <button
+              type="button"
+              className="panel-close"
+              onClick={() => {
+                setCharacterOpen(false);
+              }}
+            >
+              关闭
+            </button>
+          </div>
+          <dl>
+            <div>
+              <dt>角色</dt>
+              <dd>
+                {character.name} · {classDefinition.name}
+              </dd>
+            </div>
+            <div>
+              <dt>等级</dt>
+              <dd data-testid="character-level">{level}</dd>
+            </div>
+            <div>
+              <dt>经验</dt>
+              <dd>
+                {exp}/{expToNextLevel}
+              </dd>
+            </div>
+            <div>
+              <dt>金币</dt>
+              <dd>{gold}</dd>
+            </div>
+            <div>
+              <dt>生命</dt>
+              <dd>
+                {self?.hp ?? inventory?.hp ?? 0}/{self?.maxHp ?? inventory?.maxHp ?? 0}
+              </dd>
+            </div>
+            <div>
+              <dt>法力</dt>
+              <dd>
+                {self?.mp ?? inventory?.mp ?? 0}/{self?.maxMp ?? inventory?.maxMp ?? 0}
+              </dd>
+            </div>
+            <div>
+              <dt>攻击 / 防御</dt>
+              <dd>
+                {inventory?.attack ?? state.combatProfile?.attack ?? 0} /{' '}
+                {inventory?.defense ?? state.combatProfile?.defense ?? 0}
+              </dd>
+            </div>
+            <div>
+              <dt>武器 / 护甲</dt>
+              <dd>
+                {equipment?.weapon?.name ?? '空'} / {equipment?.armor?.name ?? '空'}
+              </dd>
+            </div>
+            <div>
+              <dt>地图</dt>
+              <dd>
+                {mapName}（{pvpEnabled ? '可 PK' : '安全区'}）
+              </dd>
+            </div>
+            <div>
+              <dt>复活</dt>
+              <dd data-testid="revive-countdown">
+                {reviveSeconds === null ? '—' : `${String(reviveSeconds)} 秒`}
+              </dd>
+            </div>
+          </dl>
+          <p className="bag-hint">
+            移动、攻击与死亡复活都由服务端结算；安全区规则随地图编译产物固定。
+          </p>
+        </aside>
+      ) : null}
+
       {state.levelUpNotice !== null ? (
         <div className="level-up-banner" data-testid="level-up-banner" role="status">
           <strong>升级！</strong> Lv.{state.levelUpNotice.level} · 生命 {state.levelUpNotice.maxHp}{' '}
@@ -600,17 +817,53 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       ) : null}
 
       {isDead ? (
-        <div className="death-banner" data-testid="player-dead" role="status">
-          你已倒下，正在等待复活…
+        <div
+          className="death-banner"
+          data-testid="player-dead"
+          data-revive-in={reviveSeconds ?? ''}
+          role="status"
+        >
+          你已倒下
+          {reviveSeconds === null
+            ? '，正在等待复活…'
+            : `，${String(reviveSeconds)} 秒后在地图复活点复活`}
         </div>
       ) : null}
 
       <footer className="hud hud-bottom">
-        <p>点击怪物攻击 · 点击地面移动 · 技能由服务端结算</p>
+        <p>点击怪物或玩家攻击 · 点击地面移动 · 技能与 PK 由服务端结算</p>
         <p data-testid="command-count">指令 {state.commandCount}</p>
         <p>tick {state.serverTick}</p>
-        <p>协议 v1 · 服务端 20Hz 权威战斗</p>
+        <p>协议 v1 · 服务端 20Hz 权威战斗 · {pvpEnabled ? '野外 PK' : '安全区'}</p>
       </footer>
+
+      {state.status === 'connecting' ||
+      state.status === 'reconnecting' ||
+      state.status === 'failed' ? (
+        <div
+          className="connection-overlay"
+          data-testid="connection-overlay"
+          data-status={state.status}
+          role="status"
+        >
+          <div className="connection-overlay-card">
+            <p className="eyebrow">{state.status === 'failed' ? '连接中断' : '正在连接世界'}</p>
+            <strong>{state.detail}</strong>
+            {state.status === 'failed' ? (
+              <button
+                type="button"
+                className="rejoin"
+                data-testid="overlay-rejoin"
+                onClick={rejoin}
+              >
+                重新加入
+              </button>
+            ) : (
+              <span className="connection-spinner" aria-hidden="true" />
+            )}
+          </div>
+        </div>
+      ) : null}
 
       {state.notice !== null ? (
         <div

@@ -8,6 +8,7 @@ import type {
   InventorySnapshot,
   LevelUp,
   LootClaimed,
+  SystemNotice,
   TilePoint,
 } from '@web-legend/contracts';
 import type Phaser from 'phaser';
@@ -15,6 +16,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 import { createWorldGame } from '../game/createWorldGame';
 import { mapBundleFor } from '../game/mapCatalog';
+import { isSfxMuted, SfxPlayer } from '../game/sfx';
 import { WorldBridge } from '../game/worldBridge';
 import { loadRoomPreference } from '../lib/identity';
 import {
@@ -38,6 +40,13 @@ export type CombatLogEntry = {
   at: number;
 };
 
+export type SystemMessageEntry = {
+  id: string;
+  kind: SystemNotice['kind'];
+  message: string;
+  at: number;
+};
+
 export type SessionState = {
   status: ConnectionStatus;
   detail: string;
@@ -53,6 +62,7 @@ export type SessionState = {
   roomId: string | null;
   roomPlayerCount: number;
   messages: ChatMessage[];
+  systemMessages: SystemMessageEntry[];
   combatProfile: CombatProfile | null;
   combatLog: CombatLogEntry[];
   selectedTargetId: string | null;
@@ -60,6 +70,9 @@ export type SessionState = {
   inventory: InventorySnapshot | null;
   levelUpNotice: LevelUp | null;
   notice: SessionNotice | null;
+  /** Client clock deadline for the local player's automatic revival. */
+  reviveAt: number | null;
+  sfxMuted: boolean;
 };
 
 export type WorldSessionOptions = {
@@ -68,6 +81,7 @@ export type WorldSessionOptions = {
 };
 
 const MAX_CHAT_MESSAGES = 120;
+const MAX_SYSTEM_MESSAGES = 60;
 const MAX_COMBAT_LOG = 12;
 
 function initialState(character: CharacterView): SessionState {
@@ -86,6 +100,7 @@ function initialState(character: CharacterView): SessionState {
     roomId: null,
     roomPlayerCount: 0,
     messages: [],
+    systemMessages: [],
     combatProfile: null,
     combatLog: [],
     selectedTargetId: null,
@@ -93,6 +108,8 @@ function initialState(character: CharacterView): SessionState {
     inventory: null,
     levelUpNotice: null,
     notice: null,
+    reviveAt: null,
+    sfxMuted: isSfxMuted(),
   };
 }
 
@@ -184,7 +201,10 @@ function combatLogFor(
       return entry(`你恢复了 ${String(event.amount)} 点生命`, 'self');
     case 'death':
       if (event.entityId === characterId) {
-        return entry('你倒下了，3 秒后在地图出生点复活', 'system');
+        return entry(
+          `你倒下了，${String(Math.max(1, Math.ceil((event.reviveInMs ?? 3_000) / 1_000)))} 秒后在地图复活点复活`,
+          'system',
+        );
       }
       return entry(
         `${name(event.entityId)} 被击败`,
@@ -222,6 +242,8 @@ class WorldSession {
   private latestLoot: LootView[] = [];
   private inventory: InventorySnapshot | null = null;
   private levelBannerTimer: number | null = null;
+  private systemMessageSequence = 0;
+  private readonly sfx = new SfxPlayer();
 
   constructor(
     container: HTMLElement,
@@ -324,6 +346,7 @@ class WorldSession {
         },
         onCombatEvent: (event) => {
           this.bridge.pushCombatEvent(event);
+          this.playCombatSfx(event, characterId);
           if (import.meta.env.DEV) {
             const debug = window.__webLegendDebug;
             if (debug !== undefined) {
@@ -357,6 +380,14 @@ class WorldSession {
             if (logEntry !== null) {
               next = { ...next, combatLog: [...next.combatLog, logEntry].slice(-MAX_COMBAT_LOG) };
             }
+            if (event.kind === 'death' && event.entityId === characterId) {
+              next = {
+                ...next,
+                reviveAt: Date.now() + Math.max(0, event.reviveInMs ?? 3_000),
+              };
+            } else if (event.kind === 'respawn' && event.entityId === characterId) {
+              next = { ...next, reviveAt: null };
+            }
             return next;
           });
         },
@@ -389,6 +420,7 @@ class WorldSession {
           }));
         },
         onLevelUp: (levelUp) => {
+          this.sfx.play('levelup');
           if (this.levelBannerTimer !== null) {
             window.clearTimeout(this.levelBannerTimer);
           }
@@ -411,11 +443,29 @@ class WorldSession {
           }, 3_500);
         },
         onLootClaimed: (claimed) => {
+          this.sfx.play('loot');
           this.updateState((previous) => ({
             ...previous,
             combatLog: [...previous.combatLog, lootLogEntry(claimed, characterId)].slice(
               -MAX_COMBAT_LOG,
             ),
+          }));
+        },
+        onSystemNotice: (notice) => {
+          this.systemMessageSequence += 1;
+          const entry: SystemMessageEntry = {
+            id: `system-${String(notice.serverTime)}-${String(this.systemMessageSequence)}`,
+            kind: notice.kind,
+            message: notice.message,
+            at: Date.now(),
+          };
+          this.updateState((previous) => ({
+            ...previous,
+            systemMessages: [...previous.systemMessages, entry].slice(-MAX_SYSTEM_MESSAGES),
+            notice:
+              notice.kind === 'info'
+                ? previous.notice
+                : { kind: notice.kind, message: notice.message, at: Date.now() },
           }));
         },
       },
@@ -533,8 +583,16 @@ class WorldSession {
     }));
   }
 
+  toggleSfx(): boolean {
+    const muted = !this.sfx.isMuted;
+    this.sfx.setMuted(muted);
+    this.updateState((previous) => ({ ...previous, sfxMuted: muted }));
+    return muted;
+  }
+
   async dispose(): Promise<void> {
     this.removeDebugHooks();
+    this.sfx.dispose();
     if (this.levelBannerTimer !== null) {
       window.clearTimeout(this.levelBannerTimer);
       this.levelBannerTimer = null;
@@ -550,6 +608,42 @@ class WorldSession {
     game?.destroy(true);
   }
 
+  private playCombatSfx(event: CombatEvent, characterId: string): void {
+    switch (event.kind) {
+      case 'attack':
+        if (event.sourceId === characterId) {
+          this.sfx.play('attack');
+        }
+        break;
+      case 'hit':
+        if (event.targetId === characterId) {
+          this.sfx.play('hurt');
+        } else if (event.sourceId === characterId) {
+          this.sfx.play('hit');
+        }
+        break;
+      case 'heal':
+        if (event.targetId === characterId) {
+          this.sfx.play('heal');
+        }
+        break;
+      case 'death':
+        if (event.entityId === characterId) {
+          this.sfx.play('death');
+        } else if (event.killerId === characterId) {
+          this.sfx.play('kill');
+        }
+        break;
+      case 'respawn':
+        if (event.entityId === characterId) {
+          this.sfx.play('heal');
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
   private handleTransfer(mapId: string): void {
     this.updateState((previous) => ({
       ...previous,
@@ -560,12 +654,14 @@ class WorldSession {
       monsters: [],
       loot: [],
       messages: [],
+      systemMessages: [],
       roomPlayerCount: 0,
       combatProfile: null,
       combatLog: [],
       selectedTargetId: null,
       skillCooldowns: {},
       levelUpNotice: null,
+      reviveAt: null,
     }));
     this.switchMap(mapId);
     if (this.client !== null) {
@@ -598,8 +694,14 @@ class WorldSession {
         return true;
       },
       attackMonster: (monsterId) => this.attack(monsterId),
+      attackPlayer: (playerId) => {
+        this.selectTarget(playerId);
+        return this.attack(playerId);
+      },
       castSkill: (skillId, targetId) => this.castSkill(skillId, targetId),
       monsterScreenPoint: (monsterId) => this.bridge.monsterScreenPoint(monsterId),
+      playerScreenPoint: (playerId) => this.bridge.playerScreenPoint(playerId),
+      sendChat: (text) => this.sendChat(text),
       pickupDrop: (dropId) => this.pickup(dropId),
       equipItem: (itemId) => this.equip(itemId),
       unequipSlot: (slot) => this.unequip(slot),
@@ -630,6 +732,7 @@ export type WorldSessionControls = {
   equip: (itemId: string) => boolean;
   unequip: (slot: EquipmentSlot) => boolean;
   consumeItem: (itemId: string) => boolean;
+  toggleSfx: () => void;
 };
 
 /**
@@ -698,6 +801,9 @@ export function useWorldSession(
     (itemId: string) => sessionRef.current?.consumeItem(itemId) ?? false,
     [],
   );
+  const toggleSfx = useCallback(() => {
+    sessionRef.current?.toggleSfx();
+  }, []);
 
   return {
     state,
@@ -710,5 +816,6 @@ export function useWorldSession(
     equip,
     unequip,
     consumeItem,
+    toggleSfx,
   };
 }

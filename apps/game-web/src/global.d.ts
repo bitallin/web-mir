@@ -21,8 +21,11 @@ declare global {
       /** Test-only input hook: submits the same intent a ground click sends. */
       moveToTile: (tileX: number, tileY: number) => boolean;
       attackMonster: (monsterId: string) => boolean;
+      attackPlayer: (playerId: string) => boolean;
       castSkill: (skillId: string, targetId: string) => boolean;
       monsterScreenPoint: (monsterId: string) => { x: number; y: number } | null;
+      playerScreenPoint: (playerId: string) => { x: number; y: number } | null;
+      sendChat: (text: string) => boolean;
       pickupDrop: (dropId: string) => boolean;
       equipItem: (itemId: string) => boolean;
       unequipSlot: (slot: EquipmentSlot) => boolean;

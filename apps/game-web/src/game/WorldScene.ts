@@ -42,11 +42,16 @@ function tileCenterUnits(tile: TilePoint): UnitPoint {
   };
 }
 
+const PLAYER_HP_BAR_WIDTH = 40;
+const PLAYER_HP_BAR_HEIGHT = 4;
+const PLAYER_HP_BAR_OFFSET_Y = -44;
+
 class PlayerVisual {
   readonly container: Phaser.GameObjects.Container;
   readonly nameText: Phaser.GameObjects.Text;
   readonly sprite: Phaser.GameObjects.Sprite;
   readonly isSelf: boolean;
+  private readonly hpBar: Phaser.GameObjects.Graphics;
   current: ScreenPoint = { x: 0, y: 0 };
   target: ScreenPoint = { x: 0, y: 0 };
   private initialized = false;
@@ -54,6 +59,11 @@ class PlayerVisual {
   private facing = 2;
   private moving = false;
   private frameIndex = 0;
+  private displayName = '';
+  private level = 1;
+  private hp = 1;
+  private maxHp = 1;
+  private alive = true;
 
   constructor(
     scene: Phaser.Scene,
@@ -71,7 +81,7 @@ class PlayerVisual {
       .setTint(color);
 
     this.nameText = scene.add
-      .text(0, -50, displayName, {
+      .text(0, -58, displayName, {
         fontFamily: DISPLAY_FONT,
         fontSize: '13px',
         color: isSelf ? '#e5c15a' : '#e8e0cd',
@@ -80,17 +90,46 @@ class PlayerVisual {
       })
       .setOrigin(0.5, 1);
 
-    this.container = scene.add.container(0, 0, [this.sprite, this.nameText]);
+    this.hpBar = scene.add.graphics();
+
+    this.container = scene.add.container(0, 0, [this.sprite, this.nameText, this.hpBar]);
+    this.setDisplayName(displayName);
+    this.drawHpBar();
+  }
+
+  get isAlive(): boolean {
+    return this.alive;
+  }
+
+  applyView(player: PlayerView): void {
+    this.setDisplayName(player.displayName);
+    this.setLevel(player.level);
+    this.setVitals(player.hp, player.maxHp, player.alive);
+    this.container.setAlpha(player.connected && player.alive ? 1 : 0.4);
   }
 
   setDisplayName(displayName: string): void {
-    if (this.nameText.text !== displayName) {
-      this.nameText.setText(displayName);
+    if (this.displayName !== displayName) {
+      this.displayName = displayName;
+      this.redrawLabel();
     }
   }
 
-  setConnected(connected: boolean): void {
-    this.container.setAlpha(connected ? 1 : 0.4);
+  setLevel(level: number): void {
+    if (this.level !== level) {
+      this.level = level;
+      this.redrawLabel();
+    }
+  }
+
+  setVitals(hp: number, maxHp: number, alive: boolean): void {
+    if (hp === this.hp && maxHp === this.maxHp && alive === this.alive) {
+      return;
+    }
+    this.hp = hp;
+    this.maxHp = maxHp;
+    this.alive = alive;
+    this.drawHpBar();
   }
 
   setTarget(screen: ScreenPoint, immediate: boolean): void {
@@ -148,10 +187,12 @@ class PlayerVisual {
 
   playDeath(): void {
     this.container.setAlpha(0.28);
+    this.hpBar.setVisible(false);
   }
 
   playRespawn(): void {
     this.container.setAlpha(1);
+    this.hpBar.setVisible(true);
     this.container.scene.tweens.add({
       targets: this.container,
       alpha: { from: 0.2, to: 1 },
@@ -161,6 +202,35 @@ class PlayerVisual {
 
   destroy(): void {
     this.container.destroy(true);
+  }
+
+  private redrawLabel(): void {
+    this.nameText.setText(`Lv.${String(this.level)} ${this.displayName}`);
+  }
+
+  private drawHpBar(): void {
+    const ratio = this.maxHp <= 0 ? 0 : Math.max(0, Math.min(1, this.hp / this.maxHp));
+    const x = -PLAYER_HP_BAR_WIDTH / 2;
+    this.hpBar.clear();
+    this.hpBar.setVisible(this.alive);
+    this.hpBar.fillStyle(0x0b0d10, 0.8);
+    this.hpBar.fillRect(
+      x - 1,
+      PLAYER_HP_BAR_OFFSET_Y - 1,
+      PLAYER_HP_BAR_WIDTH + 2,
+      PLAYER_HP_BAR_HEIGHT + 2,
+    );
+    this.hpBar.fillStyle(0x3a2320, 1);
+    this.hpBar.fillRect(x, PLAYER_HP_BAR_OFFSET_Y, PLAYER_HP_BAR_WIDTH, PLAYER_HP_BAR_HEIGHT);
+    if (ratio > 0) {
+      this.hpBar.fillStyle(this.isSelf ? 0x7fa66a : 0xb8544a, 1);
+      this.hpBar.fillRect(
+        x,
+        PLAYER_HP_BAR_OFFSET_Y,
+        Math.max(1, Math.round(PLAYER_HP_BAR_WIDTH * ratio)),
+        PLAYER_HP_BAR_HEIGHT,
+      );
+    }
   }
 }
 
@@ -278,8 +348,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         );
         this.visuals.set(player.playerId, visual);
       }
-      visual.setDisplayName(player.displayName);
-      visual.setConnected(player.connected && player.alive);
+      visual.applyView(player);
       visual.setMotion(player.moving && player.alive, player.facing);
 
       if (isSelf) {
@@ -293,6 +362,9 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       if (!seen.has(playerId)) {
         visual.destroy();
         this.visuals.delete(playerId);
+        if (this.selectedTargetId === playerId) {
+          this.clearSelection();
+        }
       }
     }
 
@@ -356,6 +428,19 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
   monsterScreenPoint(monsterId: string): ScreenPoint | null {
     const visual = this.monsterVisuals.get(monsterId);
+    if (visual === undefined) {
+      return null;
+    }
+    const camera = this.cameras.main;
+    const canvas = this.game.canvas.getBoundingClientRect();
+    return {
+      x: visual.current.x - camera.scrollX + canvas.left,
+      y: visual.current.y - camera.scrollY + canvas.top,
+    };
+  }
+
+  playerScreenPoint(playerId: string): ScreenPoint | null {
+    const visual = this.visuals.get(playerId);
     if (visual === undefined) {
       return null;
     }
@@ -493,12 +578,12 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     });
   }
 
-  selectMonster(monsterId: string): void {
-    if (this.selectedTargetId === monsterId) {
+  selectEntity(entityId: string): void {
+    if (this.selectedTargetId === entityId) {
       return;
     }
-    this.selectedTargetId = monsterId;
-    this.bridge.notifyTarget(monsterId);
+    this.selectedTargetId = entityId;
+    this.bridge.notifyTarget(entityId);
   }
 
   private clearSelection(): void {
@@ -515,8 +600,10 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     if (this.selectedTargetId === null) {
       return;
     }
-    const visual = this.monsterVisuals.get(this.selectedTargetId);
-    if (visual === undefined || !visual.isAlive) {
+    const monster = this.monsterVisuals.get(this.selectedTargetId);
+    const player = this.visuals.get(this.selectedTargetId);
+    const visual = monster ?? player;
+    if (visual === undefined || ('isAlive' in visual && !visual.isAlive)) {
       return;
     }
     this.targetRing.lineStyle(2, 0xc9a227, 0.9);
@@ -564,6 +651,25 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       );
       if (distance < 30 && distance < bestDistance) {
         best = monsterId;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
+
+  private playerAt(worldX: number, worldY: number): string | null {
+    let best: string | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const [playerId, visual] of this.visuals) {
+      if (!visual.isAlive || playerId === this.selfId) {
+        continue;
+      }
+      const distance = Math.hypot(
+        worldX - visual.current.x,
+        (worldY - (visual.current.y - 24)) * 1.25,
+      );
+      if (distance < 26 && distance < bestDistance) {
+        best = playerId;
         bestDistance = distance;
       }
     }
@@ -867,8 +973,15 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     // in the HUD can always claim the drop without a precise click.
     const monsterId = this.monsterAt(pointer.worldX, pointer.worldY);
     if (monsterId !== null) {
-      this.selectMonster(monsterId);
+      this.selectEntity(monsterId);
       this.bridge.requestAttack(monsterId);
+      return;
+    }
+
+    const playerId = this.playerAt(pointer.worldX, pointer.worldY);
+    if (playerId !== null) {
+      this.selectEntity(playerId);
+      this.bridge.requestAttack(playerId);
       return;
     }
 

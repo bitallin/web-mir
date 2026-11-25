@@ -161,6 +161,8 @@ export const COMMAND_REJECTION_CODES = [
   'NOT_OWNER',
   'DROP_EXPIRED',
   'ALREADY_CLAIMED',
+  'SAFE_ZONE',
+  'CHAT_BLOCKED',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -190,6 +192,8 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   NOT_OWNER: '该掉落暂不属于你',
   DROP_EXPIRED: '掉落已经消失',
   ALREADY_CLAIMED: '掉落已被拾取',
+  SAFE_ZONE: '安全区内禁止攻击其他玩家',
+  CHAT_BLOCKED: '消息包含不允许的内容',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

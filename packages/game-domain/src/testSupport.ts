@@ -78,6 +78,7 @@ export type TestWorldOptions = {
   seed?: number | string;
   grid?: CombatGrid;
   playerRespawnTile?: TilePoint;
+  pvpEnabled?: boolean;
   monsterRespawnMs?: number;
   playerRespawnMs?: number;
   tuning?: Pick<Partial<CombatWorldOptions>, 'skills' | 'monsters'>;
@@ -90,6 +91,7 @@ export function createTestWorld(options: TestWorldOptions = {}): CombatWorld {
     pathfinder: bfsPath,
     rng: createSeededRng(options.seed ?? 'phase4-test'),
     playerRespawnTile: options.playerRespawnTile ?? { x: 1, y: 1 },
+    pvpEnabled: options.pvpEnabled ?? false,
     monsterRespawnMs: options.monsterRespawnMs ?? 500,
     playerRespawnMs: options.playerRespawnMs ?? 500,
     ...(options.tuning ?? {}),

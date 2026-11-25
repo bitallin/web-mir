@@ -118,6 +118,10 @@ export const combatProfileSchema = z
     defense: z.number().int().nonnegative(),
     attackIntervalMs: z.number().int().positive(),
     attackRangeTiles: z.number().positive(),
+    /** Server-enforced PvP rule for the room's map (ADR-021). */
+    pvpEnabled: z.boolean(),
+    /** Time from death to automatic revival at the map's respawn point. */
+    reviveMs: z.number().int().nonnegative(),
     hp: z.number().int().nonnegative(),
     maxHp: z.number().int().positive(),
     mp: z.number().int().nonnegative(),
@@ -190,6 +194,8 @@ const deathEventSchema = z
     entityId: z.string().min(1).max(64),
     entityType: combatEntityTypeSchema,
     killerId: z.string().min(1).max(64).optional(),
+    /** Present for player deaths: the client renders this revive countdown. */
+    reviveInMs: z.number().int().nonnegative().optional(),
   })
   .strict();
 

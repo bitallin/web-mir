@@ -270,6 +270,7 @@ async function main(): Promise<void> {
       // join; consume it so the SDK does not warn about an unhandled message.
       room.onMessage('combat.profile', () => undefined);
       room.onMessage('inventory.snapshot', () => undefined);
+      room.onMessage('system.notice', () => undefined);
     }
 
     const startedAt = Date.now();

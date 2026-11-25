@@ -1,0 +1,25 @@
+{
+  "service": "game-server",
+  "rooms": [],
+  "totals": {
+    "activeRooms": 0,
+    "roomsCreated": 2,
+    "acceptedCommands": 1500,
+    "rejectedCommands": 0,
+    "chatMessages": 0,
+    "chatFiltered": 0,
+    "transfers": 0,
+    "combatCommands": 0,
+    "combatEvents": 0,
+    "monsterKills": 0,
+    "playerDeaths": 0,
+    "pvpKills": 0,
+    "assetCommands": 0,
+    "assetFailures": 0,
+    "lootSpawned": 0,
+    "lootPickedUp": 0,
+    "goldGranted": 0,
+    "expGranted": 0
+  },
+  "timestamp": "2026-11-25T03:33:31.220Z"
+}

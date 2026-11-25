@@ -1362,3 +1362,251 @@ body {
     width: auto;
   }
 }
+
+/* Phase 6: PvP, minimap, character panel and connection states. */
+
+.pvp-badge {
+  display: inline-block;
+  margin: 8px 0 0;
+  padding: 2px 9px;
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.pvp-badge[data-pvp='open'] {
+  border-color: rgba(184, 84, 74, 0.55);
+  color: #e08c7f;
+}
+
+.minimap {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid #232a32;
+}
+
+.minimap-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.minimap-mode {
+  color: var(--gold);
+}
+
+.minimap-canvas {
+  display: block;
+  border: 1px solid #232a32;
+  background: #0d1116;
+  image-rendering: pixelated;
+}
+
+.minimap-legend {
+  display: flex;
+  gap: 10px;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.minimap-legend span::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 3px;
+  border-radius: 50%;
+  content: '';
+  vertical-align: middle;
+}
+
+.legend-self::before {
+  background: #e5c15a;
+}
+
+.legend-player::before {
+  background: #9fc4e0;
+}
+
+.legend-monster::before {
+  background: #b8544a;
+}
+
+.legend-loot::before {
+  background: #c9a227;
+}
+
+.players-panel li {
+  grid-template-columns: 10px minmax(0, 1fr) auto auto auto;
+}
+
+.player-attack,
+.target-attack {
+  padding: 2px 8px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.player-attack:hover,
+.target-attack:hover:not(:disabled) {
+  background: rgba(201, 162, 39, 0.12);
+}
+
+.target-attack:disabled {
+  border-color: #2b323a;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.target-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 16px 10px;
+}
+
+.target-footer .target-hp {
+  margin: 0;
+  padding: 0;
+}
+
+.system-log {
+  flex: none;
+  max-height: 92px;
+  margin: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid #232a32;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.system-log li {
+  display: flex;
+  gap: 8px;
+  padding: 3px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.system-log li[data-kind='warning'] {
+  color: var(--warn);
+}
+
+.system-log li[data-kind='error'] {
+  color: var(--bad);
+}
+
+.system-tag {
+  flex: none;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.character-panel {
+  left: 40px;
+  top: 220px;
+  width: 300px;
+  max-height: calc(100% - 380px);
+  display: flex;
+  flex-direction: column;
+  z-index: 3;
+  border: 1px solid #2b323a;
+  background: var(--ink-raised);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.character-panel dl {
+  margin: 0;
+  padding: 8px 14px;
+  overflow-y: auto;
+}
+
+.character-panel dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px dashed rgba(43, 50, 58, 0.65);
+  font-size: 12px;
+}
+
+.character-panel dt {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.character-panel dd {
+  margin: 0;
+  color: var(--parchment);
+  text-align: right;
+}
+
+.connection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 13, 0.6);
+  backdrop-filter: blur(2px);
+  pointer-events: auto;
+}
+
+.connection-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 34px;
+  border: 1px solid #2b323a;
+  background: rgba(16, 19, 23, 0.94);
+  color: var(--parchment);
+  font-size: 14px;
+}
+
+.connection-overlay-card .eyebrow {
+  margin: 0;
+}
+
+.connection-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(201, 162, 39, 0.25);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: connection-spin 0.9s linear infinite;
+}
+
+@keyframes connection-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 860px) {
+  .character-panel {
+    left: 20px;
+    right: 20px;
+    top: auto;
+    bottom: 300px;
+    width: auto;
+  }
+}

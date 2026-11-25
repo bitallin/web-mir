@@ -59,3 +59,6 @@ export type { LootEntry, LootRoll, LootTable, RolledLootItem } from './loot';
 
 export { MAX_CHARACTER_LEVEL, applyExperience, experienceForNextLevel } from './progression';
 export type { ExperienceResult } from './progression';
+
+export { createChatFilter, defaultChatFilter } from './social';
+export type { ChatFilter, ChatFilterOptions, ChatFilterResult } from './social';

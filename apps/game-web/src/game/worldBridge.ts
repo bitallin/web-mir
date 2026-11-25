@@ -15,8 +15,9 @@ export type WorldSceneHandle = {
   applyCombatEvent: (event: CombatEvent) => void;
   screenPointForTile: (tile: TilePoint) => ScreenPoint;
   monsterScreenPoint: (monsterId: string) => ScreenPoint | null;
+  playerScreenPoint: (playerId: string) => ScreenPoint | null;
   lootScreenPoint: (dropId: string) => ScreenPoint | null;
-  selectMonster: (monsterId: string) => void;
+  selectEntity: (entityId: string) => void;
   restart: () => void;
 };
 
@@ -95,12 +96,16 @@ export class WorldBridge {
     return this.scene?.monsterScreenPoint(monsterId) ?? null;
   }
 
+  playerScreenPoint(playerId: string): ScreenPoint | null {
+    return this.scene?.playerScreenPoint(playerId) ?? null;
+  }
+
   lootScreenPoint(dropId: string): ScreenPoint | null {
     return this.scene?.lootScreenPoint(dropId) ?? null;
   }
 
-  selectTarget(monsterId: string): void {
-    this.scene?.selectMonster(monsterId);
+  selectTarget(entityId: string): void {
+    this.scene?.selectEntity(entityId);
   }
 
   sceneGeneration(): number {

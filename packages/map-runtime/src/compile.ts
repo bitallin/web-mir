@@ -161,6 +161,10 @@ function compileSingle(source: MapSource, options: MapCompileOptions): MapRuntim
   if (kind !== 'town' && kind !== 'wilds') {
     throw new MapCompileError(source.name, 'map property "kind" must be "town" or "wilds"');
   }
+  // Town is the safe zone and wilds is open PvP for the MVP. The rule is
+  // compiled into the immutable manifest so the server never reads it from a
+  // client or a mutable runtime setting (ADR-021).
+  const pvpMode = kind === 'wilds' ? ('open' as const) : ('none' as const);
 
   const cellCount = map.width * map.height;
   const ground = requiredLayer<TiledTileLayer>(map, source.name, 'ground', 'tilelayer');
@@ -302,6 +306,7 @@ function compileSingle(source: MapSource, options: MapCompileOptions): MapRuntim
     mapId,
     name: mapName,
     kind,
+    pvpMode,
     width: map.width,
     height: map.height,
     tileWidth: map.tilewidth,

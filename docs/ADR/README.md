@@ -25,5 +25,6 @@
 | [ADR-018](ADR-018-phase3-map-runtime-aoi-transfer.md) | 阶段 3 地图运行时、AOI 与传送          | Accepted              |
 | [ADR-019](ADR-019-phase4-combat-domain.md)            | 阶段 4 战斗领域与怪物运行时            | Accepted              |
 | [ADR-020](ADR-020-phase5-asset-economy.md)            | 阶段 5 资产模型与事务化经济            | Accepted              |
+| [ADR-021](ADR-021-phase6-pvp-safe-zone-chat.md)       | 阶段 6 服务端 PvP、安全区与聊天治理    | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

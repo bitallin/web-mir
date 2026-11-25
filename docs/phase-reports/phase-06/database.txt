@@ -1,0 +1,19 @@
+          metric          | value 
+--------------------------+-------
+ active_leases            | 0
+ asset_commands           | 166
+ characters               | 1501
+ currency_ledger          | 75
+ item_instances_equipment | 30
+ item_instances_ground    | 101
+ item_instances_inventory | 1049
+ migrations               | 4
+ wallets                  | 72
+ world_drops              | 130
+(10 rows)
+
+ wallets_checked | balance_mismatch | missing_idempotency 
+-----------------+------------------+---------------------
+              72 |                0 |                   0
+(1 row)
+

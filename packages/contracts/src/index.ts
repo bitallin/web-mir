@@ -179,6 +179,7 @@ export {
   STARTER_WILDS_MAP_ID,
   isMapPointInside,
   isMapTileWalkable,
+  isPvpEnabled,
   mapIdFromRoomName,
   mapIdSchema,
   mapMonsterSpawnSchema,
@@ -191,6 +192,7 @@ export type {
   MapMonsterSpawn,
   MapNpcPoint,
   MapPortal,
+  MapPvpMode,
   MapRuntimeManifest,
   MapTileset,
 } from './mapRuntime';

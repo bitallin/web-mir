@@ -1,8 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "mapId": "starter_wilds",
   "name": "静语荒野",
   "kind": "wilds",
+  "pvpMode": "open",
   "width": 44,
   "height": 32,
   "tileWidth": 32,
@@ -294,5 +295,5 @@
     }
   ],
   "assetManifestVersion": "phase3.1",
-  "checksum": "675cfc7cb9a24548e333d76d5b74100587e93de5349f99abc4cc66db8bea0700"
+  "checksum": "f3a70b0df14a10b92bd0a404b06a732f7af8426b35f0269a62893b3fb77662e3"
 }

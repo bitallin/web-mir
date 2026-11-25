@@ -38,12 +38,24 @@ describe('RoomMetrics', () => {
     metrics.recordCombatEvents(3);
     metrics.recordMonsterKill();
     metrics.recordPlayerDeath();
+    metrics.recordPvpKill();
 
     const snapshot = metrics.snapshot();
     expect(snapshot.combatCommands).toBe(1);
     expect(snapshot.combatEvents).toBe(3);
     expect(snapshot.monsterKills).toBe(1);
     expect(snapshot.playerDeaths).toBe(1);
+    expect(snapshot.pvpKills).toBe(1);
+  });
+
+  it('counts accepted and filtered chat separately', () => {
+    const metrics = new RoomMetrics('room-1');
+    metrics.recordChatMessage();
+    metrics.recordChatFiltered();
+
+    const snapshot = metrics.snapshot();
+    expect(snapshot.chatMessages).toBe(1);
+    expect(snapshot.chatFiltered).toBe(1);
   });
 });
 
@@ -53,6 +65,8 @@ describe('MetricsRegistry', () => {
     const first = registry.register('room-1');
     first.recordAcceptedCommand();
     first.recordRejectedCommand('UNREACHABLE');
+    first.recordChatFiltered();
+    first.recordPvpKill();
     first.setPlayers(2);
 
     const active = registry.snapshot();
@@ -66,5 +80,7 @@ describe('MetricsRegistry', () => {
     expect(disposed.totals.roomsCreated).toBe(1);
     expect(disposed.totals.acceptedCommands).toBe(1);
     expect(disposed.totals.rejectedCommands).toBe(1);
+    expect(disposed.totals.chatFiltered).toBe(1);
+    expect(disposed.totals.pvpKills).toBe(1);
   });
 });
