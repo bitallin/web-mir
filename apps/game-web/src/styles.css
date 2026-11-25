@@ -292,18 +292,82 @@ body {
   margin: 0;
 }
 
-.notice {
+/* Toasts live in the top-right corner, clear of the combat panel and skill
+   bar, and remove themselves after four seconds (TD-CLI-02). */
+.notice-stack {
   position: absolute;
+  top: 24px;
   left: 50%;
-  bottom: 84px;
-  z-index: 2;
+  z-index: 5;
+  display: flex;
+  max-width: min(420px, 38vw);
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.notice {
   padding: 8px 16px;
   border: 1px solid var(--warn);
-  background: rgba(30, 23, 16, 0.9);
+  border-left-width: 3px;
+  background: rgba(30, 23, 16, 0.94);
   color: var(--parchment);
   font-size: 13px;
   pointer-events: none;
+  animation: notice-in 140ms ease-out;
+}
+
+.notice-error {
+  border-color: var(--bad);
+}
+
+.notice-info {
+  border-color: var(--gold-dim);
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.auto-attack-bar {
+  position: relative;
+  height: 18px;
+  margin: 0 16px 12px;
+  overflow: hidden;
+  border: 1px solid #2b323a;
+  background: rgba(11, 13, 16, 0.75);
+}
+
+.auto-attack-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, rgba(201, 162, 39, 0.15), rgba(201, 162, 39, 0.45));
+  transition: width 100ms linear;
+}
+
+.auto-attack-label {
+  position: relative;
+  display: block;
+  padding: 2px 8px;
+  color: var(--parchment);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+.target-attack.stopping {
+  border-color: var(--bad);
+  color: var(--parchment);
 }
 
 .vitals {
@@ -322,6 +386,7 @@ body {
 .chat-panel {
   left: 40px;
   bottom: 84px;
+  z-index: 2;
   width: 340px;
   max-height: 260px;
   display: flex;
@@ -335,6 +400,7 @@ body {
 .combat-panel {
   left: 50%;
   bottom: 84px;
+  z-index: 3;
   width: 500px;
   transform: translateX(-50%);
   display: flex;

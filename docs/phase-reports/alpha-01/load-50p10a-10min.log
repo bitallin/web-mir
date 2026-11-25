@@ -1,0 +1,3 @@
+scenario: players=50 attackers=10 duration=600s room=world_map:starter_wilds
+joined=50/50 accepted=69387 rejected=649 acceptRate=99.1% codes={"COOLDOWN":247,"TARGET_DEAD":399,"OUT_OF_RANGE":3} players=50 tick p50=1.98ms p95=10.25ms p99=16.08ms max=17.57ms assetTx p95=52.16ms wsOut=450978836B wsIn=8788593B patch=262581130B reconnectRate=0.00% kills=746 assetFailures=0
+evidence: /data/nlp/ligen/web-mir/docs/phase-reports/alpha-01/load-50p10a-10min.json

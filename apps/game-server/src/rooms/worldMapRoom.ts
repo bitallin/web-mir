@@ -19,9 +19,13 @@ import {
   characterProgressSchema,
   chatMessageSchema,
   chatSendSchema,
+  combatAutoAttackStartSchema,
+  combatAutoAttackStopSchema,
   combatBasicAttackSchema,
+  combatEngageSchema,
   combatEventSchema,
   combatProfileSchema,
+  combatTargetChangedSchema,
   commandAckSchema,
   commandRejectedSchema,
   sessionKickedSchema,
@@ -47,6 +51,8 @@ import {
   type CombatEvent,
   type CombatEventPayload,
   type CombatProfile,
+  type CombatTargetChangeReason,
+  type CombatTargetChanged,
   type CommandAck,
   type CommandRejected,
   type CommandRejectionCode,
@@ -64,8 +70,6 @@ import {
   MonsterState,
   PlayerState,
   WorldState,
-  type LootStateInstance,
-  type MonsterStateInstance,
   type PlayerStateInstance,
   type WorldStateInstance,
 } from '@web-legend/contracts/world-state';
@@ -114,7 +118,10 @@ import type { MetricsRegistry, RoomMetrics } from '../metrics';
 import { createCombatRng } from '../world/combatRng';
 import { BASE_ROOM_CONTENT, type ContentProvider, type RoomContent } from '../world/contentStore';
 import type { MapInstance } from '../world/mapRegistry';
-import { createTokenBucket, type TokenBucket } from '../world/rateLimiter';
+import { createTokenBucket } from '../world/rateLimiter';
+import { CommandGuard } from './commandGuard';
+import { SessionRegistry, type SessionRecord } from './sessionRegistry';
+import { StateViewPublisher } from './stateViewPublisher';
 
 export type WorldMapRoomOptions = {
   database: Database;
@@ -159,6 +166,10 @@ const RECENT_COMMAND_WINDOW = 32;
 const RECENT_CHAT_WINDOW = 32;
 const COLOR_COUNT = 6;
 const LOOT_EXPIRY_CHECK_TICKS = 20;
+/** Database-side loot cleanup; the in-memory view expires every second. */
+const LOOT_DB_PURGE_INTERVAL_MS = 30_000;
+/** Repath towards a moving auto-attack target at most this often. */
+const AUTO_ATTACK_REPATH_INTERVAL_MS = 350;
 const REWARD_RETRY_ATTEMPTS = 3;
 
 /**
@@ -188,31 +199,6 @@ const authDataSchema = z.object({
 });
 
 type WorldAuthData = z.infer<typeof authDataSchema>;
-
-type SessionRecord = {
-  client: Client;
-  playerId: string;
-  accountId: string;
-  displayName: string;
-  mutedUntil: number | null;
-  lastSequence: number;
-  recentAcks: Map<string, CommandAck>;
-  rateBucket: TokenBucket;
-  chatBucket: TokenBucket;
-  recentChatIds: Set<string>;
-  recentCombat: Map<string, CombatEvent[]>;
-  recentAssets: Map<string, AssetCommandKind>;
-  /** Last committed private asset state, merged with live vitals on send. */
-  assetSnapshot: InventorySnapshot;
-  hp: number;
-  mp: number;
-  transferring: boolean;
-  transferTargetMapId: string | null;
-  checkpointing: boolean;
-  lastCheckpointAt: number;
-  view: StateView;
-  visible: Set<string>;
-};
 
 function colorIndexFor(characterId: string): number {
   let hash = 0;
@@ -305,8 +291,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private patching = false;
   private assetQueue: Promise<void> = Promise.resolve();
   private checkpointIntervalMs = DEFAULT_CHECKPOINT_INTERVAL_MS;
-  private readonly sessions = new Map<string, SessionRecord>();
-  private readonly sessionByPlayer = new Map<string, string>();
+  private readonly registry = new SessionRegistry();
+  private guard!: CommandGuard;
+  private views!: StateViewPublisher;
   private readonly pendingAssets = new Map<string, LoadedAssets>();
 
   override onCreate(options: WorldMapRoomOptions): void {
@@ -319,6 +306,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       cellSize: options.interestCellSize ?? DEFAULT_INTEREST.cellSize,
       radiusCells: options.interestRadiusCells ?? DEFAULT_INTEREST.radiusCells,
     });
+    this.guard = new CommandGuard({
+      protocolVersion: PROTOCOL_VERSION,
+      windowSize: RECENT_COMMAND_WINDOW,
+      now: Date.now,
+    });
+    this.views = new StateViewPublisher(this.interest, this.state, this.registry);
 
     const respawnTile = this.map.runtime.manifest.spawnPoints[0];
     if (respawnTile === undefined) {
@@ -414,6 +407,15 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.combatBasicAttack, (client, message) => {
       this.handleBasicAttack(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.combatEngage, (client, message) => {
+      this.handleEngage(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.combatAutoAttackStart, (client, message) => {
+      this.handleAutoAttackStart(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.combatAutoAttackStop, (client, message) => {
+      this.handleAutoAttackStop(client, message);
+    });
     this.onMessage<unknown>(CLIENT_MESSAGES.skillCast, (client, message) => {
       this.handleSkillCast(client, message);
     });
@@ -436,6 +438,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.clock.setInterval(() => {
       void this.checkpointAll();
     }, this.checkpointIntervalMs);
+    this.clock.setInterval(() => {
+      void this.purgeExpiredDrops();
+    }, LOOT_DB_PURGE_INTERVAL_MS);
 
     options.adminHub?.register({
       roomId: this.roomId,
@@ -458,6 +463,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     // Unclaimed drops survive a room restart because the item instance and its
     // world drop row are committed before the client is told about them.
+    void this.purgeExpiredDrops();
     void this.restoreLoot();
   }
 
@@ -491,7 +497,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.instrumentClient(client);
 
     const auth = authDataSchema.parse(client.auth);
-    if (this.sessionByPlayer.has(auth.characterId)) {
+    if (this.registry.hasPlayer(auth.characterId)) {
       throw new ServerError(ErrorCode.AUTH_FAILED, '该角色正在另一台设备上游戏');
     }
 
@@ -584,6 +590,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       recentChatIds: new Set(),
       recentCombat: new Map(),
       recentAssets: new Map(),
+      recentAutoCommands: new Map(),
+      autoAttack: null,
       assetSnapshot: {
         ...snapshot,
         level: combatPlayer.level,
@@ -596,6 +604,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       },
       hp: combatPlayer.hp,
       mp: combatPlayer.mp,
+      terminated: null,
       transferring: false,
       transferTargetMapId: null,
       checkpointing: false,
@@ -603,17 +612,16 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       view,
       visible: new Set(),
     };
-    this.sessions.set(client.sessionId, session);
-    this.sessionByPlayer.set(auth.characterId, client.sessionId);
+    this.registry.add(session);
     client.view = view;
 
     const affected = this.interest.add(auth.characterId, spawn.tile);
-    this.refreshViews(affected);
+    this.views.refresh(affected);
     this.metrics.setPlayers(this.state.players.size);
     // Deferred so the profile is delivered after the join handshake; a message
     // sent inside onJoin can otherwise race the client's listener registration.
     this.clock.setTimeout(() => {
-      const session = this.sessions.get(client.sessionId);
+      const session = this.registry.get(client.sessionId);
       if (session !== undefined) {
         this.sendProfile(session.client, session.playerId);
         this.sendAssetSnapshot(session.client, session);
@@ -638,11 +646,42 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     );
   }
 
-  override onReconnect(client: Client): void {
-    const session = this.sessions.get(client.sessionId);
+  override async onReconnect(client: Client): Promise<void> {
+    const session = this.registry.get(client.sessionId);
     if (session === undefined) {
       return;
     }
+    // A moderator disconnect never grants the grace window, so a modified
+    // client cannot use its old reconnection token to restore the session.
+    if (session.terminated !== null) {
+      this.rejectReconnect(client, session.terminated, '该会话已被管理员断开');
+      return;
+    }
+
+    // Re-check the durable account state on every reconnection: an outbox
+    // command may have banned the account while this socket was in the grace
+    // window, and a client-supplied token must not bypass that (TD-SRV-04).
+    let account;
+    try {
+      account = await findAccountById(this.options.database, session.accountId);
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, characterId: session.playerId },
+        'failed to revalidate account on reconnect',
+      );
+      this.rejectReconnect(client, 'kicked', '身份校验服务暂不可用，请重新登录');
+      return;
+    }
+    if (account === undefined || account.status !== 'active') {
+      session.terminated = 'banned';
+      this.rejectReconnect(client, 'banned', '该账号已被封禁');
+      return;
+    }
+    session.mutedUntil =
+      account.mutedUntil !== null && account.mutedUntil.getTime() > Date.now()
+        ? account.mutedUntil.getTime()
+        : null;
+
     // The reconnected transport hands us a fresh Client; without reapplying
     // the wrappers its outbound bytes and inbound messages would be invisible.
     this.instrumentClient(client);
@@ -658,7 +697,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.setConnected(session.playerId, true);
     this.combat.setPlayerTargetable(session.playerId, true);
     this.clock.setTimeout(() => {
-      const current = this.sessions.get(client.sessionId);
+      const current = this.registry.get(client.sessionId);
       if (current !== undefined) {
         this.sendProfile(current.client, current.playerId);
         this.sendAssetSnapshot(current.client, current);
@@ -674,19 +713,37 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     );
   }
 
+  /** Refuses a reconnection whose durable identity is no longer admissible. */
+  private rejectReconnect(client: Client, kind: 'kicked' | 'banned', reason: string): void {
+    try {
+      client.send(
+        SERVER_MESSAGES.sessionKicked,
+        sessionKickedSchema.parse({ reason, kind, serverTime: Date.now() }),
+      );
+    } catch (error) {
+      this.options.logger.warn(
+        { err: error, roomId: this.roomId },
+        'failed to deliver reconnect rejection',
+      );
+    }
+    void client.leave(4000, reason);
+  }
+
   override async onLeave(client: Client, code?: number): Promise<void> {
     this.pendingAssets.delete(client.sessionId);
-    const session = this.sessions.get(client.sessionId);
+    const session = this.registry.get(client.sessionId);
     if (session === undefined) {
       return;
     }
 
-    if (code === CloseCode.CONSENTED || session.transferring) {
+    if (code === CloseCode.CONSENTED || session.transferring || session.terminated !== null) {
       await this.removeSession(client.sessionId);
       return;
     }
 
     this.metrics.recordWsDisconnect();
+    // Auto-attack never survives a disconnect; the client must re-engage.
+    session.autoAttack = null;
     this.setConnected(session.playerId, false);
     this.simulation.clearPath(session.playerId);
     // A dropped player must not be killed by monsters during the grace window.
@@ -697,6 +754,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         client,
         this.options.reconnectGraceSeconds ?? DEFAULT_RECONNECT_GRACE_SECONDS,
       );
+      // onReconnect may have rejected the durable identity while this promise
+      // was pending; a rejected session must not be revived by the grace path.
+      if (session.terminated !== null || this.registry.get(client.sessionId) !== session) {
+        return;
+      }
       this.setConnected(session.playerId, true);
       this.combat.setPlayerTargetable(session.playerId, true);
     } catch {
@@ -727,7 +789,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
   override async onDispose(): Promise<void> {
     this.options.adminHub?.unregister(this.roomId);
-    const sessionIds = [...this.sessions.keys()];
+    const sessionIds = [...this.registry.sessionIds()];
     await Promise.allSettled(sessionIds.map(async (sessionId) => this.removeSession(sessionId)));
     this.options.metrics.unregister(this.roomId);
     this.options.logger.info({ roomId: this.roomId }, 'world map room disposed');
@@ -841,7 +903,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private async refreshLeases(): Promise<void> {
-    const sessionIds = [...this.sessions.keys()];
+    const sessionIds = [...this.registry.sessionIds()];
     if (sessionIds.length === 0) {
       return;
     }
@@ -865,7 +927,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private async checkpointAll(): Promise<void> {
     const now = Date.now();
     await Promise.allSettled(
-      [...this.sessions.values()].map(async (session) => {
+      [...this.registry.all()].map(async (session) => {
         if (session.transferring || session.checkpointing) {
           return;
         }
@@ -882,6 +944,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         try {
           await saveCharacterCheckpoint(this.options.database, {
             characterId: session.playerId,
+            mapId: this.map.mapId,
             x: player.x,
             y: player.y,
             facing: player.facing,
@@ -913,6 +976,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     );
     const combatEvents = this.combat.step(stepMs, positions);
     this.applyCombatEvents(combatEvents);
+    this.updateAutoAttacks();
 
     this.syncPlayers();
     this.syncMonsters();
@@ -921,8 +985,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     for (const player of this.simulation.listPlayers()) {
-      const sessionId = this.sessionByPlayer.get(player.id);
-      const session = sessionId === undefined ? undefined : this.sessions.get(sessionId);
+      const sessionId = this.registry.sessionIdForPlayer(player.id);
+      const session = sessionId === undefined ? undefined : this.registry.get(sessionId);
       if (session === undefined || session.transferring) {
         continue;
       }
@@ -941,7 +1005,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     for (const player of this.simulation.listPlayers()) {
       const affected = this.interest.move(player.id, tileOfUnits(player));
       if (affected.length > 0) {
-        this.refreshViews(affected);
+        this.views.refresh(affected);
       }
     }
 
@@ -966,7 +1030,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           y: Math.floor(event.y / TILE_UNITS),
         });
         if (affected.length > 0) {
-          this.refreshViews(affected);
+          this.views.refresh(affected);
         }
       }
     }
@@ -978,9 +1042,66 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
     const wireEvents = this.toWireEvents(events);
     for (const event of wireEvents) {
-      this.broadcast(SERVER_MESSAGES.combatEvent, event);
+      this.broadcastCombatEvent(event);
     }
     this.metrics.recordCombatEvents(wireEvents.length);
+  }
+
+  /**
+   * Combat events are private to the entities involved and to viewers whose AOI
+   * actually contains one of them (TD-SRV-02). A full-room broadcast leaks
+   * unrelated fights and, worse, makes a remote heal look like the viewer's own.
+   * Public announcements (deaths, level-ups) use `broadcastSystemNotice`.
+   */
+  private broadcastCombatEvent(event: CombatEvent): void {
+    const recipients = new Map<string, Client>();
+    const add = (session: SessionRecord): void => {
+      recipients.set(session.client.sessionId, session.client);
+    };
+    const addViewersOf = (entityIds: readonly string[]): void => {
+      for (const session of this.registry.all()) {
+        if (entityIds.some((id) => session.visible.has(id))) {
+          add(session);
+        }
+      }
+    };
+
+    switch (event.kind) {
+      case 'respawn':
+        // The revive countdown and restored vitals belong to that player only.
+        for (const session of this.registry.all()) {
+          if (session.playerId === event.entityId) {
+            add(session);
+          }
+        }
+        break;
+      case 'heal': {
+        // Healing is a private exchange: only the caster and the healed player.
+        for (const session of this.registry.all()) {
+          if (session.playerId === event.sourceId || session.playerId === event.targetId) {
+            add(session);
+          }
+        }
+        break;
+      }
+      case 'spawn':
+        addViewersOf([event.entityId]);
+        break;
+      case 'death':
+        addViewersOf(
+          event.killerId === undefined ? [event.entityId] : [event.entityId, event.killerId],
+        );
+        break;
+      case 'attack':
+      case 'hit':
+      case 'miss':
+        addViewersOf([event.sourceId, event.targetId]);
+        break;
+    }
+
+    for (const client of recipients.values()) {
+      client.send(SERVER_MESSAGES.combatEvent, event);
+    }
   }
 
   private syncPlayers(): void {
@@ -1001,8 +1122,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       statePlayer.maxMp = combatPlayer.maxMp;
       statePlayer.alive = combatPlayer.alive;
 
-      const sessionId = this.sessionByPlayer.get(player.id);
-      const session = sessionId === undefined ? undefined : this.sessions.get(sessionId);
+      const sessionId = this.registry.sessionIdForPlayer(player.id);
+      const session = sessionId === undefined ? undefined : this.registry.get(sessionId);
       if (session !== undefined) {
         session.hp = combatPlayer.hp;
         session.mp = combatPlayer.mp;
@@ -1026,59 +1147,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
       const affected = this.interest.move(monster.id, tileOfUnits(monster));
       if (affected.length > 0) {
-        this.refreshViews(affected);
+        this.views.refresh(affected);
       }
     }
-  }
-
-  /**
-   * Applies AOI visibility to one player's Colyseus view. Only ids whose
-   * visibility actually changed are written, so a tick with no cell crossing
-   * produces no view operations.
-   */
-  private refreshViews(playerIds: readonly string[]): void {
-    for (const playerId of new Set(playerIds)) {
-      const sessionId = this.sessionByPlayer.get(playerId);
-      if (sessionId === undefined) {
-        continue;
-      }
-      const session = this.sessions.get(sessionId);
-      if (session === undefined) {
-        continue;
-      }
-
-      const desired = this.interest.visibleIdsFor(playerId);
-      for (const visibleId of desired) {
-        if (session.visible.has(visibleId)) {
-          continue;
-        }
-        const entity = this.stateEntity(visibleId);
-        if (entity !== undefined) {
-          session.view.add(entity);
-          session.visible.add(visibleId);
-        }
-      }
-      for (const visibleId of [...session.visible]) {
-        if (desired.has(visibleId)) {
-          continue;
-        }
-        const entity = this.stateEntity(visibleId);
-        if (entity !== undefined) {
-          session.view.remove(entity);
-        }
-        session.visible.delete(visibleId);
-      }
-    }
-  }
-
-  private stateEntity(
-    entityId: string,
-  ): PlayerStateInstance | MonsterStateInstance | LootStateInstance | undefined {
-    return (
-      this.state.players.get(entityId) ??
-      this.state.monsters.get(entityId) ??
-      this.state.loot.get(entityId)
-    );
   }
 
   private async beginTransfer(
@@ -1115,11 +1186,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     session.transferTargetMapId = portal.targetMapId;
     session.lastCheckpointAt = Date.now();
+    this.stopAutoAttack(session, 'transferred');
 
     // The target map is committed: remove the entity from this instance before
     // telling the browser to leave, so the character never exists twice.
     const affected = this.interest.remove(session.playerId);
-    this.refreshViews(affected);
+    this.views.refresh(affected);
     this.simulation.removePlayer(session.playerId);
     this.combat.removePlayer(session.playerId);
     this.state.players.delete(session.playerId);
@@ -1146,7 +1218,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private handleMove(client: Client, raw: unknown): void {
-    const session = this.sessions.get(client.sessionId);
+    const session = this.registry.get(client.sessionId);
     if (session === undefined) {
       this.sendRejection(client, {}, 'INVALID_SESSION');
       return;
@@ -1163,37 +1235,21 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     const command = parsed.data;
-    if (command.protocolVersion !== PROTOCOL_VERSION) {
+    const gate = this.guard.check(session, command, session.recentAcks.has(command.commandId));
+    if (gate.kind === 'reject') {
       this.sendRejection(
         client,
         { commandId: command.commandId, clientSequence: command.clientSequence },
-        'PROTOCOL_MISMATCH',
+        gate.code,
       );
       return;
     }
-
-    const cached = session.recentAcks.get(command.commandId);
-    if (cached !== undefined) {
-      const replay: CommandAck = { ...cached, deduplicated: true, serverTime: Date.now() };
-      client.send(SERVER_MESSAGES.commandAck, commandAckSchema.parse(replay));
-      return;
-    }
-
-    if (command.clientSequence <= session.lastSequence) {
-      this.sendRejection(
-        client,
-        { commandId: command.commandId, clientSequence: command.clientSequence },
-        'STALE_SEQUENCE',
-      );
-      return;
-    }
-
-    if (!session.rateBucket.take(Date.now())) {
-      this.sendRejection(
-        client,
-        { commandId: command.commandId, clientSequence: command.clientSequence },
-        'RATE_LIMITED',
-      );
+    if (gate.kind === 'duplicate') {
+      const cached = session.recentAcks.get(command.commandId);
+      if (cached !== undefined) {
+        const replay: CommandAck = { ...cached, deduplicated: true, serverTime: Date.now() };
+        client.send(SERVER_MESSAGES.commandAck, commandAckSchema.parse(replay));
+      }
       return;
     }
 
@@ -1236,6 +1292,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     this.simulation.setPath(player.id, path);
+    // A manual move is an explicit cancel: it must win over the approach path
+    // the auto-attack loop would otherwise re-apply on the next tick.
+    this.stopAutoAttack(session, 'stopped', false);
     session.lastSequence = command.clientSequence;
 
     const ack: CommandAck = {
@@ -1249,13 +1308,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       startY: player.y,
     };
 
-    session.recentAcks.set(command.commandId, ack);
-    if (session.recentAcks.size > RECENT_COMMAND_WINDOW) {
-      const oldest = session.recentAcks.keys().next();
-      if (!oldest.done) {
-        session.recentAcks.delete(oldest.value);
-      }
-    }
+    this.guard.remember(session.recentAcks, command.commandId, ack);
 
     client.send(SERVER_MESSAGES.commandAck, commandAckSchema.parse(ack));
     this.metrics.recordAcceptedCommand();
@@ -1285,6 +1338,333 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     );
   }
 
+  private handleEngage(client: Client, raw: unknown): void {
+    const parsed = combatEngageSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    this.beginAutoAttack(client, parsed.data, parsed.data.targetId);
+  }
+
+  private handleAutoAttackStart(client: Client, raw: unknown): void {
+    const parsed = combatAutoAttackStartSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const session = this.registry.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, {}, 'INVALID_SESSION');
+      return;
+    }
+    const targetId = parsed.data.targetId ?? session.autoAttack?.targetId;
+    if (targetId === undefined) {
+      this.sendRejection(
+        client,
+        { commandId: parsed.data.commandId, clientSequence: parsed.data.clientSequence },
+        'INVALID_TARGET',
+      );
+      return;
+    }
+    this.beginAutoAttack(client, parsed.data, targetId);
+  }
+
+  private handleAutoAttackStop(client: Client, raw: unknown): void {
+    const parsed = combatAutoAttackStopSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const session = this.acceptAutoAttackCommand(client, parsed.data);
+    if (session === null) {
+      return;
+    }
+    session.lastSequence = parsed.data.clientSequence;
+    this.rememberAutoCommand(session, parsed.data.commandId);
+    this.stopAutoAttack(session, 'stopped');
+    this.metrics.recordAcceptedCommand();
+  }
+
+  private beginAutoAttack(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+    targetId: string,
+  ): void {
+    const session = this.acceptAutoAttackCommand(client, command);
+    if (session === null) {
+      return;
+    }
+    const rejection = this.validateAutoAttackTarget(session, targetId);
+    if (rejection !== null) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        rejection,
+      );
+      return;
+    }
+
+    session.lastSequence = command.clientSequence;
+    this.rememberAutoCommand(session, command.commandId);
+    // Switching targets always restarts the approach; the tick decides whether
+    // the player is already in range and clears this path immediately.
+    this.simulation.clearPath(session.playerId);
+    session.autoAttack = {
+      targetId,
+      phase: 'engaged',
+      nextAttackAt: 0,
+      nextRepathAt: 0,
+    };
+    this.notifyTargetChanged(session, 'engaged');
+    this.metrics.recordAcceptedCommand();
+  }
+
+  /**
+   * Session/protocol/sequence/rate/idempotency gate shared by every auto-attack
+   * intent. A duplicate command id re-sends the current authoritative state
+   * instead of restarting an approach or double-counting a stop.
+   */
+  private acceptAutoAttackCommand(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+  ): SessionRecord | null {
+    const session = this.registry.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, {}, 'INVALID_SESSION');
+      return null;
+    }
+    const gate = this.guard.check(
+      session,
+      command,
+      session.recentAutoCommands.has(command.commandId),
+    );
+    if (gate.kind === 'reject') {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        gate.code,
+      );
+      return null;
+    }
+    if (gate.kind === 'duplicate') {
+      this.notifyTargetChanged(session, session.autoAttack === null ? 'stopped' : 'engaged');
+      return null;
+    }
+    return session;
+  }
+
+  private rememberAutoCommand(session: SessionRecord, commandId: string): void {
+    this.guard.remember(session.recentAutoCommands, commandId, true);
+  }
+
+  private validateAutoAttackTarget(
+    session: SessionRecord,
+    targetId: string,
+  ): CommandRejectionCode | null {
+    const player = this.combat.getPlayer(session.playerId);
+    if (player === undefined) {
+      return 'INVALID_SESSION';
+    }
+    if (!player.alive) {
+      return 'PLAYER_DEAD';
+    }
+    if (targetId === session.playerId) {
+      return 'INVALID_TARGET';
+    }
+    const monster = this.combat.getMonster(targetId);
+    if (monster !== undefined) {
+      if (monster.state === 'dead') {
+        return 'TARGET_DEAD';
+      }
+      return session.visible.has(targetId) ? null : 'INVALID_TARGET';
+    }
+    const target = this.combat.getPlayer(targetId);
+    if (target === undefined) {
+      return 'INVALID_TARGET';
+    }
+    if (!target.alive) {
+      return 'TARGET_DEAD';
+    }
+    if (this.map.runtime.manifest.pvpMode !== 'open') {
+      return 'SAFE_ZONE';
+    }
+    return session.visible.has(targetId) ? null : 'INVALID_TARGET';
+  }
+
+  /**
+   * Server-driven attack loop: approach the locked target, swing on the
+   * authoritative cooldown, and stop on death, loss of sight, safe zone or a
+   * manual move. Clients never send per-swing messages (TD-CLI-01).
+   */
+  private updateAutoAttacks(): void {
+    for (const session of this.registry.all()) {
+      const auto = session.autoAttack;
+      if (auto === null) {
+        continue;
+      }
+      if (session.transferring) {
+        this.stopAutoAttack(session, 'transferred');
+        continue;
+      }
+      const player = this.combat.getPlayer(session.playerId);
+      if (player === undefined) {
+        this.stopAutoAttack(session, 'target_gone');
+        continue;
+      }
+      if (!player.alive) {
+        this.stopAutoAttack(session, 'player_dead');
+        continue;
+      }
+
+      const monster = this.combat.getMonster(auto.targetId);
+      const targetPlayer = monster === undefined ? this.combat.getPlayer(auto.targetId) : undefined;
+      const target = monster ?? targetPlayer;
+      if (target === undefined) {
+        this.stopAutoAttack(session, 'target_gone');
+        continue;
+      }
+      if (monster !== undefined ? monster.state === 'dead' : targetPlayer?.alive !== true) {
+        this.stopAutoAttack(session, 'target_dead');
+        continue;
+      }
+      if (monster === undefined) {
+        if (this.map.runtime.manifest.pvpMode !== 'open') {
+          this.stopAutoAttack(session, 'safe_zone');
+          continue;
+        }
+        if (targetPlayer?.id === session.playerId) {
+          this.stopAutoAttack(session, 'target_gone');
+          continue;
+        }
+      }
+      if (!session.visible.has(auto.targetId)) {
+        this.stopAutoAttack(session, 'target_lost');
+        continue;
+      }
+
+      const profile = this.combat.getProfile(session.playerId);
+      if (profile === undefined) {
+        this.stopAutoAttack(session, 'target_gone');
+        continue;
+      }
+      const distance = Math.hypot(player.x - target.x, player.y - target.y) / TILE_UNITS;
+      if (distance > profile.attackRangeTiles) {
+        if (auto.phase !== 'approaching') {
+          auto.phase = 'approaching';
+          auto.nextAttackAt = 0;
+          this.notifyTargetChanged(session, 'approaching');
+        }
+        if (this.combat.elapsedMs >= auto.nextRepathAt) {
+          auto.nextRepathAt = this.combat.elapsedMs + AUTO_ATTACK_REPATH_INTERVAL_MS;
+          const path = findPath(this.map.runtime.grid, tileOfUnits(player), tileOfUnits(target));
+          if (path === null) {
+            this.stopAutoAttack(session, 'out_of_range');
+            continue;
+          }
+          this.simulation.setPath(session.playerId, path);
+        }
+        continue;
+      }
+
+      this.simulation.clearPath(session.playerId);
+      if (auto.phase !== 'attacking') {
+        auto.phase = 'attacking';
+        this.notifyTargetChanged(session, 'attacking');
+      }
+      if (this.combat.elapsedMs < auto.nextAttackAt) {
+        continue;
+      }
+
+      const result = this.combat.basicAttack(session.playerId, auto.targetId);
+      if (!result.accepted) {
+        switch (result.rejection?.code) {
+          case 'COOLDOWN':
+            auto.nextAttackAt =
+              this.combat.elapsedMs + Math.max(50, result.rejection.retryAfterMs ?? 50);
+            break;
+          case 'OUT_OF_RANGE':
+            auto.phase = 'approaching';
+            auto.nextRepathAt = 0;
+            auto.nextAttackAt = 0;
+            this.notifyTargetChanged(session, 'approaching');
+            break;
+          case 'TARGET_DEAD':
+            this.stopAutoAttack(session, 'target_dead');
+            break;
+          case 'SAFE_ZONE':
+            this.stopAutoAttack(session, 'safe_zone');
+            break;
+          case 'PLAYER_DEAD':
+            this.stopAutoAttack(session, 'player_dead');
+            break;
+          default:
+            this.stopAutoAttack(session, 'target_gone');
+            break;
+        }
+        continue;
+      }
+
+      auto.nextAttackAt = this.combat.elapsedMs + profile.attackIntervalMs;
+      const wireEvents = this.toWireEvents(result.events);
+      for (const event of wireEvents) {
+        this.broadcastCombatEvent(event);
+      }
+      this.recordCombatOutcomes(result.events);
+      this.metrics.recordCombatCommand();
+      this.metrics.recordCombatEvents(wireEvents.length);
+      this.notifyTargetChanged(session, 'attacking');
+    }
+  }
+
+  private stopAutoAttack(
+    session: SessionRecord,
+    reason: CombatTargetChangeReason,
+    clearPath = true,
+  ): void {
+    if (session.autoAttack === null) {
+      return;
+    }
+    session.autoAttack = null;
+    if (clearPath) {
+      this.simulation.clearPath(session.playerId);
+    }
+    this.notifyTargetChanged(session, reason, null);
+  }
+
+  private notifyTargetChanged(
+    session: SessionRecord,
+    reason: CombatTargetChangeReason,
+    targetId: string | null = session.autoAttack?.targetId ?? null,
+  ): void {
+    const profile = this.combat.getProfile(session.playerId);
+    if (profile === undefined) {
+      return;
+    }
+    const auto = session.autoAttack;
+    const nextAttackAt =
+      auto === null ? 0 : Date.now() + Math.max(0, auto.nextAttackAt - this.combat.elapsedMs);
+    const message: CombatTargetChanged = {
+      targetId,
+      autoAttack: auto !== null,
+      reason,
+      attackIntervalMs: profile.attackIntervalMs,
+      nextAttackAt,
+      serverTime: Date.now(),
+    };
+    try {
+      session.client.send(
+        SERVER_MESSAGES.combatTargetChanged,
+        combatTargetChangedSchema.parse(message),
+      );
+    } catch (error) {
+      this.options.logger.warn(
+        { err: error, roomId: this.roomId, characterId: session.playerId },
+        'failed to deliver auto-attack state',
+      );
+    }
+  }
+
   /**
    * Shared combat command pipeline: session/protocol validation, idempotent
    * replay, sequence and rate limits, then the authoritative domain call. A
@@ -1295,50 +1675,24 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     command: { commandId: string; clientSequence: number; protocolVersion: number },
     execute: (playerId: string) => CombatCommandResult,
   ): void {
-    const session = this.sessions.get(client.sessionId);
+    const session = this.registry.get(client.sessionId);
     if (session === undefined) {
       this.sendRejection(client, {}, 'INVALID_SESSION');
       return;
     }
-    if (session.transferring) {
+    const gate = this.guard.check(session, command, session.recentCombat.has(command.commandId));
+    if (gate.kind === 'reject') {
       this.sendRejection(
         client,
         { commandId: command.commandId, clientSequence: command.clientSequence },
-        'INVALID_SESSION',
+        gate.code,
       );
       return;
     }
-    if (command.protocolVersion !== PROTOCOL_VERSION) {
-      this.sendRejection(
-        client,
-        { commandId: command.commandId, clientSequence: command.clientSequence },
-        'PROTOCOL_MISMATCH',
-      );
-      return;
-    }
-
-    const cached = session.recentCombat.get(command.commandId);
-    if (cached !== undefined) {
-      for (const event of cached) {
+    if (gate.kind === 'duplicate') {
+      for (const event of session.recentCombat.get(command.commandId) ?? []) {
         client.send(SERVER_MESSAGES.combatEvent, event);
       }
-      return;
-    }
-
-    if (command.clientSequence <= session.lastSequence) {
-      this.sendRejection(
-        client,
-        { commandId: command.commandId, clientSequence: command.clientSequence },
-        'STALE_SEQUENCE',
-      );
-      return;
-    }
-    if (!session.rateBucket.take(Date.now())) {
-      this.sendRejection(
-        client,
-        { commandId: command.commandId, clientSequence: command.clientSequence },
-        'RATE_LIMITED',
-      );
       return;
     }
 
@@ -1361,15 +1715,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     session.lastSequence = command.clientSequence;
     const wireEvents = this.toWireEvents(result.events);
-    session.recentCombat.set(command.commandId, wireEvents);
-    if (session.recentCombat.size > RECENT_COMMAND_WINDOW) {
-      const oldest = session.recentCombat.keys().next();
-      if (!oldest.done) {
-        session.recentCombat.delete(oldest.value);
-      }
-    }
+    this.guard.remember(session.recentCombat, command.commandId, wireEvents);
     for (const event of wireEvents) {
-      this.broadcast(SERVER_MESSAGES.combatEvent, event);
+      this.broadcastCombatEvent(event);
     }
     this.recordCombatOutcomes(result.events);
     this.metrics.recordCombatCommand();
@@ -1429,7 +1777,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private handleChat(client: Client, raw: unknown): void {
-    const session = this.sessions.get(client.sessionId);
+    const session = this.registry.get(client.sessionId);
     if (session === undefined) {
       this.sendRejection(client, {}, 'INVALID_SESSION');
       return;
@@ -1552,7 +1900,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         return 1;
       }
       case 'ban': {
-        const matching = [...this.sessions.values()].filter(
+        const matching = [...this.registry.all()].filter(
           (session) => session.accountId === command.accountId,
         );
         for (const session of matching) {
@@ -1561,7 +1909,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         return matching.length;
       }
       case 'mute': {
-        const matching = [...this.sessions.values()].filter(
+        const matching = [...this.registry.all()].filter(
           (session) => session.accountId === command.accountId,
         );
         const until = new Date(command.mutedUntil).getTime();
@@ -1575,11 +1923,16 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private findSessionByPlayerId(playerId: string): SessionRecord | undefined {
-    const sessionId = this.sessionByPlayer.get(playerId);
-    return sessionId === undefined ? undefined : this.sessions.get(sessionId);
+    return this.registry.findByPlayerId(playerId);
   }
 
   private kickSession(session: SessionRecord, kind: 'kicked' | 'banned', reason: string): void {
+    // Set before closing: onLeave must remove the session outright instead of
+    // offering the ordinary 15-second reconnection window.
+    session.terminated = kind;
+    session.autoAttack = null;
+    this.simulation.clearPath(session.playerId);
+    this.combat.setPlayerTargetable(session.playerId, false);
     try {
       session.client.send(
         SERVER_MESSAGES.sessionKicked,
@@ -1598,9 +1951,44 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     void session.client.leave(4000, reason);
   }
 
+  private async purgeExpiredDrops(): Promise<void> {
+    try {
+      const result = await this.assets.purgeExpiredDrops({ mapId: this.map.mapId });
+      if (result.removedUnclaimed > 0 || result.archivedClaimed > 0) {
+        this.options.logger.info(
+          {
+            roomId: this.roomId,
+            mapId: this.map.mapId,
+            removedUnclaimed: result.removedUnclaimed,
+            archivedClaimed: result.archivedClaimed,
+          },
+          'purged expired world drops',
+        );
+      }
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, mapId: this.map.mapId },
+        'failed to purge expired world drops',
+      );
+    }
+  }
+
   private async restoreLoot(): Promise<void> {
     try {
-      const drops = await this.assets.loadOpenDrops(this.map.mapId);
+      const unknownTemplates = new Set<string>();
+      const drops = await this.assets.loadOpenDrops(this.map.mapId, (templateId) => {
+        unknownTemplates.add(templateId);
+      });
+      if (unknownTemplates.size > 0) {
+        this.options.logger.warn(
+          {
+            roomId: this.roomId,
+            mapId: this.map.mapId,
+            templates: [...unknownTemplates],
+          },
+          'skipped open drops whose item template is missing from this content version',
+        );
+      }
       for (const drop of drops) {
         this.addLootState(drop);
       }
@@ -1636,7 +2024,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     const affected = this.interest.add(drop.dropId, tileOfUnits({ x: drop.x, y: drop.y }));
     if (affected.length > 0) {
-      this.refreshViews(affected);
+      this.views.refresh(affected);
     }
   }
 
@@ -1647,7 +2035,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const affected = this.interest.remove(dropId);
     this.state.loot.delete(dropId);
     if (affected.length > 0) {
-      this.refreshViews(affected);
+      this.views.refresh(affected);
     }
   }
 
@@ -1742,8 +2130,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       refill: outcome.leveledUp,
     });
 
-    const sessionId = this.sessionByPlayer.get(characterId);
-    const session = sessionId === undefined ? undefined : this.sessions.get(sessionId);
+    const sessionId = this.registry.sessionIdForPlayer(characterId);
+    const session = sessionId === undefined ? undefined : this.registry.get(sessionId);
     if (session === undefined) {
       return;
     }
@@ -1976,29 +2364,18 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     afterCommit: (session: SessionRecord, outcome: T) => void,
   ): Promise<void> {
     const meta = { commandId: command.commandId, clientSequence: command.clientSequence };
-    const session = this.sessions.get(client.sessionId);
+    const session = this.registry.get(client.sessionId);
     if (session === undefined) {
       this.sendRejection(client, meta, 'INVALID_SESSION');
       return;
     }
-    if (session.transferring) {
-      this.sendRejection(client, meta, 'INVALID_SESSION');
+    const gate = this.guard.check(session, command, session.recentAssets.has(command.commandId));
+    if (gate.kind === 'reject') {
+      this.sendRejection(client, meta, gate.code);
       return;
     }
-    if (command.protocolVersion !== PROTOCOL_VERSION) {
-      this.sendRejection(client, meta, 'PROTOCOL_MISMATCH');
-      return;
-    }
-    if (session.recentAssets.has(command.commandId)) {
+    if (gate.kind === 'duplicate') {
       this.sendAssetResult(client, session, command.commandId, kind, true);
-      return;
-    }
-    if (command.clientSequence <= session.lastSequence) {
-      this.sendRejection(client, meta, 'STALE_SEQUENCE');
-      return;
-    }
-    if (!session.rateBucket.take(Date.now())) {
-      this.sendRejection(client, meta, 'RATE_LIMITED');
       return;
     }
     const rejection = validate(session);
@@ -2008,13 +2385,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     session.lastSequence = command.clientSequence;
-    session.recentAssets.set(command.commandId, kind);
-    if (session.recentAssets.size > RECENT_COMMAND_WINDOW) {
-      const oldest = session.recentAssets.keys().next();
-      if (!oldest.done) {
-        session.recentAssets.delete(oldest.value);
-      }
-    }
+    this.guard.remember(session.recentAssets, command.commandId, kind);
     this.metrics.recordAssetCommand();
 
     let outcome: T;
@@ -2046,7 +2417,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         'failed to apply committed asset result',
       );
     }
-    if (this.sessions.get(client.sessionId) === session) {
+    if (this.registry.get(client.sessionId) === session) {
       try {
         this.sendAssetResult(client, session, command.commandId, kind, outcome.deduplicated);
       } catch (error) {
@@ -2110,7 +2481,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private async removeSession(sessionId: string): Promise<void> {
-    const session = this.sessions.get(sessionId);
+    const session = this.registry.get(sessionId);
     if (session === undefined) {
       return;
     }
@@ -2118,11 +2489,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const player = this.simulation.getPlayer(session.playerId);
     const combatPlayer = this.combat.getPlayer(session.playerId);
     const displayName = session.displayName;
-    this.sessions.delete(sessionId);
-    this.sessionByPlayer.delete(session.playerId);
+    this.registry.remove(sessionId);
 
     const affected = this.interest.remove(session.playerId);
-    this.refreshViews(affected);
+    this.views.refresh(affected);
     this.simulation.removePlayer(session.playerId);
     this.combat.removePlayer(session.playerId);
     this.state.players.delete(session.playerId);
@@ -2137,6 +2507,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         try {
           await saveCharacterCheckpoint(this.options.database, {
             characterId: session.playerId,
+            mapId: this.map.mapId,
             x: player.x,
             y: player.y,
             facing: player.facing,
@@ -2161,7 +2532,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       }
     }
 
-    if (!session.transferring && this.sessions.size > 0) {
+    if (!session.transferring && this.registry.size > 0) {
       this.broadcastSystemNotice('info', `${displayName} 离开了地图`);
     }
 

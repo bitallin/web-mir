@@ -1,0 +1,30 @@
+$ bash infra/scripts/db-restore-drill.sh /data/nlp/ligen/web-mir/infra/docker/data/backups/web_legend-20261125T150550Z.dump /data/nlp/ligen/web-mir/infra/docker/data/backups/web_legend-20261125T150550Z.manifest.json
+==> creating drill database web_legend_drill_20261125_150557
+CREATE DATABASE
+==> restoring /data/nlp/ligen/web-mir/infra/docker/data/backups/web_legend-20261125T150550Z.dump
+==> verifying restored data
+{
+  "restoredAt": "2026-11-25T15:06:00.319Z",
+  "problems": [],
+  "rowCounts": {
+    "accounts": 2967,
+    "characters": 2800,
+    "character_sessions": 3,
+    "game_tickets": 2898,
+    "item_instances": 4864,
+    "world_drops": 1597,
+    "wallets": 233,
+    "currency_ledger": 1204,
+    "asset_commands": 1442,
+    "admin_users": 48,
+    "admin_audit_logs": 212,
+    "outbox_events": 52,
+    "content_releases": 35,
+    "content_activations": 59,
+    "realm_active_content": 9,
+    "realms": 9
+  }
+}
+restore drill passed for web_legend_drill_20261125_150557
+==> dropping drill database web_legend_drill_20261125_150557
+DROP DATABASE

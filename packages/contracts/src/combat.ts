@@ -75,6 +75,73 @@ export const combatBasicAttackSchema = z
 
 export type CombatBasicAttack = z.infer<typeof combatBasicAttackSchema>;
 
+const autoAttackCommandBase = {
+  protocolVersion: z.number().int().positive(),
+  commandId: z.uuid(),
+  clientSequence: z.number().int().min(0).max(2_147_483_647),
+};
+
+/**
+ * Locks one visible target and asks the server to approach and attack it on
+ * the authoritative cooldown. The client never supplies a position or a hit.
+ */
+export const combatEngageSchema = z
+  .object({
+    ...autoAttackCommandBase,
+    targetId: targetIdSchema,
+  })
+  .strict();
+
+export type CombatEngage = z.infer<typeof combatEngageSchema>;
+
+/** Resumes auto-attack, optionally switching to a new locked target. */
+export const combatAutoAttackStartSchema = z
+  .object({
+    ...autoAttackCommandBase,
+    targetId: targetIdSchema.optional(),
+  })
+  .strict();
+
+export type CombatAutoAttackStart = z.infer<typeof combatAutoAttackStartSchema>;
+
+export const combatAutoAttackStopSchema = z.object(autoAttackCommandBase).strict();
+
+export type CombatAutoAttackStop = z.infer<typeof combatAutoAttackStopSchema>;
+
+export const COMBAT_TARGET_CHANGE_REASONS = [
+  'engaged',
+  'approaching',
+  'attacking',
+  'stopped',
+  'target_dead',
+  'target_lost',
+  'target_gone',
+  'player_dead',
+  'out_of_range',
+  'safe_zone',
+  'transferred',
+] as const;
+
+export const combatTargetChangeReasonSchema = z.enum(COMBAT_TARGET_CHANGE_REASONS);
+export type CombatTargetChangeReason = z.infer<typeof combatTargetChangeReasonSchema>;
+
+/**
+ * Server-owned auto-attack status. `nextAttackAt` is a server epoch timestamp
+ * so the HUD attack bar counts down without the client deciding readiness.
+ */
+export const combatTargetChangedSchema = z
+  .object({
+    targetId: targetIdSchema.nullable(),
+    autoAttack: z.boolean(),
+    reason: combatTargetChangeReasonSchema,
+    attackIntervalMs: z.number().int().positive(),
+    nextAttackAt: z.number().nonnegative(),
+    serverTime: z.number().nonnegative(),
+  })
+  .strict();
+
+export type CombatTargetChanged = z.infer<typeof combatTargetChangedSchema>;
+
 export const skillCastSchema = z
   .object({
     protocolVersion: z.number().int().positive(),

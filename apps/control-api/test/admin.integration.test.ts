@@ -23,6 +23,7 @@ import {
   contentReleases,
   createDatabase,
   insertAdminUser,
+  itemInstances,
   outboxEvents,
   realms,
   type DatabaseHandle,
@@ -540,6 +541,80 @@ describe.runIf(databaseUrl !== undefined)('admin console API', () => {
         slime_gel: { ...gel, name: typeof originalName === 'string' ? originalName : '史莱姆凝胶' },
       },
       reason: '测试恢复物品名称',
+    });
+  });
+
+  it('blocks a release that removes a template players still hold (TD-DATA-04)', async () => {
+    const player = await createPlayer('cover');
+    await database.db.insert(itemInstances).values({
+      templateId: 'slime_gel',
+      characterId: player.characterId,
+      container: 'inventory',
+      slotIndex: 20,
+      quantity: 1,
+    });
+
+    const itemsDraft = adminContentDraftDetailSchema.parse(
+      (await adminInject('designer', 'GET', '/api/v1/admin/content/drafts/items')).json(),
+    );
+    const itemsPayload = itemsDraft.payload as Record<string, unknown>;
+    expect(itemsPayload['slime_gel']).toBeDefined();
+    const withoutGel = { ...itemsPayload };
+    delete withoutGel['slime_gel'];
+
+    const lootDraft = adminContentDraftDetailSchema.parse(
+      (await adminInject('designer', 'GET', '/api/v1/admin/content/drafts/lootTables')).json(),
+    );
+    const lootPayload = lootDraft.payload as Record<string, { entries: unknown[] }>;
+    const withoutGelLoot = Object.fromEntries(
+      Object.entries(lootPayload).map(([id, table]) => [
+        id,
+        {
+          ...table,
+          entries: table.entries.filter(
+            (entry) => (entry as { templateId?: string }).templateId !== 'slime_gel',
+          ),
+        },
+      ]),
+    );
+
+    expect(
+      (
+        await adminInject('designer', 'PUT', '/api/v1/admin/content/drafts/items', {
+          section: 'items',
+          payload: withoutGel,
+          reason: '测试删除被持有物品模板',
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await adminInject('designer', 'PUT', '/api/v1/admin/content/drafts/lootTables', {
+          section: 'lootTables',
+          payload: withoutGelLoot,
+          reason: '测试移除模板掉落引用',
+        })
+      ).statusCode,
+    ).toBe(200);
+
+    const blocked = await adminInject('approver', 'POST', '/api/v1/admin/content/releases', {
+      reason: '测试删除持有物品模板的发布',
+    });
+    expect(blocked.statusCode).toBe(422);
+    const body = blocked.json<{ error: { message: string; details?: string[] } }>();
+    expect(body.error.message).toContain('玩家仍持有');
+    expect(JSON.stringify(body.error.details ?? [])).toContain('slime_gel');
+
+    // Restore the drafts so a later run starts from a publishable state.
+    await adminInject('designer', 'PUT', '/api/v1/admin/content/drafts/items', {
+      section: 'items',
+      payload: itemsPayload,
+      reason: '测试恢复物品草稿',
+    });
+    await adminInject('designer', 'PUT', '/api/v1/admin/content/drafts/lootTables', {
+      section: 'lootTables',
+      payload: lootPayload,
+      reason: '测试恢复掉落草稿',
     });
   });
 });

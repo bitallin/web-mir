@@ -1,0 +1,40 @@
+$ playwright test
+[WebServer] $ vite
+[WebServer] $ vite
+[WebServer] $ pnpm --filter @web-legend/persistence db:migrate
+[WebServer] $ tsx src/migrate.ts
+[WebServer] $ pnpm --filter @web-legend/persistence db:seed && pnpm --filter @web-legend/control-api seed:admin
+[WebServer] $ tsx src/seed.ts
+[WebServer] $ tsx src/scripts/seedAdmin.ts
+[WebServer] $ tsx src/index.ts
+[WebServer] $ tsx src/index.ts
+
+Running 21 tests using 2 workers
+
+  ✓   2 [chromium] › tests/e2e/admin.spec.ts:84:1 › admin sees live overview, rooms and audit of an online player (4.5s)
+[WebServer] 4:24:55 PM [vite] (client) [console.error] Warning: [antd: Drawer] `width` is deprecated. Please use `size` instead.
+[WebServer] 4:24:57 PM [vite] (client) [console.error] Warning: [antd: Alert] `message` is deprecated. Please use `title` instead.
+  ✓   3 [chromium] › tests/e2e/admin.spec.ts:104:1 › operator kicks a live player and the audit trail records why (8.3s)
+[WebServer] 4:25:03 PM [vite] (client) [console.error] Warning: [antd: Alert] `message` is deprecated. Please use `title` instead.
+  ✓   4 [chromium] › tests/e2e/admin.spec.ts:160:1 › content designer publishes, activates and rolls back a release (7.5s)
+  ✓   1 [chromium] › tests/e2e/autoAttack.spec.ts:74:1 › one click locks and auto-attacks until the target dies (29.2s)
+  ✓   5 [chromium] › tests/e2e/combat.spec.ts:126:1 › two players fight one wilds monster with authoritative hp, skills and respawn (38.6s)
+  ✓   7 [chromium] › tests/e2e/foundation.spec.ts:10:1 › game client boots into the account gate (1.0s)
+  ✓   6 [chromium] › tests/e2e/economy.spec.ts:125:1 › kill, loot, equip and relogin keep the committed economy state (31.6s)
+  ✓   8 [chromium] › tests/e2e/foundation.spec.ts:21:1 › admin console boots into its login gate (943ms)
+  ✓  10 [chromium] › tests/e2e/pvp.spec.ts:140:1 › town safe zone rejects player attacks on the server (8.6s)
+  ✓   9 [chromium] › tests/e2e/multiplayer.spec.ts:175:1 › two accounts create characters and see each other within 250ms (9.6s)
+  ✓  12 [chromium] › tests/e2e/multiplayer.spec.ts:352:1 › a page reload returns to the same character without duplicating the player (9.4s)
+[WebServer] 4:26:13 PM [vite] (client) [console.warn] Room connection was closed unexpectedly (4002): 
+  ✓  13 [chromium] › tests/e2e/multiplayer.spec.ts:388:1 › a second client cannot control a character that is already in the world (5.6s)
+  ✓  14 [chromium] › tests/e2e/multiplayer.spec.ts:418:1 › a dropped socket shows the reconnecting state and recovers (6.5s)
+  ✓  15 [chromium] › tests/e2e/multiplayer.spec.ts:442:1 › restarting the Phaser scene does not duplicate input listeners (7.2s)
+  ✓  16 [chromium] › tests/e2e/multiplayer.spec.ts:474:1 › logging out clears the session and returns to the account screen (2.2s)
+  ✓  17 [chromium] › tests/e2e/multiplayer.spec.ts:488:1 › registration and the world work on a plain-HTTP LAN origin (2.5s)
+  ✓  18 [chromium] › tests/e2e/multiplayer.spec.ts:533:1 › clicking a blocked tile sends no move command (3.4s)
+  ✓  11 [chromium] › tests/e2e/pvp.spec.ts:162:1 › wilds pvp kills, announces and revives without a reward (38.0s)
+  ✓  20 [chromium] › tests/e2e/pvp.spec.ts:222:1 › minimap, character panel and filtered chat work in the world (4.8s)
+  ✓  19 [chromium] › tests/e2e/multiplayer.spec.ts:549:1 › a character crosses the town wilds portal and returns without duplicates (11.8s)
+  ✓  21 [chromium] › tests/e2e/multiplayer.spec.ts:593:1 › chat reaches the other player on the same map (7.6s)
+
+  21 passed (2.4m)

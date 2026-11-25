@@ -4,9 +4,10 @@ import {
   MONSTER_STATE_LABELS,
   TILE_UNITS,
   type CharacterView,
+  type CombatTargetChanged,
   type SkillView,
 } from '@web-legend/contracts';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 
 import { issueGameTicket } from '../api/client';
 import { mapBundleFor, mapNameFor } from '../game/mapCatalog';
@@ -45,6 +46,31 @@ function expPercent(exp: number, expToNextLevel: number): number {
   return Math.max(0, Math.min(100, Math.round((exp / expToNextLevel) * 100)));
 }
 
+function AutoAttackBar({
+  autoAttack,
+  progress,
+}: {
+  autoAttack: CombatTargetChanged;
+  progress: number;
+}): JSX.Element {
+  const approaching = autoAttack.reason === 'approaching';
+  return (
+    <div
+      className="auto-attack-bar"
+      data-testid="auto-attack-bar"
+      data-reason={autoAttack.reason}
+      role="progressbar"
+      aria-label="自动攻击进度"
+      aria-valuenow={approaching ? undefined : progress}
+    >
+      <span className="auto-attack-fill" style={{ width: `${String(progress)}%` }} />
+      <span className="auto-attack-label">
+        {approaching ? '正在接近目标…' : '自动攻击中 · Esc 停止'}
+      </span>
+    </div>
+  );
+}
+
 export type GameScreenProps = {
   character: CharacterView;
   onExit: () => void;
@@ -67,6 +93,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     castSkill,
     selectTarget,
     attack,
+    stopAutoAttack,
     pickup,
     equip,
     unequip,
@@ -112,6 +139,23 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const pvpEnabled = state.combatProfile?.pvpEnabled ?? mapBundle.manifest.pvpMode === 'open';
   const reviveSeconds =
     state.reviveAt === null ? null : Math.max(0, Math.ceil((state.reviveAt - now) / 1_000));
+  const autoAttack = state.autoAttack?.autoAttack === true ? state.autoAttack : null;
+  const autoTargetId = autoAttack?.targetId ?? null;
+  const autoRemainingMs = autoAttack === null ? 0 : Math.max(0, autoAttack.nextAttackAt - now);
+  const autoProgress =
+    autoAttack === null || autoAttack.reason === 'approaching'
+      ? 100
+      : Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(
+              ((autoAttack.attackIntervalMs - autoRemainingMs) / autoAttack.attackIntervalMs) * 100,
+            ),
+          ),
+        );
+  const attackingTargetIsShown = (targetId: string | undefined): boolean =>
+    targetId !== undefined && autoTargetId === targetId;
 
   const triggerSkill = useCallback(
     (skill: SkillView) => {
@@ -132,6 +176,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         targetElement instanceof HTMLTextAreaElement ||
         targetElement instanceof HTMLButtonElement
       ) {
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        stopAutoAttack();
         return;
       }
       if (event.key.toLowerCase() === 'b') {
@@ -155,7 +204,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     return () => {
       window.removeEventListener('keydown', handler);
     };
-  }, [skills, triggerSkill]);
+  }, [skills, triggerSkill, stopAutoAttack]);
 
   const attackEntity = useCallback(
     (entityId: string) => {
@@ -386,17 +435,33 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 <p className="target-hp" data-testid="target-hp">
                   {targetMonster.hp}/{targetMonster.maxHp}
                 </p>
-                <button
-                  type="button"
-                  className="target-attack"
-                  data-testid="target-attack"
-                  onClick={() => {
-                    attackEntity(targetMonster.monsterId);
-                  }}
-                >
-                  攻击
-                </button>
+                {attackingTargetIsShown(targetMonster.monsterId) ? (
+                  <button
+                    type="button"
+                    className="target-attack stopping"
+                    data-testid="target-stop"
+                    onClick={() => {
+                      stopAutoAttack();
+                    }}
+                  >
+                    停止攻击
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="target-attack"
+                    data-testid="target-attack"
+                    onClick={() => {
+                      attackEntity(targetMonster.monsterId);
+                    }}
+                  >
+                    攻击
+                  </button>
+                )}
               </div>
+              {attackingTargetIsShown(targetMonster.monsterId) && autoAttack !== null ? (
+                <AutoAttackBar autoAttack={autoAttack} progress={autoProgress} />
+              ) : null}
             </>
           ) : targetPlayer !== undefined ? (
             <>
@@ -420,19 +485,35 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 <p className="target-hp" data-testid="target-hp">
                   {targetPlayer.hp}/{targetPlayer.maxHp}
                 </p>
-                <button
-                  type="button"
-                  className="target-attack"
-                  data-testid="target-attack"
-                  disabled={!pvpEnabled || !targetPlayer.alive}
-                  title={pvpEnabled ? '攻击玩家' : '安全区内禁止攻击玩家'}
-                  onClick={() => {
-                    attackEntity(targetPlayer.playerId);
-                  }}
-                >
-                  {pvpEnabled ? '攻击玩家' : '安全区'}
-                </button>
+                {attackingTargetIsShown(targetPlayer.playerId) ? (
+                  <button
+                    type="button"
+                    className="target-attack stopping"
+                    data-testid="target-stop"
+                    onClick={() => {
+                      stopAutoAttack();
+                    }}
+                  >
+                    停止攻击
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="target-attack"
+                    data-testid="target-attack"
+                    disabled={!pvpEnabled || !targetPlayer.alive}
+                    title={pvpEnabled ? '攻击玩家' : '安全区内禁止攻击玩家'}
+                    onClick={() => {
+                      attackEntity(targetPlayer.playerId);
+                    }}
+                  >
+                    {pvpEnabled ? '攻击玩家' : '安全区'}
+                  </button>
+                )}
               </div>
+              {attackingTargetIsShown(targetPlayer.playerId) && autoAttack !== null ? (
+                <AutoAttackBar autoAttack={autoAttack} progress={autoProgress} />
+              ) : null}
             </>
           ) : null}
         </section>
@@ -831,7 +912,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       ) : null}
 
       <footer className="hud hud-bottom">
-        <p>点击怪物或玩家攻击 · 点击地面移动 · 技能与 PK 由服务端结算</p>
+        <p>点击怪物锁定并自动攻击（Esc 停止） · 点击地面移动 · 技能与 PK 由服务端结算</p>
         <p data-testid="command-count">指令 {state.commandCount}</p>
         <p>tick {state.serverTick}</p>
         <p>协议 v1 · 服务端 20Hz 权威战斗 · {pvpEnabled ? '野外 PK' : '安全区'}</p>
@@ -886,13 +967,18 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         </div>
       ) : null}
 
-      {state.notice !== null ? (
-        <div
-          className={`notice notice-${state.notice.kind}`}
-          data-testid="last-notice"
-          role="status"
-        >
-          {state.notice.message}
+      {state.notices.length > 0 ? (
+        <div className="notice-stack" aria-live="polite">
+          {state.notices.map((notice, index) => (
+            <div
+              key={notice.id}
+              className={`notice notice-${notice.kind}`}
+              data-testid={index === state.notices.length - 1 ? 'last-notice' : 'notice-toast'}
+              role="status"
+            >
+              {notice.message}
+            </div>
+          ))}
         </div>
       ) : null}
     </div>

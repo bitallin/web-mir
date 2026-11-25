@@ -231,7 +231,9 @@ pnpm exec playwright install chromium
 | `pnpm maps:compile`      | Tiled 源图编译为运行时 manifest          |
 | `pnpm repair:maps`       | 幂等迁移退役地图上的角色                 |
 | `pnpm load:world`        | 30 人地图负载检查并读取 tick 指标        |
-| `pnpm load:scenario`     | 阶段 8 容量场景（30+10 / 50 人）         |
+| `pnpm load:scenario`     | 容量场景（人数与环境变量可调）           |
+| `pnpm load:regression`   | 50 人 × 10 分钟回归并断言接受率          |
+| `pnpm verify:invariants` | 钱包/账本/物品位置/过期掉落不变量        |
 | `pnpm drill:recovery`    | SIGTERM / SIGKILL 恢复演练（先 build）   |
 | `pnpm drill:outbox`      | Outbox 重试、退避与重复 commandId 演练   |
 | `pnpm db:backup`         | 备份数据库并生成校验 manifest            |
@@ -246,20 +248,19 @@ pnpm exec playwright install chromium
 `TEST_DATABASE_URL` 指向独立实例。异常中断留下的测试库会在 24 小时后自动清理，
 需要立即清理时运行 `TEST_DATABASE_STALE_MS=0 pnpm test`。
 
-E2E 会执行迁移与区服 seed，并启动 game-web、admin-web、control-api 和
-game-server 四个开发服务；如果开发栈已运行，可复用现有服务：
+E2E 完全独立于开发栈：默认使用 `web_legend_e2e` 数据库（由
+`E2E_DATABASE_URL` 覆盖）和端口 5184/5185/3086/2587。Playwright 启动
+control-api 前会建库并迁移，测试结束后删库；E2E 不共享开发库的 outbox、内容
+激活或账号数据（ADR-025）。只有显式设置 `E2E_REUSE_SERVER=true` 才会复用
+现有服务；`PLAYWRIGHT_SKIP_WEBSERVER=true` 时需自行准备已迁移的独立栈。
+
+E2E 使用真实账号、角色与票据，通过开发专用参数为每个场景创建独立 Room。软件
+渲染环境默认使用 2 个 worker，可用 `PLAYWRIGHT_WORKERS` 覆盖。需要改端口时显式
+覆盖 E2E 变量：
 
 ```bash
-PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
-```
-
-E2E 使用真实账号、角色与票据，通过开发专用参数为每个场景创建独立 Room；阶段 7
-证据（运营总览、玩家详情、Kick 确认、指令 Outbox、内容校验、发布/回滚、被踢
-客户端）写入 `docs/phase-reports/phase-07/`。软件渲染环境默认使用 2 个 worker，
-可用 `PLAYWRIGHT_WORKERS` 覆盖。若默认端口被其他开发栈占用，可在运行时覆盖端口：
-
-```bash
-GAME_WEB_PORT=8844 ADMIN_WEB_PORT=8845 CONTROL_API_PORT=8846 GAME_SERVER_PORT=8847 pnpm test:e2e
+E2E_GAME_WEB_PORT=8844 E2E_ADMIN_WEB_PORT=8845 \
+  E2E_CONTROL_API_PORT=8846 E2E_GAME_SERVER_PORT=8847 pnpm test:e2e
 ```
 
 ## 目录结构

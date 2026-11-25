@@ -11,6 +11,7 @@ import {
   type MapMonsterSpawn,
 } from '@web-legend/contracts';
 import { MAP_MANIFESTS } from '@web-legend/contracts/maps';
+import { AssetService } from '@web-legend/game-application';
 import type { ChatFilter } from '@web-legend/game-domain';
 import { RuntimeMetrics } from '@web-legend/observability';
 import { pingDatabase, type Database } from '@web-legend/persistence';
@@ -265,6 +266,25 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
       } catch (error) {
         runtimeMetrics.stop();
         throw error;
+      }
+      // Rooms only exist while a map has players, so an idle map would never
+      // run its maintenance timer. Clear expired drops once at process start
+      // (bounded batches, outside any tick) before accepting traffic.
+      const assets = new AssetService(database);
+      try {
+        let removed = 0;
+        for (let batch = 0; batch < 20; batch += 1) {
+          const result = await assets.purgeExpiredDrops({ limit: 500 });
+          removed += result.removedUnclaimed;
+          if (result.removedUnclaimed < 500) {
+            break;
+          }
+        }
+        if (removed > 0) {
+          logger.info({ removed }, 'purged expired world drops at startup');
+        }
+      } catch (error) {
+        logger.warn({ err: error }, 'startup drop purge failed; rooms will retry');
       }
       await server.listen(env.GAME_SERVER_PORT, env.GAME_SERVER_HOST);
     },

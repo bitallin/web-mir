@@ -11,6 +11,7 @@
     "dev:watch": "tsx watch src/index.ts",
     "load:world": "tsx scripts/worldLoad.ts",
     "load:scenario": "tsx scripts/worldScenario.ts",
+    "load:regression": "LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 LOAD_OUTPUT=docs/phase-reports/alpha-01/load-50p10a-10min.json tsx scripts/worldScenario.ts",
     "drill:recovery": "tsx scripts/recoveryDrill.ts"
   },
   "dependencies": {

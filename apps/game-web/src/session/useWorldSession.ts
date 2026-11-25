@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   CombatEvent,
   CombatProfile,
+  CombatTargetChanged,
   EquipmentSlot,
   InventorySnapshot,
   LevelUp,
@@ -29,6 +30,7 @@ import {
 } from '../net/worldClient';
 
 export type SessionNotice = {
+  id: string;
   kind: 'info' | 'warning' | 'error';
   message: string;
   at: number;
@@ -70,7 +72,10 @@ export type SessionState = {
   skillCooldowns: Record<string, number>;
   inventory: InventorySnapshot | null;
   levelUpNotice: LevelUp | null;
-  notice: SessionNotice | null;
+  /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
+  notices: SessionNotice[];
+  /** Server-owned auto-attack status for the locked target. */
+  autoAttack: CombatTargetChanged | null;
   /** Client clock deadline for the local player's automatic revival. */
   reviveAt: number | null;
   kicked: SessionKicked | null;
@@ -109,7 +114,8 @@ function initialState(character: CharacterView): SessionState {
     skillCooldowns: {},
     inventory: null,
     levelUpNotice: null,
-    notice: null,
+    notices: [],
+    autoAttack: null,
     reviveAt: null,
     kicked: null,
     sfxMuted: isSfxMuted(),
@@ -201,7 +207,13 @@ function combatLogFor(
       }
       return null;
     case 'heal':
-      return entry(`你恢复了 ${String(event.amount)} 点生命`, 'self');
+      if (event.targetId === characterId) {
+        return entry(`你恢复了 ${String(event.amount)} 点生命`, 'self');
+      }
+      if (event.sourceId === characterId) {
+        return entry(`你为 ${name(event.targetId)} 恢复了 ${String(event.amount)} 点生命`, 'self');
+      }
+      return null;
     case 'death':
       if (event.entityId === characterId) {
         return entry(
@@ -214,7 +226,7 @@ function combatLogFor(
         event.killerId === characterId ? 'self' : 'other',
       );
     case 'respawn':
-      return entry('你已在地图出生点复活', 'system');
+      return event.entityId === characterId ? entry('你已在地图出生点复活', 'system') : null;
     case 'spawn':
       return entry(`${event.displayName} 重新出现`, 'other');
     case 'attack':
@@ -246,6 +258,9 @@ class WorldSession {
   private inventory: InventorySnapshot | null = null;
   private levelBannerTimer: number | null = null;
   private systemMessageSequence = 0;
+  private noticeSequence = 0;
+  private readonly noticeTimers = new Map<string, number>();
+  private readonly recentNoticeAt = new Map<string, number>();
   private readonly sfx = new SfxPlayer();
 
   constructor(
@@ -339,10 +354,7 @@ class WorldSession {
           }
         },
         onRejected: (rejected) => {
-          this.updateState((previous) => ({
-            ...previous,
-            notice: { kind: 'warning', message: rejected.message, at: Date.now() },
-          }));
+          this.pushNotice('warning', rejected.message);
         },
         onChat: (message) => {
           this.updateState((previous) => ({
@@ -479,10 +491,16 @@ class WorldSession {
           this.updateState((previous) => ({
             ...previous,
             systemMessages: [...previous.systemMessages, entry].slice(-MAX_SYSTEM_MESSAGES),
-            notice:
-              notice.kind === 'info'
-                ? previous.notice
-                : { kind: notice.kind, message: notice.message, at: Date.now() },
+          }));
+          if (notice.kind !== 'info') {
+            this.pushNotice(notice.kind, notice.message);
+          }
+        },
+        onCombatTargetChanged: (state) => {
+          this.updateState((previous) => ({
+            ...previous,
+            autoAttack: state,
+            selectedTargetId: state.targetId ?? previous.selectedTargetId,
           }));
         },
       },
@@ -504,8 +522,9 @@ class WorldSession {
     }
   }
 
+  /** Locks the target; the server keeps swinging until told to stop. */
   attack(targetId: string): boolean {
-    const sent = this.client?.sendBasicAttack(targetId) ?? false;
+    const sent = this.client?.sendEngage(targetId) ?? false;
     if (sent) {
       this.commandCount += 1;
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
@@ -515,6 +534,24 @@ class WorldSession {
           debug.lastAttackIntentAt = Date.now();
         }
       }
+    }
+    return sent;
+  }
+
+  stopAutoAttack(): boolean {
+    const sent = this.client?.sendAutoAttackStop() ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  resumeAutoAttack(): boolean {
+    const sent = this.client?.sendAutoAttackStart() ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
     return sent;
   }
@@ -577,12 +614,13 @@ class WorldSession {
       this.start();
       return;
     }
+    this.clearNotices();
     this.updateState((previous) => ({
       ...previous,
       status: 'connecting',
       detail: '正在重新加入世界',
-      notice: null,
       kicked: null,
+      autoAttack: null,
     }));
     void this.client.restart();
   }
@@ -612,6 +650,10 @@ class WorldSession {
   async dispose(): Promise<void> {
     this.removeDebugHooks();
     this.sfx.dispose();
+    for (const timer of this.noticeTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    this.noticeTimers.clear();
     if (this.levelBannerTimer !== null) {
       window.clearTimeout(this.levelBannerTimer);
       this.levelBannerTimer = null;
@@ -625,6 +667,48 @@ class WorldSession {
     const game = this.game;
     this.game = null;
     game?.destroy(true);
+  }
+
+  /**
+   * Rejection and warning toasts. The old single banner never cleared, so one
+   * stray click covered the skill bar for the rest of the session (TD-CLI-02).
+   */
+  private pushNotice(kind: SessionNotice['kind'], message: string): void {
+    const now = Date.now();
+    // Deduplicate synchronously: React may defer the state updater, and the
+    // dismissal timer must be scheduled in this call, not inside it.
+    const previousAt = this.recentNoticeAt.get(message);
+    if (previousAt !== undefined && now - previousAt < 1_500) {
+      return;
+    }
+    for (const [key, at] of this.recentNoticeAt) {
+      if (now - at >= 1_500) {
+        this.recentNoticeAt.delete(key);
+      }
+    }
+    this.recentNoticeAt.set(message, now);
+
+    const id = `notice-${String(now)}-${String((this.noticeSequence += 1))}`;
+    this.updateState((previous) => ({
+      ...previous,
+      notices: [...previous.notices, { id, kind, message, at: now }].slice(-3),
+    }));
+    const timer = window.setTimeout(() => {
+      this.noticeTimers.delete(id);
+      this.updateState((previous) => ({
+        ...previous,
+        notices: previous.notices.filter((notice) => notice.id !== id),
+      }));
+    }, 4_000);
+    this.noticeTimers.set(id, timer);
+  }
+
+  private clearNotices(): void {
+    for (const timer of this.noticeTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    this.noticeTimers.clear();
+    this.updateState((previous) => ({ ...previous, notices: [] }));
   }
 
   private playCombatSfx(event: CombatEvent, characterId: string): void {
@@ -664,6 +748,10 @@ class WorldSession {
   }
 
   private handleTransfer(mapId: string): void {
+    for (const timer of this.noticeTimers.values()) {
+      window.clearTimeout(timer);
+    }
+    this.noticeTimers.clear();
     this.updateState((previous) => ({
       ...previous,
       status: 'connecting',
@@ -680,6 +768,8 @@ class WorldSession {
       selectedTargetId: null,
       skillCooldowns: {},
       levelUpNotice: null,
+      notices: [],
+      autoAttack: null,
       reviveAt: null,
     }));
     this.switchMap(mapId);
@@ -717,6 +807,8 @@ class WorldSession {
         this.selectTarget(playerId);
         return this.attack(playerId);
       },
+      stopAutoAttack: () => this.stopAutoAttack(),
+      startAutoAttack: () => this.resumeAutoAttack(),
       castSkill: (skillId, targetId) => this.castSkill(skillId, targetId),
       monsterScreenPoint: (monsterId) => this.bridge.monsterScreenPoint(monsterId),
       playerScreenPoint: (playerId) => this.bridge.playerScreenPoint(playerId),
@@ -747,6 +839,8 @@ export type WorldSessionControls = {
   castSkill: (skillId: string, targetId: string) => boolean;
   selectTarget: (monsterId: string) => void;
   attack: (targetId: string) => boolean;
+  stopAutoAttack: () => boolean;
+  resumeAutoAttack: () => boolean;
   pickup: (dropId: string) => boolean;
   equip: (itemId: string) => boolean;
   unequip: (slot: EquipmentSlot) => boolean;
@@ -810,6 +904,8 @@ export function useWorldSession(
     (targetId: string) => sessionRef.current?.attack(targetId) ?? false,
     [],
   );
+  const stopAutoAttack = useCallback(() => sessionRef.current?.stopAutoAttack() ?? false, []);
+  const resumeAutoAttack = useCallback(() => sessionRef.current?.resumeAutoAttack() ?? false, []);
   const pickup = useCallback((dropId: string) => sessionRef.current?.pickup(dropId) ?? false, []);
   const equip = useCallback((itemId: string) => sessionRef.current?.equip(itemId) ?? false, []);
   const unequip = useCallback(
@@ -831,6 +927,8 @@ export function useWorldSession(
     castSkill,
     selectTarget,
     attack,
+    stopAutoAttack,
+    resumeAutoAttack,
     pickup,
     equip,
     unequip,

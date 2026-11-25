@@ -1,0 +1,55 @@
+{
+  "runAt": "2026-11-25T14:59:55.508Z",
+  "results": [
+    {
+      "scenario": "sigterm",
+      "characterId": "01a21337-4289-78af-b867-5ed33c3d1b4e",
+      "joinPosition": {
+        "x": 17500,
+        "y": 10500
+      },
+      "movedPosition": {
+        "x": 18500,
+        "y": 10500
+      },
+      "rejoinPosition": {
+        "x": 18500,
+        "y": 10500
+      },
+      "persistedPosition": {
+        "x": 18500,
+        "y": 10500
+      },
+      "itemInstances": {
+        "before": 2,
+        "after": 2
+      },
+      "leaseWaitMs": 1
+    },
+    {
+      "scenario": "sigkill",
+      "characterId": "01a21337-53f2-73f4-86ce-e6232d17927e",
+      "joinPosition": {
+        "x": 17500,
+        "y": 10500
+      },
+      "movedPosition": {
+        "x": 18500,
+        "y": 10500
+      },
+      "rejoinPosition": {
+        "x": 18500,
+        "y": 10500
+      },
+      "persistedPosition": {
+        "x": 18500,
+        "y": 10500
+      },
+      "itemInstances": {
+        "before": 2,
+        "after": 2
+      },
+      "leaseWaitMs": 23089
+    }
+  ]
+}

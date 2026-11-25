@@ -1,9 +1,9 @@
 {
-  "runAt": "2026-11-25T13:09:19.097Z",
+  "runAt": "2026-11-25T15:59:00.689Z",
   "results": [
     {
       "scenario": "sigterm",
-      "characterId": "01a212d1-fe39-74bd-925f-ebd91c817ba1",
+      "characterId": "01a2136d-5ab7-7fcf-9651-448f9a74019a",
       "joinPosition": {
         "x": 17500,
         "y": 10500
@@ -28,7 +28,7 @@
     },
     {
       "scenario": "sigkill",
-      "characterId": "01a212d2-1077-78ca-8a62-195f817612b2",
+      "characterId": "01a2136d-6c43-7f66-b89b-13074946bad4",
       "joinPosition": {
         "x": 17500,
         "y": 10500
@@ -49,7 +49,7 @@
         "before": 2,
         "after": 2
       },
-      "leaseWaitMs": 23095
+      "leaseWaitMs": 23098
     }
   ]
 }

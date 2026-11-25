@@ -114,6 +114,8 @@ export async function findCharacterById(
 
 export type CharacterCheckpoint = {
   characterId: string;
+  /** The map the session was simulating when it took this snapshot. */
+  mapId: string;
   x: number;
   y: number;
   facing: number;
@@ -122,8 +124,9 @@ export type CharacterCheckpoint = {
 };
 
 /**
- * Throttled snapshot of transient state. Single-character lease guarantees
- * there is no concurrent writer, so a plain update is sufficient here.
+ * Throttled snapshot of transient state. The map id is part of the predicate:
+ * a checkpoint that was in flight while the character transferred must not
+ * write old-map coordinates onto the newly persisted destination (TD-DATA-03).
  */
 export async function saveCharacterCheckpoint(
   db: Database,
@@ -141,7 +144,7 @@ export async function saveCharacterCheckpoint(
       version: sql`${characters.version} + 1`,
       updatedAt: now,
     })
-    .where(eq(characters.id, checkpoint.characterId));
+    .where(and(eq(characters.id, checkpoint.characterId), eq(characters.mapId, checkpoint.mapId)));
 }
 
 export type CharacterTransfer = {

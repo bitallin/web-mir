@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { INVENTORY_CAPACITY, type ContentBundle } from '@web-legend/contracts';
+import { INVENTORY_CAPACITY, LOOT_EXPIRY_MS, type ContentBundle } from '@web-legend/contracts';
 import {
   DEFAULT_CONTENT_BUNDLE,
   STARTER_KIT,
@@ -15,12 +15,13 @@ import {
   insertCharacterWithItems,
   itemInstances,
   realms,
+  worldDrops,
   type Character,
   type CharacterClassId,
   type Database,
   type DatabaseHandle,
 } from '@web-legend/persistence';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AssetError, AssetService } from '../src/index';
@@ -201,6 +202,104 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     const [stored] = await db.select().from(characters).where(eq(characters.id, character.id));
     expect(stored?.level).toBe(2);
     expect(stored?.hp).toBe(levelTwo.maxHp);
+  });
+
+  it('persists equipment-adjusted maxima after a kill (TD-DATA-01)', async () => {
+    const character = await createCharacter(db, 'warrior', {
+      level: 3,
+      exp: 0,
+    });
+    const [armor] = await db
+      .insert(itemInstances)
+      .values({
+        templateId: 'leather_armor',
+        characterId: character.id,
+        container: 'inventory',
+        slotIndex: 20,
+        quantity: 1,
+      })
+      .returning();
+    expect(armor).toBeDefined();
+
+    await service.equip({
+      characterId: character.id,
+      commandId: randomUUID(),
+      itemId: armor!.id,
+    });
+
+    const outcome = await service.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference: `test-geared-${randomUUID()}`,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    const expectedMaxHp = combatStatsFor('warrior', 3).maxHp + 15;
+    expect(outcome?.snapshot.maxHp).toBe(expectedMaxHp);
+    expect(outcome?.stats.maxHp).toBe(expectedMaxHp);
+
+    const [stored] = await db.select().from(characters).where(eq(characters.id, character.id));
+    expect(stored?.maxHp).toBe(expectedMaxHp);
+    expect(stored?.hp).toBeLessThanOrEqual(expectedMaxHp);
+  });
+
+  it('purges expired unclaimed drops and archives claimed history (TD-DATA-02)', async () => {
+    const character = await createCharacter(db, 'warrior');
+    const reference = `test-purge-${randomUUID()}`;
+    const outcome = await service.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    const drops = outcome?.drops ?? [];
+    expect(drops.length).toBeGreaterThan(0);
+
+    // Claim one drop, leave the rest on the ground, then pass the expiry and
+    // the claimed-history retention window in one jump.
+    const claimed = drops[0]!;
+    await service.pickup({
+      characterId: character.id,
+      commandId: randomUUID(),
+      dropId: claimed.dropId,
+      mapId: 'starter_wilds',
+    });
+    clock = new Date(clock.getTime() + LOOT_EXPIRY_MS + 8 * 24 * 60 * 60 * 1_000);
+
+    const result = await service.purgeExpiredDrops({ mapId: 'starter_wilds' });
+    expect(result.removedUnclaimed).toBeGreaterThanOrEqual(drops.length - 1);
+    expect(result.archivedClaimed).toBeGreaterThanOrEqual(1);
+
+    const remainingInstances = await db
+      .select()
+      .from(itemInstances)
+      .where(
+        inArray(
+          itemInstances.id,
+          drops.filter((drop) => drop.dropId !== claimed.dropId).map((drop) => drop.itemId),
+        ),
+      );
+    expect(remainingInstances).toHaveLength(0);
+
+    const claimedInstance = await db
+      .select()
+      .from(itemInstances)
+      .where(eq(itemInstances.id, claimed.itemId));
+    expect(claimedInstance[0]?.container).toBe('inventory');
+
+    const remainingDrops = await db
+      .select()
+      .from(worldDrops)
+      .where(
+        inArray(
+          worldDrops.id,
+          drops.map((drop) => drop.dropId),
+        ),
+      );
+    expect(remainingDrops).toHaveLength(0);
   });
 
   it('reserves drops for the killer, then lets another player claim them', async () => {
@@ -384,6 +483,30 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     });
     expect(unequipped.snapshot.equipment.weapon).toBeNull();
     expect(unequipped.snapshot.items.some((item) => item.itemId === secondSword!.id)).toBe(true);
+  });
+
+  it('scopes asset idempotency keys to the character (TD-DATA-06)', async () => {
+    const first = await createCharacter(db, 'warrior');
+    const second = await createCharacter(db, 'warrior');
+    const firstSword = await inventoryItem(db, first.id, 'warrior_sword');
+    const secondSword = await inventoryItem(db, second.id, 'warrior_sword');
+    const sharedCommandId = randomUUID();
+
+    const firstOutcome = await service.equip({
+      characterId: first.id,
+      commandId: sharedCommandId,
+      itemId: firstSword.id,
+    });
+    const secondOutcome = await service.equip({
+      characterId: second.id,
+      commandId: sharedCommandId,
+      itemId: secondSword.id,
+    });
+
+    expect(firstOutcome.deduplicated).toBe(false);
+    expect(secondOutcome.deduplicated).toBe(false);
+    expect(firstOutcome.snapshot.equipment.weapon?.itemId).toBe(firstSword.id);
+    expect(secondOutcome.snapshot.equipment.weapon?.itemId).toBe(secondSword.id);
   });
 
   it('refuses to unequip into a full bag', async () => {

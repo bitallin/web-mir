@@ -230,7 +230,9 @@ pnpm build
 pnpm maps:compile        # 从 Tiled 源图生成编译产物；提交产物后测试会校验一致性
 pnpm repair:maps         # 幂等迁移退役地图上的角色（阶段 3 一次性维护命令）
 pnpm load:world          # 30 人地图负载检查，读取 /metrics 的 tick 指标
-pnpm load:scenario       # 阶段 8 容量场景；LOAD_PLAYERS/LOAD_ATTACKERS/LOAD_DURATION_MS 可调
+pnpm load:scenario       # 容量场景；LOAD_PLAYERS/LOAD_ATTACKERS/LOAD_DURATION_MS 可调
+pnpm load:regression     # 50 人 × 10 分钟容量回归，输出接受率与拒绝码分布
+pnpm verify:invariants   # 钱包/账本/物品位置/过期掉落等资产不变量
 pnpm drill:recovery      # Game Server SIGTERM/SIGKILL 恢复演练（先 pnpm build）
 pnpm drill:outbox        # Outbox 重试、退避与重复 commandId 演练
 pnpm db:backup           # 自定义格式备份 + manifest + SHA-256
@@ -251,8 +253,9 @@ pnpm prod:rollback       # 回滚到 previous-tag，无数据库反向迁移
 - `pnpm test` 使用一次性 PostgreSQL 数据库（`wl_test_*`，ADR-024），结束后
   删除；测试不得依赖或写入共享开发库数据。目标角色需要 `CREATEDB`，可用
   `TEST_DATABASE_URL` 指向独立实例。
-- E2E 仍连接开发栈数据库，必须使用唯一账号/角色名；需要完全隔离时用
-  `TEST_DATABASE_URL` 与独立端口启动一套栈。
+- E2E 使用专用数据库 `web_legend_e2e`（可用 `E2E_DATABASE_URL` 覆盖）与独立
+  端口 5184/5185/3086/2587；Playwright 启动前建库并迁移，结束后删库。E2E 不得
+  连接开发栈数据库或其 outbox，否则管理命令会被开发进程抢走（ADR-025）。
 
 ## 9. Git 规范
 

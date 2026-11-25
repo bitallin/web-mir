@@ -14,6 +14,8 @@ declare global {
       moveToTile: (tileX: number, tileY: number) => boolean;
       attackMonster: (monsterId: string) => boolean;
       attackPlayer: (playerId: string) => boolean;
+      stopAutoAttack: () => boolean;
+      startAutoAttack: () => boolean;
       castSkill: (skillId: string, targetId: string) => boolean;
       monsterScreenPoint: (monsterId: string) => { x: number; y: number } | null;
       playerScreenPoint: (playerId: string) => { x: number; y: number } | null;

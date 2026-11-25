@@ -24,6 +24,7 @@ import {
   statsWithEquipment,
   type CombatStats,
   type ItemCatalog,
+  type ItemDefinition,
   type Rng,
 } from '@web-legend/game-domain';
 import {
@@ -35,16 +36,21 @@ import {
   listEquippedItems,
   listInventoryItems,
   listOpenWorldDrops,
+  purgeExpiredWorldDrops,
   wallets,
   worldDrops,
   type Character,
   type Database,
   type DbExecutor,
+  type ExpiredDropCleanup,
   type ItemInstance,
 } from '@web-legend/persistence';
 import { and, eq, sql } from 'drizzle-orm';
 
 import { AssetError } from './errors';
+
+/** Claimed drop rows remain as audit history for a week after expiry. */
+const DEFAULT_CLAIMED_DROP_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 const DROP_OFFSETS = [
   { x: 0, y: 0 },
@@ -176,17 +182,31 @@ export class AssetService {
     return this.loadAssetsWithin(this.db, characterId);
   }
 
-  /** Unclaimed drops used to restore a room's loot after a restart. */
-  async loadOpenDrops(mapId: string): Promise<LootDropView[]> {
+  /**
+   * Unclaimed drops used to restore a room's loot after a restart. A retired
+   * template is skipped and reported instead of failing the whole map: one bad
+   * row must not hide every other drop (TD-DATA-04).
+   */
+  async loadOpenDrops(
+    mapId: string,
+    onUnknownTemplate?: (templateId: string) => void,
+  ): Promise<LootDropView[]> {
     const now = this.now();
     const rows = await listOpenWorldDrops(this.db, mapId, now);
-    return rows.map(({ drop, item }) => {
-      const definition = requireItem(item.templateId, this.content.items);
+    const drops: LootDropView[] = [];
+    for (const { drop, item } of rows) {
+      let definition: ItemDefinition;
+      try {
+        definition = requireItem(item.templateId, this.content.items);
+      } catch {
+        onUnknownTemplate?.(item.templateId);
+        continue;
+      }
       const ownerActive =
         drop.ownerCharacterId !== null &&
         drop.ownerExpiresAt !== null &&
         drop.ownerExpiresAt.getTime() > now.getTime();
-      return {
+      drops.push({
         dropId: drop.id,
         itemId: item.id,
         templateId: item.templateId,
@@ -196,8 +216,28 @@ export class AssetService {
         y: drop.y,
         ownerId: ownerActive && drop.ownerCharacterId !== null ? drop.ownerCharacterId : '',
         expiresAt: drop.expiresAt.getTime(),
-      };
-    });
+      });
+    }
+    return drops;
+  }
+
+  /**
+   * Removes expired unclaimed drops (and their ground item rows) plus old
+   * claimed history. Safe to run from a room maintenance timer: it takes no
+   * player lock and touches no live asset.
+   */
+  async purgeExpiredDrops(
+    options: { mapId?: string; limit?: number; claimedRetentionMs?: number } = {},
+  ): Promise<ExpiredDropCleanup> {
+    const now = this.now();
+    return this.db.transaction((tx) =>
+      purgeExpiredWorldDrops(tx, {
+        now,
+        claimedRetentionMs: options.claimedRetentionMs ?? DEFAULT_CLAIMED_DROP_RETENTION_MS,
+        ...(options.mapId === undefined ? {} : { mapId: options.mapId }),
+        ...(options.limit === undefined ? {} : { limit: options.limit }),
+      }),
+    );
   }
 
   /**
@@ -236,9 +276,18 @@ export class AssetService {
       const roll = rollLoot(table, this.rng);
       const progression = applyExperience(character.level, character.exp, roll.exp);
       const leveledUp = progression.levelsGained > 0;
-      const base = combatStatsFor(character.classId, progression.level, this.content);
-      const hp = leveledUp ? base.maxHp : clamp(character.hp, 0, base.maxHp);
-      const mp = leveledUp ? base.maxMp : clamp(character.mp, 0, base.maxMp);
+      // Persist the effective (equipment-adjusted) maxima, not the base class
+      // table: otherwise a kill silently lowers a geared character's HP cap
+      // until the next equipment change rewrites it (TD-DATA-01).
+      const equipped = await listEquippedItems(tx, character.id);
+      const stats = statsWithEquipment(
+        combatStatsFor(character.classId, progression.level, this.content),
+        equipmentBonuses(
+          equipped.map((entry) => requireItem(entry.templateId, this.content.items)),
+        ),
+      );
+      const hp = leveledUp ? stats.maxHp : clamp(character.hp, 0, stats.maxHp);
+      const mp = leveledUp ? stats.maxMp : clamp(character.mp, 0, stats.maxMp);
 
       await tx
         .update(characters)
@@ -247,8 +296,8 @@ export class AssetService {
           exp: progression.exp,
           hp,
           mp,
-          maxHp: base.maxHp,
-          maxMp: base.maxMp,
+          maxHp: stats.maxHp,
+          maxMp: stats.maxMp,
           version: sql`${characters.version} + 1`,
           updatedAt: now,
         })
@@ -727,7 +776,9 @@ export class AssetService {
       .values({
         characterId,
         kind,
-        idempotencyKey: `cmd:${kind}:${commandId}`,
+        // Scope the key to the character: a client-generated command id is not
+        // globally unique, and two players may legitimately reuse one (TD-DATA-06).
+        idempotencyKey: `cmd:${characterId}:${kind}:${commandId}`,
         createdAt: this.now(),
       })
       .onConflictDoNothing({ target: assetCommands.idempotencyKey })

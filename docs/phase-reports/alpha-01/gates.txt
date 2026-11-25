@@ -1,0 +1,108 @@
+$ pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+$ prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+$ eslint . --max-warnings=0
+$ tsc -p tsconfig.json && pnpm -r typecheck
+Scope: 15 of 16 workspace projects
+packages/auth typecheck$ tsc -p tsconfig.json
+packages/config typecheck$ tsc -p tsconfig.json
+packages/contracts typecheck$ tsc -p tsconfig.json
+packages/observability typecheck$ tsc -p tsconfig.json
+packages/observability typecheck: Done
+packages/testkit typecheck$ tsc -p tsconfig.json
+packages/config typecheck: Done
+packages/auth typecheck: Done
+packages/contracts typecheck: Done
+packages/testkit typecheck: Done
+apps/admin-web typecheck$ tsc -p tsconfig.json
+packages/content-schema typecheck$ tsc -p tsconfig.json
+apps/game-web typecheck$ tsc -p tsconfig.json
+packages/game-simulation typecheck$ tsc -p tsconfig.json
+packages/game-simulation typecheck: Done
+packages/map-runtime typecheck$ tsc -p tsconfig.json
+packages/content-schema typecheck: Done
+packages/persistence typecheck$ tsc -p tsconfig.json
+packages/map-runtime typecheck: Done
+apps/admin-web typecheck: Done
+apps/game-web typecheck: Done
+packages/persistence typecheck: Done
+packages/game-domain typecheck$ tsc -p tsconfig.json
+packages/game-domain typecheck: Done
+apps/control-api typecheck$ tsc -p tsconfig.json
+packages/game-application typecheck$ tsc -p tsconfig.json
+packages/game-application typecheck: Done
+apps/control-api typecheck: Done
+apps/game-server typecheck$ tsc -p tsconfig.json
+apps/game-server typecheck: Done
+$ vitest run
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./packages/persistence/test/testDatabaseNaming" without a file extension (vitest.config.ts:9:8). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.1.1 /data/nlp/ligen/web-mir
+
+
+ Test Files  63 passed (63)
+      Tests  345 passed (345)
+   Start at  16:27:55
+   Duration  22.83s (tests 55%, import 35%, transform 9%, worker 1%)
+
+$ pnpm -r build
+Scope: 15 of 16 workspace projects
+apps/admin-web build$ tsc -p tsconfig.json && vite build
+apps/game-web build$ tsc -p tsconfig.json && vite build
+apps/admin-web build: vite v8.3.8 building client environment for production...
+apps/admin-web build: transforming...
+apps/game-web build: vite v8.3.8 building client environment for production...
+apps/game-web build: transforming...
+apps/admin-web build: ✓ 1602 modules transformed.
+apps/admin-web build: rendering chunks...
+apps/game-web build: ✓ 195 modules transformed.
+apps/admin-web build: computing gzip size...
+apps/admin-web build: dist/index.html                     0.46 kB │ gzip:   0.32 kB
+apps/admin-web build: dist/assets/index-D7U3wmxm.css      9.95 kB │ gzip:   2.46 kB
+apps/admin-web build: dist/assets/index-B-UJFM5O.js   1,355.86 kB │ gzip: 417.04 kB │ map: 6,002.79 kB
+apps/admin-web build: [plugin builtin:vite-reporter] 
+apps/admin-web build: (!) Some chunks are larger than 500 kB after minification. Consider:
+apps/admin-web build: - Using dynamic import() to code-split the application
+apps/admin-web build: - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+apps/admin-web build: - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+apps/admin-web build: ✓ built in 907ms
+apps/admin-web build: Done
+apps/game-web build: rendering chunks...
+apps/game-web build: computing gzip size...
+apps/game-web build: dist/index.html                     0.44 kB │ gzip:   0.28 kB
+apps/game-web build: dist/assets/index-C7bO6S-8.css     22.42 kB │ gzip:   4.86 kB
+apps/game-web build: dist/assets/index-jv1U7fml.js   2,218.05 kB │ gzip: 603.99 kB │ map: 15,088.15 kB
+apps/game-web build: ✓ built in 1.45s
+apps/game-web build: [plugin builtin:vite-reporter] 
+apps/game-web build: (!) Some chunks are larger than 500 kB after minification. Consider:
+apps/game-web build: - Using dynamic import() to code-split the application
+apps/game-web build: - Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+apps/game-web build: - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+apps/game-web build: Done
+apps/control-api build$ tsc -p tsconfig.json && tsup
+apps/control-api build: CLI Building entry: src/index.ts
+apps/control-api build: CLI Using tsconfig: tsconfig.json
+apps/control-api build: CLI tsup v9.0.0
+apps/control-api build: CLI Using tsup config: /data/nlp/ligen/web-mir/apps/control-api/tsup.config.ts
+apps/control-api build: CLI Target: es2024
+apps/control-api build: CLI Cleaning output folder
+apps/control-api build: ESM Build start
+apps/control-api build: ESM dist/index.js     478.04 KB
+apps/control-api build: ESM dist/index.js.map 923.64 KB
+apps/control-api build: ESM ⚡️ Build success in 131ms
+apps/control-api build: Done
+apps/game-server build$ tsc -p tsconfig.json && tsup
+apps/game-server build: CLI Building entry: src/index.ts
+apps/game-server build: CLI Using tsconfig: tsconfig.json
+apps/game-server build: CLI tsup v9.0.0
+apps/game-server build: CLI Using tsup config: /data/nlp/ligen/web-mir/apps/game-server/tsup.config.ts
+apps/game-server build: CLI Target: es2024
+apps/game-server build: CLI Cleaning output folder
+apps/game-server build: ESM Build start
+apps/game-server build: ESM dist/index.js     772.30 KB
+apps/game-server build: ESM dist/index.js.map 1.62 MB
+apps/game-server build: ESM ⚡️ Build success in 218ms
+apps/game-server build: Done

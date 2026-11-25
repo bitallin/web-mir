@@ -196,6 +196,16 @@ test('two players fight one wilds monster with authoritative hp, skills and resp
     .toBeLessThan(afterFirstHit);
   await seeSameMonsterHp(alice.page, bob.page);
 
+  // Auto-attack is server-driven now; stop both loops and make sure the spawn
+  // is alive before testing the skill, otherwise the cast targets a corpse and
+  // is correctly rejected.
+  await Promise.all([
+    alice.page.evaluate(() => window.__webLegendDebug?.stopAutoAttack()),
+    bob.page.evaluate(() => window.__webLegendDebug?.stopAutoAttack()),
+  ]);
+  await expect(alice.page.getByTestId('auto-attack-bar')).toHaveCount(0, { timeout: 5_000 });
+  await expect.poll(async () => monsterHp(alice.page), { timeout: 30_000 }).toBeGreaterThan(0);
+
   // The warrior skill spends mana and exposes a server cooldown.
   await alice.page.getByTestId('skill-1').click();
   await expect(alice.page.getByTestId('vitals')).toContainText('法力 24/30', {

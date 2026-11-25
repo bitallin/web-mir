@@ -3,17 +3,40 @@
 > 更新日期：2026-11-25
 > 维护规则：每个重要任务或阶段结束后更新；阶段门禁未通过不得标记完成。
 
+## 0. Alpha 0.1 完成情况（2026-11-25）
+
+**Alpha 0.1 工程目标完成：8 项 P1 全部关闭；345 个测试与 21 个浏览器 E2E
+通过；50 人 10 分钟容量回归、恢复演练与资产不变量通过。**
+
+- 阶段报告：`docs/phase-reports/alpha-01/ALPHA_01_REPORT.md`
+- 执行计划：`docs/ALPHA_01_EXECUTION_PLAN.md`
+- ADR：`docs/ADR/ADR-025-alpha01-auto-attack-event-routing-and-room-decomposition.md`
+- 证据：`docs/phase-reports/alpha-01/`
+- 债务：`docs/TECHNICAL_DEBT.md`（P1 清零；残余 Room 拆分为 TD-SRV-01b/P2）
+
+关键结果：
+
+1. E2E 使用专用数据库 `web_legend_e2e` 与端口 5184/5185/3086/2587；本地
+   21/21 通过。CI e2e job 已补 PostgreSQL service 与连接串；本环境无法推送，
+   远端 CI 首次执行仍需确认。
+2. 自动攻击由服务端状态机驱动：一次锁定点击即可接近并持续攻击；服务端仍裁定
+   冷却、射程、目标有效性与安全区。
+3. 封禁/踢下线不再进入重连宽限；重连重新校验账号；内容发布/激活阻止删除玩家
+   仍持有的物品模板；战斗事件按 AOI 与归属投递。
+4. 击杀奖励按装备后属性持久化；过期掉落清理；checkpoint 绑定地图；资产幂等键
+   加入角色。
+5. 50 人 × 10 分钟：50/50 加入、接受率 99.1%、0 资产失败、tick p95 10.25ms
+   （目标 10ms，高 0.25ms）、p99 16.08ms；稳态内存无持续增长。
+6. `WorldMapRoom` 抽出 `SessionRegistry`/`CommandGuard`/`StateViewPublisher`；
+   残余编排拆分明确为 TD-SRV-01b（Alpha 0.2）。
+
 ## 1. 当前阶段
 
-**阶段 9：MVP 收口（测试数据隔离与 WebSocket 观测）—— 实现与自动化验收完成，
-等待用户确认。**
+**Alpha 0.1 已完成，等待进入 Alpha 0.2（游戏体验完善）。**
 
-阶段 0–3 已通过用户验收；阶段 4–8 的实现和自动化验收完成，阶段 6/7 的用户
-实测与阶段 8 的证据确认仍未单独记录。阶段 9 在 MVP 计划定义的 0–8 阶段全部
-交付后，按 `docs/WEB_LEGEND_MVP_PLAN_v2.md` 第 19 节 Definition of Done 做差距
-审计，补齐两项验收基础：`pnpm test` 改为每次运行创建一次性 PostgreSQL 数据库，
-不再写入共享开发库；WebSocket 观测补齐入站字节、连接/断线/重连计数，并修复
-重连后出站字节漏计。阶段 7 的后台实测与阶段 8 的生产演练确认仍等待用户完成。
+Alpha 0.2 的前置条件见阶段报告 §9：复用服务端自动攻击、资产事务与内容发布
+校验；新玩法进入 domain/application；保持独立 E2E 与容量回归门禁；首周复测
+容量 p95 与掉落视图性能。Alpha 0.2 范围见 `docs/POST_MVP_ROADMAP.md` 第 3 节。
 
 ## 2. 阶段进度
 
@@ -29,33 +52,31 @@
 | 阶段 7：运营后台与内容发布     | 待实测     | 管理员 RBAC、审计、Outbox、Kick/Ban/Mute、内容 Draft/Release/回滚     |
 | 阶段 8：质量、压测、部署与恢复 | 自动化完成 | 生产镜像/edge、指标告警、Realm 绑定、备份恢复、重启/Outbox 演练、压测 |
 | 阶段 9：MVP 收口与工程隔离     | 自动化完成 | 一次性测试库、WS 入站/连接/断线/重连指标、负载证据、ADR-024           |
+| 阶段 10：MVP 全面审计与规划    | 完成       | 15 维审计、真实运行、独立库 E2E、50 人压测、恢复/备份、Alpha 路线     |
+| Alpha 0.1：可信度与体验止血    | 完成       | CI/E2E 隔离、8 项 P1、自动攻击、AOI 事件、Room 第一阶段拆分、容量回归 |
 
-## 3. 当前正在进行的任务
+## 3. 当前任务与待确认
 
-阶段 9 确认（自动化证据已就绪）：
+Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用户确认：
 
-1. 阅读 `docs/phase-reports/PHASE_09_REPORT.md` 与
+1. 远端 CI：推送后确认 e2e job 真实执行 21/21（本环境未推送）。
+2. 8584/8585 手工试玩：自动攻击一次锁定、攻击条、Esc/停止、Toast 不遮挡；
+   管理员 Kick/Ban 与内容发布/回滚。
+3. 容量基线：接受 tick p95 10.25ms（高于 10ms 目标 0.25ms）作为已知风险，
+   或在 Alpha 0.2 首周优化后复测。
+
+开发栈当前保持在 84–87 运行，可直接在 `http://<LAN-IP>:8584/` 验收。
+
+阶段 9 证据（已确认）：
+
+1. `docs/phase-reports/PHASE_09_REPORT.md` 与
    `docs/phase-reports/phase-09/`（隔离前后计数、指标快照、短时负载）。
-2. 若使用自己的数据库角色，确认其具备 `CREATEDB`，或设置
-   `TEST_DATABASE_URL`；`pnpm test` 会创建并删除 `wl_test_*` 数据库。
+2. `pnpm test` 会创建并删除 `wl_test_*` 数据库；数据库角色需要 `CREATEDB`，
+   或设置 `TEST_DATABASE_URL`。E2E 已改为独立 `web_legend_e2e` 库。
 
-阶段 7 实测（仍待用户确认）：
-
-1. 游戏侧在 `http://<LAN-IP>:8584/` 用两个独立窗口进入主城/野外，确认阶段 6 的
-   移动、战斗、掉落、聊天、PvP 与复活无回归。
-2. 后台在 `http://<LAN-IP>:8585/` 使用 `admin` / `web-legend-admin` 登录（如
-   设置过 `ADMIN_SEED_PASSWORD` 则使用该密码），按阶段 7 报告逐项检查 Kick/
-   Mute/Ban、内容发布与回滚。
-
-阶段 8 确认（自动化证据已就绪）：
-
-1. 阅读 `docs/phase-reports/PHASE_08_REPORT.md` 与
-   `docs/phase-reports/phase-08/` 下的证据。
-2. 生产拓扑演练已在本地 compose 完成（HTTPS/WSS/安全头/限流/内部端点隔离/
-   Prometheus 抓取与告警）；用户可按
-   `docs/runbooks/DEPLOYMENT_AND_RECOVERY.md` 在自己的证书与镜像仓库上复跑。
-3. 容量与恢复结论：30+10 玩家 10 分钟、50 玩家短时、SIGTERM/SIGKILL、数据库
-   中断、Outbox 重试与真实恢复。
+阶段 7/8 历史待办仍可按 `docs/phase-reports/PHASE_07_REPORT.md` 与
+`docs/runbooks/DEPLOYMENT_AND_RECOVERY.md` 复跑；Alpha 0.1 的恢复演练已在
+`docs/phase-reports/alpha-01/recovery-drill.json` 留证。
 
 ## 4. 已完成内容
 
@@ -467,9 +488,10 @@
 - 正式美术资源、怪物/技能动画与音效；当前为占位美术与 WebAudio 合成音。
 - 内容工作台当前按类型保存完整 JSON section，未提供逐字段表单、审批流或按
   Realm 的独立草稿；新增内容类型需要新增 schema 与校验规则。
-- `pnpm test` 已使用一次性数据库；E2E 仍连接开发栈数据库（验证真实开发拓扑），
-  仅靠唯一账号/角色名隔离。
-- 过期掉落、`asset_commands`、审计与 Outbox 历史没有定期归档/清理任务。
+- `pnpm test` 使用一次性数据库；E2E 使用独立 `web_legend_e2e` 数据库与独立端口
+  （ADR-025），不再共享开发库或 outbox。
+- 过期掉落已由 Room 维护任务清理；`asset_commands`、审计与 Outbox 历史仍没有
+  定期归档/清理任务。
 - 后台会话无 refresh token，8 小时后需重新登录；无 MFA/OIDC。
 - Outbox dispatcher 与 Control API 同进程；吞吐不足时需要独立 worker。
 - Kick/Ban/Mute 目前只有命令结果，没有禁言历史列表或申诉流程。
@@ -485,7 +507,8 @@
 | 开发默认 `INTERNAL_ADMIN_TOKEN`     | 生产误用会暴露内部端点              | 生产 schema 拒绝默认值；部署时显式设置                                  |
 | Outbox 与 Control API 同进程        | 进程终止时投递暂停                  | PostgreSQL 保留 pending；stale dispatched 60 秒后重投                   |
 | Outbox dispatcher 单实例            | 吞吐有限                            | SKIP LOCKED 支持多实例；当前命令量小                                    |
-| 资产事务队列串行                    | 压测 p95 反映排队+提交（约 35ms）   | tick 不等待事务；队列指标可观测；扩容前评估批量/并行                    |
+| 资产事务队列串行                    | 50 人压测 p95 约 52ms（含排队）     | tick 不等待事务；队列指标可观测；扩容前评估批量/并行                    |
+| 50 人 tick p95 略高超标             | 本次 10.25ms vs 10ms 目标           | p99 16ms 远低于 40ms；Alpha 0.2 首周降低掉落视图 churn 后复测           |
 | 生产会话/证书由部署方提供           | 自签证书只用于演练                  | runbook 要求 CA 证书与过期轮换；edge reload 不影响在线连接              |
 | 内容草稿为全局 section              | 多区服/多人编辑会互相覆盖           | 当前单区服单运营；扩容前评估按 Realm/按人草稿                           |
 | 内容 JSON 直接编辑                  | 运营误改需要校验拦截                | Schema + 引用/范围校验 + 差异预览 + 不可变 Release                      |
@@ -495,14 +518,14 @@
 | 共享开发库残留内容 Release/审计     | 后台列表较长、测试数据混杂          | `pnpm test` 使用一次性库；E2E 使用唯一 ID；历史数据未清理               |
 | 传送为离开/重新加入                 | 切换有短暂加载                      | 服务端先提交再通知；客户端重建场景；后续优化体验                        |
 | AOI 依赖 Colyseus StateView 行为    | 升级可能改变过滤/带宽               | 集成测试锁定远处不可见、近处可见、离开释放                              |
-| CombatEvent 全 Room 广播            | 远处玩家收到战斗表现事件            | MVP 事件量小；扩容前评估 AOI 事件过滤与带宽                             |
+| 战斗事件带宽                        | 团战事件量随视野人数增长            | 已按 AOI/归属投递；Alpha 0.2 在 50 人基线复测                           |
 | 怪物/玩家无碰撞                     | 可重叠站位、点击判定重叠            | 不改变权威位置；后续增加软碰撞                                          |
 | 怪物 AI 每 400ms 重算路径           | 大量怪物时寻路成本上升              | 野外 30 只压测 tick p95 仍低于 25ms；扩容前优化                         |
 | 战斗/怪物状态仅内存                 | 进程崩溃丢失怪物 HP 与冷却          | 允许按规则重建；资产与经验不在战斗中                                    |
 | checkpoint 20 秒                    | 崩溃最多丢 20 秒瞬时状态            | 正常离开立即保存；资产不在 tick/内存中                                  |
 | 软件渲染下浏览器约 22–27 FPS        | 客户端帧率与可见延迟受影响          | 静态地表合批、nearest 渲染、20Hz patch；真机应更高                      |
 | Node fetch 拒绝 87 端口             | 负载脚本不能直连 matchmaking        | 通过 Vite `/ws` 代理 + `node:http` 读指标；内部客户端也使用 `node:http` |
-| E2E 共享开发数据库                  | E2E 数据残留、掉落/内容恢复污染     | 唯一账号/角色名、测试按 owner 过滤；需要完全隔离时用独立栈              |
+| E2E 数据库与端口                    | 与开发栈共享会假失败                | 已使用 `web_legend_e2e` 与 5184/5185/3086/2587；测试后删库              |
 | 临时测试库需要 CREATEDB             | 权限不足时 `pnpm test` 失败         | 明确错误提示；`TEST_DATABASE_URL` 指向有权限的实例                      |
 | 开发 PostgreSQL 端口发布在所有接口  | 共享主机暴露风险                    | 仅本地开发；生产使用私有网络                                            |
 | 容器 inotify 限额 8192              | watcher ENOSPC                      | 默认后端无 watch、Vite 轮询                                             |
@@ -558,6 +581,22 @@
 - 背包 24 格、装备槽仅武器/护甲；没有背包整理、丢弃、出售或物品图标。
 - 掉落归属 30 秒、2 分钟消失；客户端不显示归属倒计时。
 
+阶段 10 审计新增已知问题（完整清单见 `docs/TECHNICAL_DEBT.md`）：
+
+- CI 的 e2e job 没有 PostgreSQL/`DATABASE_URL`，浏览器门禁在 CI 中无法执行。
+- E2E 仍共享开发库；与运行中的开发栈并发时，开发 Control API 会抢走 Outbox
+  命令并投递到错误 Game Server，导致运营用例假失败（本轮复现；独立库 20/20）。
+- 过期未领取掉落只在 Room 内存删除，数据库行与 ground 物品实例永久保留；
+  开发库当前 763 条过期未领取掉落仍占 ground。
+- 击杀奖励按“职业+等级”基础属性裁剪并写回 HP/MP，忽略装备加成。
+- 封禁/踢下线走 15 秒重连宽限，修改过的客户端可用旧 token 恢复会话。
+- 内容发布若删除仍被玩家持有的物品模板，角色加入世界会报“资产加载失败”。
+- 战斗没有自动攻击，每次挥砍都要点击；拒绝提示常驻并遮挡战斗面板。
+- 50 人 10 分钟容量已由本轮补齐（tick p95 8.79ms、0 资产失败），但尚未纳入
+  CI/发布门禁。
+- 两个静态 nginx 镜像以 root 运行；备份 manifest 与 dump 非同一快照，恢复
+  演练不校验 SHA-256。
+
 ## 8. 阻塞事项
 
 无技术阻塞。阶段 7 等待用户在 8584（游戏）与 8585（后台）实测验收；阶段 8 与
@@ -565,6 +604,20 @@
 阶段”的明确指令执行，不改变阶段 7/8 仍需用户确认的事实。
 
 ## 9. 最近一次测试结果
+
+### Alpha 0.1（2026-11-25，`docs/phase-reports/alpha-01/`）
+
+| 检查           | 命令/方式                | 结果                                                            |
+| -------------- | ------------------------ | --------------------------------------------------------------- |
+| 格式/lint/类型 | `pnpm verify` 前三步     | 全部通过                                                        |
+| 单元/集成      | `pnpm test`              | 63 文件、**345 测试**通过（22.7s，一次性 PostgreSQL）           |
+| 构建           | `pnpm build`             | 4 个应用成功                                                    |
+| 浏览器 E2E     | `pnpm test:e2e`          | **21/21 通过**（2.3 分钟，独立 `web_legend_e2e` 库与端口）      |
+| 50 人 10 分钟  | `pnpm load:regression`   | 50/50、接受率 99.1%、0 资产失败、tick p95 10.25ms / p99 16.08ms |
+| 恢复演练       | `pnpm drill:recovery`    | SIGTERM/SIGKILL 均通过，位置一致、物品 2→2、租约释放/过期       |
+| 资产不变量     | `pnpm verify:invariants` | 账本/负余额/槽位/物品位置/过期掉落（>2 分钟）全部 0             |
+
+### 阶段 9（历史）
 
 日期：2026-11-25
 
@@ -586,6 +639,21 @@
 | 重启演练    | `pnpm drill:recovery`                                                                                   | SIGTERM 租约 1ms 释放；SIGKILL 周期 checkpoint 生效                                         |
 | Outbox      | `pnpm drill:outbox`                                                                                     | 失败退避 → applied → 重复 commandId duplicate                                               |
 | 短时负载    | `LOAD_PLAYERS=6 LOAD_ATTACKERS=2 LOAD_DURATION_MS=30000 pnpm load:scenario`                             | 6/6 加入、360 接受、tick p95 0.75ms、出站 1,353,745B、入站 58,638B、0 资产失败              |
+
+阶段 10 审计结果（2026-11-25，详见 `docs/MVP_ACCEPTANCE_REPORT.md`）：
+
+| 检查                | 方式                                                        | 结果                                                                                                      |
+| ------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 格式/lint/类型/构建 | `pnpm format:check`、`lint`、`typecheck`、`build`           | 全部通过                                                                                                  |
+| 单元/集成           | `pnpm test`                                                 | 61 文件、329 测试通过（13.88s）                                                                           |
+| E2E（共享开发库）   | 独立端口、开发栈同库                                        | 18/20 + 1 失败 + 1 跳过；开发 Control API 抢占 outbox 导致假失败                                          |
+| E2E（独立数据库）   | `web_legend_audit_e2e`                                      | **20/20 通过（2.0 分钟）**                                                                                |
+| 手动浏览器          | 8584 完整链路                                               | 注册/创建/传送/战斗/击杀/拾取/背包成功；软件渲染 25 FPS                                                   |
+| 30 玩家 10 分钟     | `load:scenario`（10 名攻击者为子集）                        | 30/30 加入、36000 接受、11041 拒绝、tick p95 3.58ms / p99 4.4ms、资产 p95 32.28ms、337 击杀、0 资产失败   |
+| 50 玩家             | `LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000` | 50/50 加入、60000 接受、11088 拒绝、tick p95 8.79ms / p99 12.47ms、资产 p95 38.79ms、317 击杀、0 资产失败 |
+| 重启恢复            | `pnpm drill:recovery`                                       | SIGTERM 1ms 释放租约；SIGKILL 23.1s 租约过期、checkpoint 位置恢复、物品 2→2                               |
+| 备份/恢复           | `pnpm db:backup` + `db:restore-drill`                       | 19 表/6 迁移/2,967 账号，恢复后 `problems: []`，演练库删除                                                |
+| 数据库不变量        | 开发库 SQL                                                  | 账本/槽位/物品位置不变量均为 0；**763 条过期未领取掉落滞留 ground**                                       |
 
 阶段 8 关键证据：
 
@@ -637,6 +705,7 @@
   主题：`feat(phase-8): deliver production deployment, observability and recovery`
 - 阶段 9 主提交：`8e3e534`
   主题：`feat(phase-9): isolate test databases and complete websocket metrics`
+- Alpha 0.1：工作区已完成、尚未提交（等待用户审阅与远端 CI 确认）
 
 ## 11. 当前环境事实
 
@@ -647,25 +716,23 @@
   （8586）、game-server 87（8587）。
 - PostgreSQL 从 SSH 容器通过网关 `192.51.0.1:5432` 访问。
 - Playwright 使用预装 Chromium 131；默认 2 workers，软件渲染约 22–27 FPS。
-- 开发库当前有 2819 账号、2652 角色、3860 物品实例、205 条审计、34 个 Release、
-  48 条 Outbox；钱包/流水、物品放置不变量均为 0。阶段 9 的全量测试未改变这些
-  计数。
+- 开发库当前约 3,017 账号、2,850 角色、3,562 物品实例、295 条掉落、212 条
+  审计、35 个 Release、52 条 Outbox、9 个 Realm（含审计/E2E 历史数据）；
+  钱包/流水、物品放置、重复槽位、过期超过 2 分钟的掉落不变量均为 0。
+  历史测试数据尚未清理。
 - 开发管理员：`admin` / `web-legend-admin`（除非 `ADMIN_SEED_PASSWORD` 覆盖）。
 - 激活内容为 `baseline`，checksum
   `732f923b8c9a0637af7f78644aa5e2d6be616376d2d649af4b5004f268ed245c`。
 
 ## 12. 下一步
 
-1. 确认阶段 9 证据（`docs/phase-reports/PHASE_09_REPORT.md`）；在目标数据库
-   角色上验证 `pnpm test` 的一次性库创建/删除，必要时设置 `TEST_DATABASE_URL`。
-2. 在 `http://<LAN-IP>:8584/` 与 `http://<LAN-IP>:8585/` 按第 3 节完成阶段 7
-   实测，并确认阶段 1–6 游戏行为无回归。
-3. 确认阶段 8 证据与部署方式（`docs/phase-reports/PHASE_08_REPORT.md`、
-   `docs/runbooks/DEPLOYMENT_AND_RECOVERY.md`）；在自己的证书与镜像仓库上复跑
-   一次 `prod:deploy` / `prod:rollback`。
-4. 后续评估：E2E 独立环境、Outbox 独立 worker、审计/Release/Outbox 归档、
-   多 Realm 路由与聊天持久化/审核。
-5. 保持阶段 1–9 的 329 个测试与 20 个浏览器 E2E 为回归门禁；软件渲染环境默认
-   2 个 Playwright worker。压测/演练脚本已并入 `pnpm load:scenario`、
-   `pnpm drill:*` 与 `pnpm db:*`。
-6. 正式音效与美术资源在用户确认阶段 8 后替换。
+1. 推送并确认远端 CI 的 verify 与 e2e job：本地隔离流程为 21/21，本环境未推送。
+2. 用户验收 `http://<LAN-IP>:8584/`：点击怪物一次自动靠近并持续攻击、攻击条、
+   Esc/停止、Toast 自动消失且不遮挡战斗面板；`8585` 验证 Kick/Ban 与内容发布。
+3. Alpha 0.2 首周：降低掉落/视图同步的 tick 开销并复测 50 人 p95；当前
+   10.25ms 作为已知风险记录。
+4. Alpha 0.2 前补齐正式美术（tileset/三职业/怪物/图标）与三职业技能设计。
+5. 保持 345 个测试与 21 个浏览器 E2E 为回归门禁；E2E 固定使用独立数据库，
+   软件渲染环境默认 2 个 Playwright worker。
+6. 多 Realm、动态实例、独立 Outbox worker、审计归档按 `docs/POST_MVP_ROADMAP.md`
+   的触发条件推进，不提前引入分布式架构。

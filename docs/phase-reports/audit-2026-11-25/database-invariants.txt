@@ -1,0 +1,13 @@
+# development database invariants, 2026-11-25 (after E2E runs)
+counts [{"accounts":"2915","chars":"2748","items":"4196","drops":"933","wallets":"223","ledger":"667","releases":"35","outbox":"52","audits":"212","realms":"9"}]
+item-containers [{"container":"equipment","n":"76"},{"container":"ground","n":"856"},{"container":"inventory","n":"3264"}]
+wallet-ledger-mismatch [{"n":"0"}]
+negative-wallets [{"n":"0"}]
+dup-equip-slot [{"n":"0"}]
+dup-inv-slot [{"n":"0"}]
+ground-without-drop [{"n":"0"}]
+claimed-but-ground [{"n":"0"}]
+expired-open-ground [{"n":"763"}]
+leases [{"n":"33","expired":"3"}]
+active-content [{"code":"classic-01","version":"baseline"},{"code":"other-0f0485d8","version":"test-other-0f0485d8"},{"code":"other-4ea3550f","version":"test-other-4ea3550f"},{"code":"other-a1bb3459","version":"test-other-a1bb3459"},{"code":"other-bdec7a0e","version":"test-other-bdec7a0e"},{"code":"other-cb1ffcc4","version":"test-other-cb1ffcc4"},{"code":"other-d6efe204","version":"test-other-d6efe204"},{"code":"other-d83f8d1c","version":"test-other-d83f8d1c"},{"code":"other-f6d2b1b9","version":"test-other-f6d2b1b9"}]
+outbox-status [{"status":"applied","n":"52"}]

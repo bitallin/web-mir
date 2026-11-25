@@ -8,10 +8,13 @@ import {
   STARTER_WILDS_MAP_ID,
   combatEventSchema,
   combatProfileSchema,
+  combatTargetChangedSchema,
   commandRejectedSchema,
+  chatMessageSchema,
   worldRoomNameFor,
   type CombatEvent,
   type CombatProfile,
+  type CombatTargetChanged,
   type CommandRejected,
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
@@ -31,6 +34,7 @@ import {
 const databaseUrl = process.env.DATABASE_URL;
 const SLIME = 'wilds_slime_2';
 const SLIME_TILE = { x: 7, y: 15 };
+const SECOND_SLIME = 'wilds_slime_3';
 
 function requireDatabaseUrl(): string {
   if (databaseUrl === undefined || databaseUrl.length === 0) {
@@ -547,5 +551,232 @@ describe.runIf(databaseUrl !== undefined)('world_map combat', () => {
     expect(revived?.hp).toBe(120);
     expect(Math.floor((revived?.x ?? 0) / 1_000)).toBe(2);
     expect(Math.floor((revived?.y ?? 0) / 1_000)).toBe(16);
+  });
+
+  it('approaches and kills a locked target with one engage command (TD-CLI-01)', async () => {
+    // Two tiles away from the slime, so the server has to walk before it can
+    // swing. No per-swing client message is sent after the initial engage.
+    const actor = await wildsActor({ position: tileUnits({ x: 2, y: 15 }) });
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+    const changes: CombatTargetChanged[] = [];
+    room.onMessage('combat.target.changed', (payload: unknown) => {
+      changes.push(combatTargetChangedSchema.parse(payload));
+    });
+    const rejections: CommandRejected[] = [];
+    room.onMessage('command.rejected', (payload: unknown) => {
+      rejections.push(commandRejectedSchema.parse(payload));
+    });
+
+    await waitForMessage(room, 'combat.profile', (payload) => combatProfileSchema.parse(payload));
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+    const startX = room.state.players.get(actor.character.id)?.x ?? 0;
+
+    room.send('combat.engage', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetId: SLIME,
+    });
+
+    await waitUntil(
+      () =>
+        changes.some((change) => change.reason === 'approaching' || change.reason === 'attacking'),
+      5_000,
+      'auto-attack state',
+    );
+    await waitUntil(
+      () => (room.state.players.get(actor.character.id)?.x ?? startX) > startX,
+      5_000,
+      'approach movement',
+    );
+    await waitUntil(
+      () =>
+        events.filter((event) => event.kind === 'hit' && event.sourceId === actor.character.id)
+          .length >= 2,
+      15_000,
+      'two server-driven hits',
+    );
+    await waitUntil(
+      () => monsterState(room, SLIME)?.state === MONSTER_STATE_CODES.dead,
+      15_000,
+      'slime defeated by auto attack',
+    );
+    await waitUntil(
+      () => changes.some((change) => change.reason === 'target_dead' && !change.autoAttack),
+      3_000,
+      'auto attack stops on target death',
+    );
+
+    // Auto swings are server-generated: the client never learns a COOLDOWN
+    // rejection from them and never has to repeat an attack command.
+    expect(rejections.filter((rejection) => rejection.code === 'COOLDOWN')).toHaveLength(0);
+  });
+
+  it('runs independent auto-attack loops for two players at once', async () => {
+    const first = await wildsActor({ position: tileUnits({ x: 6, y: 15 }) });
+    const second = await createActor(db, 'AutoTwo', {
+      mapId: STARTER_WILDS_MAP_ID,
+      position: tileUnits({ x: 10, y: 20 }),
+    });
+    const firstRoom = await createWorld(first.ticket);
+    await waitForMessage(firstRoom, 'combat.profile', (payload) =>
+      combatProfileSchema.parse(payload),
+    );
+    await waitUntil(
+      () => monsterState(firstRoom, SLIME) !== undefined,
+      5_000,
+      'first slime visible',
+    );
+
+    const secondRoom = await joinWorld(firstRoom.roomId, second.ticket);
+    await waitUntil(
+      () => monsterState(secondRoom, SECOND_SLIME) !== undefined,
+      5_000,
+      'second slime visible',
+    );
+    const firstEvents = collectCombatEvents(firstRoom);
+    const secondEvents = collectCombatEvents(secondRoom);
+
+    firstRoom.send('combat.engage', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetId: SLIME,
+    });
+    secondRoom.send('combat.engage', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetId: SECOND_SLIME,
+    });
+
+    await waitUntil(
+      () => monsterState(firstRoom, SLIME)?.state === MONSTER_STATE_CODES.dead,
+      20_000,
+      'first auto attack kill',
+    );
+    await waitUntil(
+      () => monsterState(secondRoom, SECOND_SLIME)?.state === MONSTER_STATE_CODES.dead,
+      20_000,
+      'second auto attack kill',
+    );
+
+    // Both players are inside each other's AOI, so each may see the other's
+    // fight; what must hold is that each auto-attack loop only damages its own
+    // locked target.
+    expect(
+      firstEvents
+        .filter((event) => event.kind === 'hit' && event.sourceId === first.character.id)
+        .every((event) => event.kind === 'hit' && event.targetId === SLIME),
+    ).toBe(true);
+    expect(
+      secondEvents
+        .filter((event) => event.kind === 'hit' && event.sourceId === second.character.id)
+        .every((event) => event.kind === 'hit' && event.targetId === SECOND_SLIME),
+    ).toBe(true);
+  });
+
+  it('does not leak combat events to players outside the AOI (TD-SRV-02)', async () => {
+    const near = await wildsActor({ position: tileUnits({ x: 6, y: 15 }) });
+    const far = await wildsActor({ position: tileUnits({ x: 40, y: 2 }) });
+    const nearRoom = await createWorld(near.ticket);
+    await waitForMessage(nearRoom, 'combat.profile', (payload) =>
+      combatProfileSchema.parse(payload),
+    );
+    await waitUntil(() => monsterState(nearRoom, SLIME) !== undefined, 5_000, 'slime visible');
+
+    const farRoom = await joinWorld(nearRoom.roomId, far.ticket);
+    await waitUntil(
+      () => farRoom.state.players.get(far.character.id) !== undefined,
+      5_000,
+      'far player joined',
+    );
+    const farEvents = collectCombatEvents(farRoom);
+
+    nearRoom.send('combat.engage', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      targetId: SLIME,
+    });
+
+    const nearEvents = collectCombatEvents(nearRoom);
+    await waitUntil(
+      () =>
+        nearEvents.filter((event) => event.kind === 'hit' && event.sourceId === near.character.id)
+          .length >= 2,
+      10_000,
+      'near player lands two hits',
+    );
+
+    const leaked = farEvents.filter(
+      (event) =>
+        ('sourceId' in event && event.sourceId === near.character.id) ||
+        ('targetId' in event && event.targetId === SLIME) ||
+        ('entityId' in event && event.entityId === SLIME),
+    );
+    expect(leaked).toEqual([]);
+  });
+
+  it('delivers heal events only to the caster and healed player (TD-SRV-02)', async () => {
+    const healer = await createActor(db, 'Healer', {
+      mapId: STARTER_WILDS_MAP_ID,
+      position: tileUnits({ x: 4, y: 20 }),
+      classId: 'taoist',
+      hp: 20,
+      mp: 60,
+    });
+    const witness = await createActor(db, 'Witness', {
+      mapId: STARTER_WILDS_MAP_ID,
+      position: tileUnits({ x: 5, y: 20 }),
+    });
+    const healerRoom = await createWorld(healer.ticket);
+    await waitForMessage(healerRoom, 'combat.profile', (payload) =>
+      combatProfileSchema.parse(payload),
+    );
+    const witnessRoom = await joinWorld(healerRoom.roomId, witness.ticket);
+    await waitUntil(
+      () => witnessRoom.state.players.get(witness.character.id) !== undefined,
+      5_000,
+      'witness joined',
+    );
+
+    const healerEvents = collectCombatEvents(healerRoom);
+    const witnessEvents = collectCombatEvents(witnessRoom);
+    healerRoom.send('skill.cast', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      skillId: 'taoist_heal',
+      targetId: healer.character.id,
+    });
+
+    await waitUntil(
+      () =>
+        healerEvents.some(
+          (event) => event.kind === 'heal' && event.targetId === healer.character.id,
+        ),
+      5_000,
+      'heal event',
+    );
+
+    // A broadcast chat message reaches the witness after the heal would have;
+    // socket ordering therefore proves the heal was never sent to it.
+    const chat = waitForMessage(witnessRoom, 'chat.message', (payload) =>
+      chatMessageSchema.parse(payload),
+    );
+    witnessRoom.send('chat.send', {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: randomUUID(),
+      message: '治疗事件归属验证',
+    });
+    await chat;
+
+    expect(
+      witnessEvents.filter(
+        (event) => event.kind === 'heal' && event.targetId === healer.character.id,
+      ),
+    ).toEqual([]);
   });
 });

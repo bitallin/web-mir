@@ -36,6 +36,7 @@ import {
   listContentActivations,
   listContentDrafts,
   listContentReleases,
+  listItemTemplateUsage,
   upsertContentDraft,
   type AdminUser,
   type ContentDraft,
@@ -289,6 +290,17 @@ export class ContentService {
     }
 
     const bundle = candidate.bundle;
+    const missingTemplates = await this.missingItemTemplates(bundle);
+    if (missingTemplates.length > 0) {
+      const issues = this.missingTemplateIssues(missingTemplates);
+      await this.recordFailure(admin, requestId, 'content.publish', 'bundle', reason, issues);
+      throw new AppError(
+        422,
+        'VALIDATION_ERROR',
+        '内容版本删除了玩家仍持有的物品模板，无法发布',
+        issues.map((issue) => `${issue.path}: ${issue.message}`),
+      );
+    }
     const realm = await this.activeRealm();
     const active = await findRealmActiveContent(this.db, realm.id);
     const now = this.now();
@@ -369,11 +381,25 @@ export class ContentService {
       throw new AppError(404, 'NOT_FOUND', '内容版本不存在');
     }
     const validated = validateContentBundle(release.payload);
-    if (!validated.valid) {
+    if (!validated.valid || validated.bundle === null) {
       await this.recordFailure(admin, requestId, 'content.activate', releaseId, reason, [
         { path: 'release', message: 'release payload is invalid' },
       ]);
       throw new AppError(422, 'VALIDATION_ERROR', '该内容版本校验未通过，不能激活');
+    }
+
+    // Activation is a second door to the same login incident: an older release
+    // may already lack a template that players have acquired since (TD-DATA-04).
+    const missingTemplates = await this.missingItemTemplates(validated.bundle);
+    if (missingTemplates.length > 0) {
+      const issues = this.missingTemplateIssues(missingTemplates);
+      await this.recordFailure(admin, requestId, 'content.activate', releaseId, reason, issues);
+      throw new AppError(
+        422,
+        'VALIDATION_ERROR',
+        '该内容版本不包含玩家仍持有的物品模板，不能激活',
+        issues.map((issue) => `${issue.path}: ${issue.message}`),
+      );
     }
 
     const current = await findRealmActiveContent(this.db, realm.id);
@@ -443,6 +469,22 @@ export class ContentService {
       summary,
     };
     return { report, bundle: validation.bundle, changes };
+  }
+
+  private async missingItemTemplates(
+    bundle: ContentBundle,
+  ): Promise<{ templateId: string; instances: number; characters: number }[]> {
+    const usage = await listItemTemplateUsage(this.db);
+    return usage.filter((entry) => bundle.items[entry.templateId] === undefined);
+  }
+
+  private missingTemplateIssues(
+    missing: readonly { templateId: string; instances: number; characters: number }[],
+  ): { path: string; message: string }[] {
+    return missing.slice(0, 20).map((entry) => ({
+      path: `items.${entry.templateId}`,
+      message: `模板仍被持有：${String(entry.characters)} 个角色 / ${String(entry.instances)} 件实例`,
+    }));
   }
 
   private async assertPermission(

@@ -1,0 +1,8 @@
+$ bash infra/scripts/db-backup.sh
+==> dumping to /data/nlp/ligen/web-mir/infra/docker/data/backups/web_legend-20261125T150550Z.dump
+==> writing manifest /data/nlp/ligen/web-mir/infra/docker/data/backups/web_legend-20261125T150550Z.manifest.json
+manifest /data/nlp/ligen/web-mir/infra/docker/data/backups/web_legend-20261125T150550Z.manifest.json: tables=19 migrations=6 accounts=2967 digest=c66aec009e39cf7d
+==> hashing
+backup: /data/nlp/ligen/web-mir/infra/docker/data/backups/web_legend-20261125T150550Z.dump
+manifest: /data/nlp/ligen/web-mir/infra/docker/data/backups/web_legend-20261125T150550Z.manifest.json
+sha256: cd7cf8a97e047d8c75bba45f4ced4136eeb92a567ebba8d43eb9bcfed556edf3

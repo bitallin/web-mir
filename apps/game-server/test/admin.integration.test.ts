@@ -92,6 +92,21 @@ function waitUntil(
   });
 }
 
+async function waitForAsync(
+  predicate: () => Promise<boolean>,
+  timeoutMs = 5_000,
+  label = 'condition',
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    if (await predicate()) {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
 type WorldRoom = SdkRoom<unknown, WorldStateInstance>;
 
 function waitForMessage<T>(
@@ -208,7 +223,7 @@ describe.runIf(databaseUrl !== undefined)('admin command delivery to the game se
       env,
       logger: logger(),
       database: db,
-      world: { reconnectGraceSeconds: 1, checkpointIntervalMs: 250 },
+      world: { reconnectGraceSeconds: 5, checkpointIntervalMs: 250 },
       contentRefreshMs: 200,
     });
     await runtime.listen();
@@ -362,6 +377,60 @@ describe.runIf(databaseUrl !== undefined)('admin command delivery to the game se
     expect(adminCommandReceiptSchema.parse(response.body).applied).toBe(1);
     expect((await kicked).kind).toBe('banned');
     await left;
+  });
+
+  it('refuses to reconnect a session terminated by a ban (TD-SRV-04)', async () => {
+    const actor = await createActor(db, 'BanReconnect');
+    const room = await joinActor(actor);
+    const token = room.reconnectionToken;
+
+    const kicked = waitForMessage(room, SERVER_MESSAGES.sessionKicked, (payload) =>
+      sessionKickedSchema.parse(payload),
+    );
+    const left = waitForLeave(room);
+    const response = await postCommand({
+      commandId: randomUUID(),
+      type: 'ban',
+      accountId: actor.accountId,
+      reason: '管理员测试封禁重连',
+      issuedAt: new Date().toISOString(),
+    });
+    expect(adminCommandReceiptSchema.parse(response.body).applied).toBe(1);
+    expect((await kicked).kind).toBe('banned');
+    await left;
+
+    // The old reconnection token pointed at this room before the ban. The
+    // session must be gone from the room, not merely closed on the socket.
+    await expect(client().reconnect(token, WorldState)).rejects.toThrow();
+  });
+
+  it('revalidates the account when reconnecting inside the grace window', async () => {
+    const actor = await createActor(db, 'GraceBan');
+    const room = await joinActor(actor);
+    const token = room.reconnectionToken;
+
+    const disconnectCount = async (): Promise<number> => {
+      const metrics = (await (await fetch(`${baseUrl}/metrics`)).json()) as {
+        totals: { wsDisconnects: number };
+      };
+      return metrics.totals.wsDisconnects;
+    };
+    const before = await disconnectCount();
+    room.connection.close();
+    await waitForAsync(
+      async () => (await disconnectCount()) > before,
+      5_000,
+      'the server to enter the reconnection grace window',
+    );
+
+    await db.update(accounts).set({ status: 'banned' }).where(eq(accounts.id, actor.accountId));
+
+    const reconnectClient = client();
+    const reconnected = await reconnectClient.reconnect(token, WorldState).catch(() => null);
+    if (reconnected !== null) {
+      const left = waitForLeave(reconnected as WorldRoom);
+      await expect(left).resolves.toBe(4000);
+    }
   });
 
   it('pins content per room and lets new rooms pick up a newer snapshot', async () => {

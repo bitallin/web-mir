@@ -1,0 +1,72 @@
+=== format ===
+$ prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+=== lint ===
+$ eslint . --max-warnings=0
+=== typecheck ===
+packages/testkit typecheck$ tsc -p tsconfig.json
+packages/observability typecheck: Done
+packages/config typecheck: Done
+packages/contracts typecheck: Done
+packages/testkit typecheck: Done
+apps/admin-web typecheck$ tsc -p tsconfig.json
+apps/game-web typecheck$ tsc -p tsconfig.json
+packages/content-schema typecheck$ tsc -p tsconfig.json
+packages/game-simulation typecheck$ tsc -p tsconfig.json
+packages/game-simulation typecheck: Done
+packages/map-runtime typecheck$ tsc -p tsconfig.json
+packages/content-schema typecheck: Done
+packages/persistence typecheck$ tsc -p tsconfig.json
+packages/map-runtime typecheck: Done
+apps/admin-web typecheck: Done
+apps/game-web typecheck: Done
+packages/persistence typecheck: Done
+packages/game-domain typecheck$ tsc -p tsconfig.json
+packages/game-domain typecheck: Done
+apps/control-api typecheck$ tsc -p tsconfig.json
+packages/game-application typecheck$ tsc -p tsconfig.json
+packages/game-application typecheck: Done
+apps/control-api typecheck: Done
+apps/game-server typecheck$ tsc -p tsconfig.json
+apps/game-server typecheck: Done
+=== test ===
+$ vitest run
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./packages/persistence/test/testDatabaseNaming" without a file extension (vitest.config.ts:9:8). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.1.1 /data/nlp/ligen/web-mir
+
+
+ Test Files  61 passed (61)
+      Tests  329 passed (329)
+   Start at  14:35:22
+   Duration  13.88s (import 47%, tests 43%, transform 9%, worker 1%)
+
+=== build ===
+apps/game-web build: Done
+apps/control-api build$ tsc -p tsconfig.json && tsup
+apps/control-api build: CLI Building entry: src/index.ts
+apps/control-api build: CLI Using tsconfig: tsconfig.json
+apps/control-api build: CLI tsup v9.0.0
+apps/control-api build: CLI Using tsup config: /data/nlp/ligen/web-mir/apps/control-api/tsup.config.ts
+apps/control-api build: CLI Target: es2024
+apps/control-api build: CLI Cleaning output folder
+apps/control-api build: ESM Build start
+apps/control-api build: ESM dist/index.js     474.90 KB
+apps/control-api build: ESM dist/index.js.map 914.14 KB
+apps/control-api build: ESM ⚡️ Build success in 135ms
+apps/control-api build: Done
+apps/game-server build$ tsc -p tsconfig.json && tsup
+apps/game-server build: CLI Building entry: src/index.ts
+apps/game-server build: CLI Using tsconfig: tsconfig.json
+apps/game-server build: CLI tsup v9.0.0
+apps/game-server build: CLI Using tsup config: /data/nlp/ligen/web-mir/apps/game-server/tsup.config.ts
+apps/game-server build: CLI Target: es2024
+apps/game-server build: CLI Cleaning output folder
+apps/game-server build: ESM Build start
+apps/game-server build: ESM dist/index.js     752.36 KB
+apps/game-server build: ESM dist/index.js.map 1.58 MB
+apps/game-server build: ESM ⚡️ Build success in 256ms
+apps/game-server build: Done

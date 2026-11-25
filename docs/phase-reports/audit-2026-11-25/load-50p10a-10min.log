@@ -1,0 +1,6 @@
+$ pnpm --filter @web-legend/game-server load:scenario
+$ tsx scripts/worldScenario.ts
+scenario: players=50 attackers=10 duration=600s room=world_map:starter_wilds
+joined=50/50 accepted=60000 rejected=11088 players=50 tick p50=1.57ms p95=8.79ms p99=12.47ms max=14.54ms assetTx p95=38.79ms wsOut=445247562B wsIn=8860604B patch=251416337B reconnectRate=0.00% kills=317 assetFailures=0
+evidence: /data/nlp/ligen/web-mir/docs/phase-reports/audit-2026-11-25/load-50p10a-10min.json
+exit=0

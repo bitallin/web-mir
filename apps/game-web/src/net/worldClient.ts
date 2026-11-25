@@ -9,6 +9,7 @@ import {
   chatMessageSchema,
   combatEventSchema,
   combatProfileSchema,
+  combatTargetChangedSchema,
   commandAckSchema,
   commandRejectedSchema,
   inventorySnapshotSchema,
@@ -24,6 +25,7 @@ import {
   type ChatMessage,
   type CombatEvent,
   type CombatProfile,
+  type CombatTargetChanged,
   type CommandAck,
   type CommandRejected,
   type EquipmentSlot,
@@ -112,6 +114,7 @@ export type WorldClientCallbacks = {
   onChat: (message: ChatMessage) => void;
   onCombatProfile: (profile: CombatProfile) => void;
   onCombatEvent: (event: CombatEvent) => void;
+  onCombatTargetChanged: (state: CombatTargetChanged) => void;
   onTransfer: (mapId: string) => void;
   onLatency: (latencyMs: number) => void;
   onInventory: (snapshot: InventorySnapshot) => void;
@@ -246,6 +249,51 @@ export class WorldClient {
       commandId: createUuid(),
       clientSequence: this.sequence,
       targetId,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  /** Locks a visible target; the server approaches and swings on its own. */
+  sendEngage(targetId: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.combatEngage, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      targetId,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendAutoAttackStart(targetId?: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.combatAutoAttackStart, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      ...(targetId === undefined ? {} : { targetId }),
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendAutoAttackStop(): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.combatAutoAttackStop, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
     });
     this.sequence += 1;
     return true;
@@ -511,6 +559,15 @@ export class WorldClient {
         const parsed = combatEventSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onCombatEvent(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.combatTargetChanged, (payload: unknown) => {
+        const parsed = combatTargetChangedSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onCombatTargetChanged(parsed.data);
         }
       }),
     );

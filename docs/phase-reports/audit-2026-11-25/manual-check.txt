@@ -1,0 +1,13 @@
+Manual browser run against the user-facing dev stack (http://127.0.0.1:84/), 2026-11-25.
+Flow: register -> create warrior -> starter_town -> portal -> starter_wilds -> attack slime -> kill -> loot -> open bag.
+Result:
+  characterName: Audit3d08
+  fps (software rendering, rAF over 2s): 25
+  currentMapId after portal: starter_wilds
+  attack clicks sent: 12 (several rejected out of range/cooldown)
+  monster killed: true
+  loot picked up: true
+  inventory: 4/24, iron sword x1, hp potion x3, mp potion x1, slime gel x2, gold 2
+  console errors: 401 x3 (pre-login /me), 404 x1 (static asset)
+Screenshots: 01-character-create.png, 02-character-select.png, 03-town-hud.png,
+  04-wilds.png, 05-combat.png, 06-after-combat.png, 07-inventory.png

@@ -48,6 +48,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+SHA_FILE="$DUMP.sha256"
+if [[ -f "$SHA_FILE" ]]; then
+  echo "==> verifying dump checksum"
+  (cd "$(dirname "$DUMP")" && sha256sum -c "$(basename "$SHA_FILE")")
+else
+  echo "warning: $SHA_FILE not found; restoring without a checksum check" >&2
+fi
+
 echo "==> restoring $DUMP"
 if command -v pg_restore >/dev/null 2>&1; then
   pg_restore --no-owner --no-privileges --dbname="$RESTORE_URL" --exit-on-error "$DUMP"

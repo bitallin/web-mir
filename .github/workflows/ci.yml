@@ -69,7 +69,27 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18.7-alpine
+        env:
+          POSTGRES_USER: web_legend
+          POSTGRES_PASSWORD: web_legend_dev
+          POSTGRES_DB: web_legend
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U web_legend -d web_legend"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      NODE_ENV: test
+      # The browser run creates and drops its own database from this base
+      # connection; it must not share the verify job's schema.
+      DATABASE_URL: postgres://web_legend:web_legend_dev@127.0.0.1:5432/web_legend
+      E2E_DATABASE_URL: postgres://web_legend:web_legend_dev@127.0.0.1:5432/web_legend_e2e
 
     steps:
       - uses: actions/checkout@v4

@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { get } from 'node:http';
-import { join, dirname } from 'node:path';
+import { isAbsolute, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { Client, type Room as SdkRoom } from '@colyseus/sdk';
@@ -22,6 +22,7 @@ import {
   GAME_TICKET_TTL_SECONDS,
   PROTOCOL_VERSION,
   TILE_UNITS,
+  commandRejectedSchema,
   worldRoomNameFor,
 } from '@web-legend/contracts';
 import { STARTER_WILDS_MAP } from '@web-legend/contracts/maps';
@@ -55,6 +56,7 @@ type Options = {
   databaseUrl: string;
   output: string;
   assertGoals: boolean;
+  minAcceptRate: number;
 };
 
 type Tile = { x: number; y: number };
@@ -74,6 +76,13 @@ function readOptions(): Options {
     throw new Error('DATABASE_URL is required');
   }
   const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
+  const outputEnv = process.env['LOAD_OUTPUT'];
+  const output =
+    outputEnv === undefined
+      ? join(SERVER_DIR, '..', '..', 'docs', 'phase-reports', 'phase-08', `load-${stamp}.json`)
+      : isAbsolute(outputEnv)
+        ? outputEnv
+        : join(SERVER_DIR, '..', '..', outputEnv);
   return {
     players,
     attackers,
@@ -84,10 +93,9 @@ function readOptions(): Options {
     gameServerPort: Number(process.env['GAME_SERVER_PORT'] ?? '87'),
     controlApiPort: Number(process.env['CONTROL_API_PORT'] ?? '86'),
     databaseUrl,
-    output:
-      process.env['LOAD_OUTPUT'] ??
-      join(SERVER_DIR, '..', '..', 'docs', 'phase-reports', 'phase-08', `load-${stamp}.json`),
+    output,
     assertGoals: process.env['LOAD_ASSERT'] !== 'false',
+    minAcceptRate: Number(process.env['LOAD_MIN_ACCEPT_RATE'] ?? '0.7'),
   };
 }
 
@@ -390,6 +398,7 @@ async function main(): Promise<void> {
   const clients: LoadClient[] = [];
   let clientAccepted = 0;
   let clientRejected = 0;
+  const rejectedByCode: Record<string, number> = {};
 
   for (const actor of actors) {
     const client = new Client(clientUrl);
@@ -401,8 +410,11 @@ async function main(): Promise<void> {
     room.onMessage('command.ack', () => {
       clientAccepted += 1;
     });
-    room.onMessage('command.rejected', () => {
+    room.onMessage('command.rejected', (payload: unknown) => {
       clientRejected += 1;
+      const parsed = commandRejectedSchema.safeParse(payload);
+      const code = parsed.success ? parsed.data.code : 'UNKNOWN';
+      rejectedByCode[code] = (rejectedByCode[code] ?? 0) + 1;
     });
     for (const type of [
       'combat.profile',
@@ -464,12 +476,30 @@ async function main(): Promise<void> {
           targetTileY: target.y,
         });
       } else {
-        client.room.send('combat.basicAttack', {
-          protocolVersion: PROTOCOL_VERSION,
-          commandId: randomUUID(),
-          clientSequence: client.sequence,
-          targetId: monster.id,
-        });
+        // Approach before swinging: attacking from across the map only
+        // produces OUT_OF_RANGE rejections and makes the acceptance metric
+        // meaningless (TD-QA-02).
+        const player = client.room.state.players.get(client.characterId);
+        const distance =
+          player === undefined
+            ? Number.POSITIVE_INFINITY
+            : Math.hypot(monster.x - player.x, monster.y - player.y);
+        if (distance > 1.2 * TILE_UNITS) {
+          client.room.send('move.to', {
+            protocolVersion: PROTOCOL_VERSION,
+            commandId: randomUUID(),
+            clientSequence: client.sequence,
+            targetTileX: Math.floor(monster.x / TILE_UNITS),
+            targetTileY: Math.floor(monster.y / TILE_UNITS),
+          });
+        } else {
+          client.room.send('combat.basicAttack', {
+            protocolVersion: PROTOCOL_VERSION,
+            commandId: randomUUID(),
+            clientSequence: client.sequence,
+            targetId: monster.id,
+          });
+        }
       }
     }
 
@@ -522,12 +552,16 @@ async function main(): Promise<void> {
   }
 
   const reconnectRate = wilds.wsConnections > 0 ? wilds.wsReconnects / wilds.wsConnections : 0;
+  const acceptRate =
+    clientAccepted + clientRejected === 0 ? 1 : clientAccepted / (clientAccepted + clientRejected);
   const summary = {
     runAt: new Date().toISOString(),
     options,
     joined: clients.length,
     clientAccepted,
     clientRejected,
+    acceptRate,
+    rejectedByCode,
     reconnectRate,
     inboundBytesPerPlayer: wilds.players > 0 ? wilds.wsReceivedBytes / wilds.players : 0,
     room: wilds,
@@ -550,6 +584,7 @@ async function main(): Promise<void> {
   process.stdout.write(
     `joined=${String(clients.length)}/${String(options.players)} ` +
       `accepted=${String(clientAccepted)} rejected=${String(clientRejected)} ` +
+      `acceptRate=${(acceptRate * 100).toFixed(1)}% codes=${JSON.stringify(rejectedByCode)} ` +
       `players=${String(wilds.players)} tick p50=${String(wilds.tick.p50Ms)}ms ` +
       `p95=${String(wilds.tick.p95Ms)}ms p99=${String(wilds.tick.p99Ms)}ms ` +
       `max=${String(wilds.tick.maxMs)}ms assetTx p95=${String(wilds.assetTx.p95Ms)}ms ` +
@@ -568,6 +603,12 @@ async function main(): Promise<void> {
     }
     if (clientAccepted === 0) {
       throw new Error('no command was acknowledged');
+    }
+    if (acceptRate < options.minAcceptRate) {
+      throw new Error(
+        `command acceptance ${(acceptRate * 100).toFixed(1)}% is below ` +
+          `${(options.minAcceptRate * 100).toFixed(0)}%; codes=${JSON.stringify(rejectedByCode)}`,
+      );
     }
     if (wilds.tick.p95Ms >= 25 || wilds.tick.p99Ms >= 40) {
       throw new Error(

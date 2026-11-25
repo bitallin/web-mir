@@ -1463,3 +1463,207 @@ LOAD_PLAYERS=6 LOAD_ATTACKERS=2 LOAD_DURATION_MS=30000 pnpm load:scenario
    `TEST_DATABASE_URL`。
 2. 按原计划完成阶段 7 的 8584/8585 实测与阶段 8 的部署/恢复确认。
 3. 后续评估 E2E 独立环境、Outbox worker、审计/Release 归档与多 Realm 路由。
+
+---
+
+## 2026-11-25 MVP 全面审计与 Alpha 路线规划
+
+### 目标
+
+MVP 阶段 0–9 交付后，对项目做一次独立于阶段报告的全面审计：以当前代码与
+真实运行结果为准，验证 15 个技术与产品维度，评估游戏质量，制定 Alpha/Beta
+路线；除非发现 P0，不修改业务代码。
+
+### 实际改动
+
+本轮以审计、验证与文档为主，未修改业务代码、迁移或已发布内容：
+
+- 新增 `docs/MVP_ACCEPTANCE_REPORT.md`：15 维审计、门禁结果、DoD 对照、
+  未验证项与 Alpha 准入结论。
+- 新增 `docs/TECHNICAL_DEBT.md`：57 项债务（P1×8 / P2×25 / P3×24），含
+  证据位置、影响、修复建议与工作量。
+- 新增 `docs/GAMEPLAY_REVIEW.md`：操作、战斗、职业、怪物、地图、成长、
+  掉落、HUD、多人、美术十维评审与数值测算。
+- 新增 `docs/POST_MVP_ROADMAP.md`：Alpha 0.1/0.2/0.3、Beta 与长期演进；
+  每版含目标、范围、技术任务、依赖、里程碑、验收、风险、工作量与优先级。
+- 新增证据目录 `docs/phase-reports/audit-2026-11-25/`：手动浏览器截图、
+  门禁日志、独立库 E2E 结果、数据库不变量、压测/恢复/备份结果。
+- 更新 `docs/PROJECT_STATUS.md`：审计结论、阶段表、已知问题、测试结果与
+  下一步。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+# 共享开发库（开发栈同时运行）
+GAME_WEB_PORT=5184 ADMIN_WEB_PORT=5185 CONTROL_API_PORT=3086 \
+  GAME_SERVER_PORT=2587 pnpm test:e2e
+# 独立数据库（隔离 outbox 与内容）
+DATABASE_URL=…/web_legend_audit_e2e pnpm test:e2e
+# 手动浏览器链路（临时 Playwright 脚本，截图存证据目录）
+LOAD_PLAYERS=30 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 pnpm load:scenario
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 pnpm load:scenario
+pnpm drill:recovery
+pnpm db:backup && pnpm db:restore-drill <dump> <manifest>
+```
+
+- 格式/lint/类型/构建：全部通过。
+- 单元/集成：61 文件、329 测试通过（13.88s）。
+- E2E（共享开发库）：18/20 + 1 失败 + 1 跳过。失败为 kick 用例；根因是开发
+  Control API 与 E2E Control API 共享 outbox 表，开发进程抢走命令并投递到
+  没有该会话的 87 端口（outbox 标记 applied，applied=0）。
+- E2E（独立数据库）：20/20 通过（2.0 分钟），证明不是产品缺陷。
+- 手动浏览器：注册→创建→主城→传送→打怪→击杀→拾取→背包成功；软件渲染
+  25 FPS；背包 4/24、铁剑/药水/凝胶/金币 2。
+- 开发库不变量：钱包与账本差异 0、负余额 0、重复装备/背包槽 0、ground 无
+  掉落行 0、已领取仍在 ground 0；**763 条过期未领取掉落仍占 ground**。
+- 30 玩家（10 名攻击）10 分钟压测：30/30 加入、36,000 接受、11,041 拒绝（主要
+  OUT_OF_RANGE/COOLDOWN）、tick p95 3.58ms / p99 4.4ms、资产事务 p95
+  32.28ms、337 击杀、0 资产失败。
+- 50 玩家（10 名攻击）10 分钟压测：50/50 加入、60,000 接受、11,088 拒绝、
+  tick p95 8.79ms / p99 12.47ms、资产 p95 38.79ms、317 击杀、0 资产失败，
+  满足 50 人 × 10 分钟目标。注意 `LOAD_ATTACKERS` 是 `LOAD_PLAYERS` 的子集。
+- 恢复演练：SIGTERM 1ms 释放租约；SIGKILL 23.1s 租约过期、checkpoint 位置
+  恢复、物品 2→2。
+- 备份/恢复：19 表、6 迁移、2,967 账号；恢复 `problems: []`，演练库删除。
+  证据见 `load-*.json`、`recovery-drill.json`、`backup.txt`、`restore.txt`。
+
+### 遇到的问题及解决方法
+
+1. **E2E kick 稳定失败**：最初怀疑产品回归；用直接向 Game Server 发内部命令
+   验证 Room 能正常踢人（applied=1、客户端收到 `session.kicked`、关闭码
+   4000）。进一步对照两个进程的 `activeCommands`，确认开发 Control API 抢走
+   outbox 行。改用独立数据库后 20/20。结论：E2E 隔离不完整，不是产品 bug。
+2. **“独立端口”不等于独立环境**：Outbox dispatcher 与内容激活都绑定数据库，
+   共享库时仍互相干扰。已写入技术债务与 Alpha 0.1。
+3. **开发库测试污染**：E2E 每次留下账号/角色/测试 Realm/Release；长期累积到
+   2,900+ 账号、9 个 Realm。建议 E2E 独立库并整库销毁。
+4. **过期掉落**：Room 只删内存 LootState，数据库无删除路径；实测 763 条
+   未领取过期掉落仍占 ground。已在技术债务中给出维护任务方案。
+5. **封禁重连缺口**：管理断开走 `leave(4000)` 进入 15 秒宽限，`onReconnect`
+   不重查账号状态；正常网页客户端不会重连，但修改客户端可恢复会话。
+
+### 尚未解决的问题
+
+- CI E2E 仍不可用；容量场景未纳入 CI；E2E 仍写开发库。
+- 自动攻击、常驻提示、三职业差异、金币消耗、美术资源均属 Alpha 0.2 范围。
+- 多 Realm/动态实例、独立 Outbox worker、审计归档未开始。
+
+### 下一步计划
+
+1. 人工审阅四份审计/路线文档，确认“有条件通过”与 Alpha 0.1 范围。
+2. 执行 Alpha 0.1 门禁（2 周），通过后进入 Alpha 0.2 体验完善。
+3. 完成阶段 7/8 遗留的手工实测与生产演练确认。
+
+---
+
+## 2026-11-25 Alpha 0.1：可信度、战斗体验与架构质量加固
+
+### 本次任务目标
+
+按用户指令进入 Alpha 0.1，以实际代码与审计结果重新梳理 8 项 P1，完成五个
+里程碑：CI/测试可靠性、服务端安全与数据正确性、服务端权威自动攻击、Room
+第一阶段拆分、回归与最终验收；不进入 Alpha 0.2 的三职业/装备/美术/商店。
+
+### 计划与依赖
+
+- 新增 `docs/ALPHA_01_EXECUTION_PLAN.md`：重新列出 8 项 P1，补充审计发现但
+  路线图遗漏的 AOI/事件归属与 TD-DATA-01/02；明确 A→B→C→D→E 依赖。
+- 新增 ADR-025：自动攻击状态机、AOI/归属路由、E2E 独立库、Room 拆分边界与
+  延期项（TD-SRV-01b）。
+
+### 实际改动
+
+1. **CI / E2E 隔离**
+   - `ci.yml` e2e job 增加 PostgreSQL 18 service、`DATABASE_URL`、
+     `E2E_DATABASE_URL`，超时 30 分钟。
+   - `playwright.config.ts` 使用 `web_legend_e2e` 与 5184/5185/3086/2587；
+     webServer 统一注入 DB/端口；默认不复用现有服务。
+   - `infra/scripts/e2e-database.ts` 建库/迁移；`tests/e2e/globalTeardown.ts`
+     删库；control-api webServer 启动前执行 prepare。
+2. **服务端安全与数据**
+   - 封禁/踢下线：`terminated` 标记、`onLeave` 直接移除、`onReconnect` 重新
+     查询账号状态与禁言；宽限结束不复活已终止会话。
+   - 内容发布/激活：阻断删除玩家仍持有模板的候选 bundle，列出受影响角色/实例；
+     `loadOpenDrops` 逐条容错并告警。
+   - 战斗事件：`broadcastCombatEvent` 按 source/target 的 AOI 可见性投递，
+     heal/respawn 仅本人，公共公告仍全图。
+   - 击杀奖励按装备后属性持久化 `max_hp/max_mp`。
+   - 过期未领取掉落与地面实例清理（单次 500、30 秒周期、Room 创建与 Game
+     Server 启动时各一次；已领取行保留 7 天）。
+   - checkpoint 条件加入 `map_id`；资产幂等键加入 `characterId`。
+   - 恢复演练校验 `.sha256`。
+3. **自动攻击与 UI**
+   - 协议：`combat.engage`、`combat.autoAttack.start`、
+     `combat.autoAttack.stop`、`combat.target.changed`。
+   - 服务端 `SessionRecord.autoAttack` 状态机：目标有效/可见/安全区校验、
+     BFS 接近（350ms 重寻路）、权威冷却挥砍、死亡/离开 AOI/断线/传送/手动移动
+     停止；复用 `CommandGuard` 幂等与限频。
+   - 客户端一次点击锁定、攻击条、停止按钮/Esc、点击地面取消；Toast 4 秒消失、
+     1.5 秒去重、最多 3 条，右上角布局，战斗面板/聊天/Toast 分层。
+4. **Room 拆分**
+   - 新增 `SessionRegistry`、`CommandGuard`、`StateViewPublisher`，四套命令管线
+     复用统一门禁；删除 Room 内的会话双索引与视图 diff 实现。
+5. **回归工具**
+   - `pnpm load:regression`：50 人 × 10 分钟，攻击者先接近，输出接受率/拒绝码，
+     断言接受率与 tick 上限；`LOAD_OUTPUT` 相对路径按仓库根解析。
+   - `pnpm verify:invariants`：钱包/账本、负余额、重复槽位、ground 位置、
+     过期掉落（>2 分钟）不变量。
+6. **文档**
+   - 新增阶段报告 `docs/phase-reports/alpha-01/ALPHA_01_REPORT.md` 与证据目录；
+     更新 TECHNICAL_DEBT、PROJECT_STATUS、AGENTS、README、架构协议列表。
+
+### 命令与结果
+
+```bash
+pnpm verify
+pnpm test:e2e
+pnpm load:regression
+pnpm verify:invariants
+pnpm drill:recovery
+```
+
+- format/lint/typecheck：通过；单元/集成：63 文件、345 测试通过（22.7s）；
+  build：4 个应用成功。
+- E2E：**21/21 通过**（2.3 分钟，独立数据库与端口；开发栈同时在 84–87 运行）。
+- 50 人 10 分钟：50/50 加入、接受 69,387、拒绝 649（COOLDOWN 247、
+  TARGET_DEAD 399、OUT_OF_RANGE 3），接受率 99.1%、0 资产失败、746 击杀；
+  tick p50 1.98ms / p95 10.25ms / p99 16.08ms / max 17.57ms；资产 p95
+  52.16ms；重连 0%；稳态内存无持续增长。
+- 不变量：全部 0；当前 30 秒窗口内新过期掉落 147 条，>2 分钟 0 条。
+- 恢复：SIGTERM/SIGKILL 通过，位置一致、物品 2→2、租约 1ms/23.1s。
+
+### 遇到的问题及解决方法
+
+1. **Combat E2E 技能断言失败**：自动攻击在技能点击前已击杀目标，技能被正确
+   拒绝。测试改为先停止双方自动攻击并等待目标存活；产品行为未回退。
+2. **Toast 永不消失**：去重标记写在 React updater 内，而 updater 异步执行，
+   定时器未被安排。改为同步去重并直接安排 4 秒定时器。
+3. **Toast 几何断言误判**：改为判断 Toast 与战斗面板矩形是否相交，而不是比较
+   纵向位置。
+4. **50 人 tick p95 10.25ms**：高于 10ms 目标 0.25ms；攻击者改为真实接近后
+   击杀 746（审计基线 317），掉落密度约 2.3 倍。未调低断言掩盖；保留 25ms/40ms
+   硬上限并在报告中列为 Alpha 0.2 首周性能项。
+5. **不变量的“过期掉落 >0”**：清理周期 30 秒，任意时刻都有刚过期行；改为断言
+   “过期超过 2 分钟”为 0，同时输出当前数量。
+6. **E2E 重写历史截图**：本轮 E2E 再次刷新 phase-03…08 截图与
+   phase-08 恢复证据；它们仍是真实执行产物，内容对应当前代码。alpha-01 目录
+   保留了自动攻击截图、压测/恢复证据与日志；如需保留原始历史图，可从 Git 历史
+   恢复（本轮未执行破坏性 Git 命令）。
+
+### 尚未解决的问题
+
+- 远端 CI 未实际执行（本环境不能推送）。
+- Room 残余编排拆分（TD-SRV-01b）、装备槽数据库唯一约束（TD-DATA-05）、
+  备份/manifest 同一快照（TD-OPS-08b）留待 Alpha 0.2/Beta。
+- 三职业差异、内容量、金币消耗与正式美术仍属 Alpha 0.2。
+
+### 下一步计划
+
+1. 推送后确认 CI verify/e2e 21/21。
+2. 用户在 8584/8585 验收自动攻击、Toast、封禁与内容发布。
+3. 进入 Alpha 0.2 前复测容量 p95 并规划掉落/视图同步优化。

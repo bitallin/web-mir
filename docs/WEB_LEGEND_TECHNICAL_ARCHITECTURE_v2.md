@@ -762,7 +762,9 @@ GET    /api/v1/admin/audit-logs
 Client → Server：
 
 - `move.to`
-- `combat.basicAttack`
+- `combat.engage`（锁定目标并启动服务端自动攻击/接近）
+- `combat.autoAttack.start` / `combat.autoAttack.stop`
+- `combat.basicAttack`（手动单次攻击；自动攻击内部复用同一权威入口）
 - `skill.cast`
 - `loot.pickup`
 - `inventory.use`
@@ -775,7 +777,8 @@ Server → Client：
 
 - Colyseus Schema state patches；
 - `command.ack` / `command.rejected`；
-- `combat.hit` / `combat.miss` / `combat.death`；
+- `combat.target.changed`（自动攻击状态、目标与下一次攻击时间）；
+- `combat.event`（attack/hit/miss/heal/death/spawn/respawn，按 AOI 与归属投递）；
 - `loot.spawned` / `loot.claimed`；
 - `inventory.updated`；
 - `character.stats.updated`；

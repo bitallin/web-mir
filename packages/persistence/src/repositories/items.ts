@@ -1,4 +1,15 @@
-import { and, asc, eq, gt, isNull } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  countDistinct,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+} from 'drizzle-orm';
 
 import type { DbExecutor } from '../client';
 import {
@@ -70,4 +81,100 @@ export async function listOpenWorldDrops(
     )
     .orderBy(asc(worldDrops.createdAt));
   return rows;
+}
+
+export type ItemTemplateUsage = {
+  templateId: string;
+  instances: number;
+  characters: number;
+};
+
+/**
+ * Distinct templates referenced by any live item instance. A content release
+ * that drops one of these would make every holder fail asset loading on login
+ * (TD-DATA-04), so publishing/activating it must be refused.
+ */
+export async function listItemTemplateUsage(executor: DbExecutor): Promise<ItemTemplateUsage[]> {
+  const rows = await executor
+    .select({
+      templateId: itemInstances.templateId,
+      instances: count(),
+      characters: countDistinct(itemInstances.characterId),
+    })
+    .from(itemInstances)
+    .groupBy(itemInstances.templateId);
+  return rows.map((row) => ({
+    templateId: row.templateId,
+    instances: Number(row.instances),
+    characters: Number(row.characters),
+  }));
+}
+
+export type ExpiredDropCleanup = {
+  /** Unclaimed expired drops removed together with their ground item row. */
+  removedUnclaimed: number;
+  /** Claimed drop rows whose retention window has passed. */
+  archivedClaimed: number;
+};
+
+/**
+ * Maintenance pass for the loot tables (TD-DATA-02). Unclaimed expired drops
+ * are removed with their ground item instance; deleting the instance cascades
+ * the drop row, so no invisible ground asset survives. Claimed rows are merely
+ * audit history and are pruned after the retention window.
+ */
+export async function purgeExpiredWorldDrops(
+  executor: DbExecutor,
+  options: {
+    now: Date;
+    /** Restricts the unclaimed cleanup to one map; claimed history is global. */
+    mapId?: string;
+    claimedRetentionMs: number;
+    limit?: number;
+  },
+): Promise<ExpiredDropCleanup> {
+  const limit = options.limit ?? 500;
+  const conditions = [
+    isNull(worldDrops.claimedAt),
+    lt(worldDrops.expiresAt, options.now),
+    eq(itemInstances.container, 'ground'),
+  ];
+  if (options.mapId !== undefined) {
+    conditions.push(eq(worldDrops.mapId, options.mapId));
+  }
+
+  const expired = await executor
+    .select({ itemId: worldDrops.itemInstanceId })
+    .from(worldDrops)
+    .innerJoin(itemInstances, eq(itemInstances.id, worldDrops.itemInstanceId))
+    .where(and(...conditions))
+    .limit(limit);
+
+  let removedUnclaimed = 0;
+  if (expired.length > 0) {
+    // Re-check the placement in the DELETE: a pickup may have moved one of
+    // these instances into a bag between the SELECT and the DELETE.
+    const removed = await executor
+      .delete(itemInstances)
+      .where(
+        and(
+          inArray(
+            itemInstances.id,
+            expired.map((row) => row.itemId),
+          ),
+          eq(itemInstances.container, 'ground'),
+          isNull(itemInstances.characterId),
+        ),
+      )
+      .returning({ id: itemInstances.id });
+    removedUnclaimed = removed.length;
+  }
+
+  const retentionCutoff = new Date(options.now.getTime() - options.claimedRetentionMs);
+  const archived = await executor
+    .delete(worldDrops)
+    .where(and(isNotNull(worldDrops.claimedAt), lt(worldDrops.expiresAt, retentionCutoff)))
+    .returning({ id: worldDrops.id });
+
+  return { removedUnclaimed, archivedClaimed: archived.length };
 }
