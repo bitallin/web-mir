@@ -126,6 +126,21 @@ test('operator kicks a live player and the audit trail records why', async ({ br
   await expect(player.page.getByTestId('kicked-overlay')).toHaveAttribute('data-kind', 'kicked');
   await expect(player.page.getByTestId('kicked-overlay')).toContainText('E2E：管理员踢下线验证');
   await player.page.screenshot({ path: join(ARTIFACT_DIR, 'player-kicked.png') });
+  await expect(player.page.getByTestId('connection-status')).toHaveAttribute(
+    'data-status',
+    'disconnected',
+    { timeout: 10_000 },
+  );
+  // Rejoining must clear the moderator disconnect overlay.
+  await player.page.getByTestId('kicked-rejoin').click();
+  await expect(player.page.getByTestId('kicked-overlay')).toHaveCount(0, { timeout: 5_000 });
+  await expect(player.page.getByTestId('connection-status')).toHaveAttribute(
+    'data-status',
+    'connected',
+    {
+      timeout: 20_000,
+    },
+  );
 
   await admin.locator('.ant-drawer-close').click();
   await expect(admin.locator('.ant-drawer-mask')).toBeHidden({ timeout: 5_000 });

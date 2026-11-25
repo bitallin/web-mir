@@ -318,7 +318,13 @@ class WorldSession {
           }));
         },
         onStatus: (status, detail) => {
-          this.updateState((previous) => ({ ...previous, status, detail }));
+          this.updateState((previous) => ({
+            ...previous,
+            status,
+            detail,
+            // A successful (re)join clears a previous moderator disconnect.
+            ...(status === 'connected' ? { kicked: null } : {}),
+          }));
         },
         onRoom: (roomId) => {
           this.updateState((previous) => ({ ...previous, roomId }));
@@ -576,6 +582,7 @@ class WorldSession {
       status: 'connecting',
       detail: '正在重新加入世界',
       notice: null,
+      kicked: null,
     }));
     void this.client.restart();
   }
@@ -591,6 +598,7 @@ class WorldSession {
       status: 'disconnected',
       detail: '已离开世界',
       players: [],
+      kicked: null,
     }));
   }
 

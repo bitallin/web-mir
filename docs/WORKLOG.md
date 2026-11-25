@@ -1184,6 +1184,10 @@ pnpm load:world
     Control API 的 CSRF Origin 同源判断因此拒绝 `http://<LAN-IP>:8585`。改为
     `{ changeOrigin: false }` 保留浏览器 Host；用 LAN Origin 直接请求登录返回
     200。
+15. **被踢后弹窗一直存在**：`session.kicked` 写入的 `kicked` 状态在点击“重新
+    加入”后没有清除，覆盖层一直挡住页面。`rejoin()`/`leave()` 和连接成功回调
+    现在都会清空 `kicked`；E2E 增加“被踢 → 点击重新加入 → 覆盖层消失 →
+    connected”断言并通过。
 
 ### 尚未解决的问题
 

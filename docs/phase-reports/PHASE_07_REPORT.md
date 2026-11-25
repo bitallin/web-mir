@@ -210,6 +210,8 @@
 - 共享开发库留下测试 Release/审计/管理员记录；当前激活内容已恢复 baseline。
 - admin-web 的 Vite 代理必须保留 Host（`changeOrigin: false`），否则局域网后台
   登录会被 CSRF Origin 校验拒绝；修复后 LAN Origin 登录 200。
+- 被 Kick 后的覆盖层在点击“重新加入”时必须清除；E2E 已覆盖“被踢 → 重新加入 →
+  connected”。
 - 正式美术、音效、压测、部署与恢复演练属于阶段 8。
 
 ## 6. 用户实测清单（8584 / 8585）
