@@ -1354,6 +1354,11 @@ pnpm db:restore-drill <dump> <manifest>
 - 生产浏览器截图未采集（浏览器无法访问 compose 在宿主机发布的端口）。
 - 共享开发库仍有历史测试数据。
 
+### 阶段提交
+
+- 阶段 8 主提交：`d079b9644e4d9aff7a88358fadc7d002698e2c4f`
+  主题：`feat(phase-8): deliver production deployment, observability and recovery`。
+
 ### 下一步计划
 
 1. 用户在 8584/8585 完成阶段 7 实测，并确认阶段 8 的部署/恢复证据。

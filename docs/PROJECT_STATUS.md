@@ -569,6 +569,8 @@
 - 阶段 6 主提交：`029d2da`
 - 阶段 7 主提交：`23ee461c0d196217cf2b192e3893fb59db8a6bea`
   主题：`feat(phase-7): deliver admin console, outbox operations and content releases`
+- 阶段 8 主提交：`d079b9644e4d9aff7a88358fadc7d002698e2c4f`
+  主题：`feat(phase-8): deliver production deployment, observability and recovery`
 
 ## 11. 当前环境事实
 
