@@ -145,6 +145,12 @@ export const itemContentSchema = z
     maxMpBonus: z.number().int().min(0).max(100_000),
     healHp: z.number().int().min(0).max(100_000),
     healMp: z.number().int().min(0).max(100_000),
+    /**
+     * Merchant prices. Optional on purpose: historical releases predate the
+     * fields, and Zod defaults would change their canonical checksum (EL-004).
+     */
+    buyPrice: z.number().int().min(0).max(1_000_000).optional(),
+    sellPrice: z.number().int().min(0).max(1_000_000).optional(),
   })
   .strict();
 

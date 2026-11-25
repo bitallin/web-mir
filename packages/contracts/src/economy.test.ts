@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   INVENTORY_CAPACITY,
+  SHOP_MAX_QUANTITY,
   assetResultSchema,
   inventoryEquipSchema,
   inventorySnapshotSchema,
   inventoryUseSchema,
   itemViewSchema,
   lootPickupSchema,
+  shopBuySchema,
+  shopCatalogSchema,
+  shopSellSchema,
 } from './economy';
 import { PlayerState, LootState, WorldState } from './worldState';
 
@@ -72,6 +76,73 @@ describe('economy command schemas', () => {
         itemId: ITEM_ID,
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('shop command schemas', () => {
+  it('accepts buy and sell intents without client-side prices', () => {
+    const buy = shopBuySchema.parse({
+      protocolVersion: 1,
+      commandId: COMMAND_ID,
+      clientSequence: 7,
+      merchantId: 'town_merchant',
+      templateId: 'small_hp_potion',
+      quantity: 2,
+    });
+    expect(buy.quantity).toBe(2);
+
+    const sell = shopSellSchema.parse({
+      protocolVersion: 1,
+      commandId: COMMAND_ID,
+      clientSequence: 8,
+      merchantId: 'town_merchant',
+      itemId: ITEM_ID,
+      quantity: 1,
+    });
+    expect(sell.itemId).toBe(ITEM_ID);
+  });
+
+  it('rejects forged prices, invalid merchants and out-of-range quantities', () => {
+    const base = {
+      protocolVersion: 1,
+      commandId: COMMAND_ID,
+      clientSequence: 7,
+      merchantId: 'town_merchant',
+      templateId: 'small_hp_potion',
+      quantity: 1,
+    };
+    expect(shopBuySchema.safeParse({ ...base, price: 1 }).success).toBe(false);
+    expect(shopBuySchema.safeParse({ ...base, merchantId: 'Town Merchant' }).success).toBe(false);
+    expect(shopBuySchema.safeParse({ ...base, quantity: 0 }).success).toBe(false);
+    expect(shopBuySchema.safeParse({ ...base, quantity: SHOP_MAX_QUANTITY + 1 }).success).toBe(
+      false,
+    );
+  });
+
+  it('parses a catalog with merchants, offers and sell prices', () => {
+    const catalog = shopCatalogSchema.parse({
+      merchants: [{ id: 'town_merchant', name: '杂货商', tile: { x: 12, y: 8 } }],
+      offers: [
+        {
+          templateId: 'small_hp_potion',
+          name: '金创药',
+          kind: 'consumable',
+          buyPrice: 15,
+          levelRequirement: 1,
+          stackable: true,
+          maxStack: 20,
+          attackBonus: 0,
+          defenseBonus: 0,
+          maxHpBonus: 0,
+          maxMpBonus: 0,
+          healHp: 40,
+          healMp: 0,
+        },
+      ],
+      sellPrices: [{ templateId: 'slime_gel', sellPrice: 4 }],
+    });
+    expect(catalog.offers[0]?.buyPrice).toBe(15);
+    expect(catalog.sellPrices[0]?.sellPrice).toBe(4);
   });
 });
 

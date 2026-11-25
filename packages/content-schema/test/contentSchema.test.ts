@@ -118,6 +118,36 @@ describe('content validation', () => {
     expect(result.issues.some((issue) => issue.path.endsWith('.equipSlot'))).toBe(true);
   });
 
+  it('rejects a sell price that would let players mint gold', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const potion = bundle.items['small_hp_potion'];
+        if (potion !== undefined) {
+          potion.buyPrice = 10;
+          potion.sellPrice = 10;
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes('收购价'))).toBe(true);
+  });
+
+  it('does not inject price defaults into legacy payloads (EL-004)', () => {
+    const legacy = clone(BASE_CONTENT_BUNDLE);
+    for (const item of Object.values(legacy.items)) {
+      delete item.buyPrice;
+      delete item.sellPrice;
+    }
+    const result = validateContentBundle(legacy);
+    expect(result.valid).toBe(true);
+    expect(result.bundle).not.toBeNull();
+    if (result.bundle === null) {
+      return;
+    }
+    expect(result.bundle.items['small_hp_potion']?.buyPrice).toBeUndefined();
+    expect(contentChecksum(result.bundle)).toBe(contentChecksum(legacy));
+  });
+
   it('rejects a healing skill aimed at an enemy', () => {
     const result = validateContentBundle(
       withMutation((bundle) => {

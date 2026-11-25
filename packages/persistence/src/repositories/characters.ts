@@ -4,8 +4,10 @@ import type { Database } from '../client';
 import {
   characters,
   characterSessions,
+  currencyLedger,
   itemInstances,
   realms,
+  wallets,
   type Character,
   type CharacterClassId,
   type CharacterSession,
@@ -52,6 +54,7 @@ export async function insertCharacterWithItems(
   db: Database,
   input: CreateCharacterInput,
   items: readonly StarterItemInput[],
+  starterGold = 0,
 ): Promise<Character> {
   return db.transaction(async (tx) => {
     const [character] = await tx.insert(characters).values(input).returning();
@@ -68,6 +71,20 @@ export async function insertCharacterWithItems(
           quantity: item.quantity,
         })),
       );
+    }
+    if (starterGold > 0) {
+      await tx
+        .insert(wallets)
+        .values({ characterId: character.id, balance: starterGold, version: 1 });
+      await tx.insert(currencyLedger).values({
+        characterId: character.id,
+        currencyType: 'gold',
+        delta: starterGold,
+        balanceAfter: starterGold,
+        reason: 'starter_gold',
+        referenceId: character.id,
+        idempotencyKey: `starter:${character.id}:gold`,
+      });
     }
     return character;
   });

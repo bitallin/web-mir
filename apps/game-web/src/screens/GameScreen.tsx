@@ -2,9 +2,11 @@ import {
   CHAT_MESSAGE_MAX_LENGTH,
   CHARACTER_CLASS_CATALOG,
   MONSTER_STATE_LABELS,
+  SHOP_RANGE_TILES,
   TILE_UNITS,
   type CharacterView,
   type CombatTargetChanged,
+  type ShopOffer,
   type SkillView,
 } from '@web-legend/contracts';
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
@@ -46,6 +48,33 @@ function expPercent(exp: number, expToNextLevel: number): number {
   return Math.max(0, Math.min(100, Math.round((exp / expToNextLevel) * 100)));
 }
 
+function describeShopOffer(offer: ShopOffer): string {
+  if (offer.kind === 'weapon') {
+    return `+${String(offer.attackBonus)} 攻击`;
+  }
+  if (offer.kind === 'armor') {
+    const parts = [`+${String(offer.defenseBonus)} 防御`];
+    if (offer.maxHpBonus > 0) {
+      parts.push(`+${String(offer.maxHpBonus)} 生命`);
+    }
+    if (offer.maxMpBonus > 0) {
+      parts.push(`+${String(offer.maxMpBonus)} 法力`);
+    }
+    return parts.join(' · ');
+  }
+  if (offer.kind === 'consumable') {
+    const parts: string[] = [];
+    if (offer.healHp > 0) {
+      parts.push(`回复 ${String(offer.healHp)} HP`);
+    }
+    if (offer.healMp > 0) {
+      parts.push(`回复 ${String(offer.healMp)} MP`);
+    }
+    return parts.join(' · ');
+  }
+  return '材料';
+}
+
 function AutoAttackBar({
   autoAttack,
   progress,
@@ -82,6 +111,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
   const [characterOpen, setCharacterOpen] = useState(false);
+  const [shopOpen, setShopOpen] = useState(false);
+  const [shopTab, setShopTab] = useState<'buy' | 'sell'>('buy');
   const requestTicket = useCallback(async () => {
     const response = await issueGameTicket(character.id);
     return response.ticket;
@@ -98,6 +129,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     equip,
     unequip,
     consumeItem,
+    shopBuy,
+    shopSell,
     toggleSfx,
   } = useWorldSession(containerRef, {
     character,
@@ -137,6 +170,24 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const gold = inventory?.gold ?? 0;
   const mapBundle = useMemo(() => mapBundleFor(state.mapId), [state.mapId]);
   const pvpEnabled = state.combatProfile?.pvpEnabled ?? mapBundle.manifest.pvpMode === 'open';
+  const shopCatalog = state.shopCatalog;
+  const nearbyMerchant = useMemo(() => {
+    if (shopCatalog === null || self === undefined) {
+      return null;
+    }
+    const px = self.x / TILE_UNITS;
+    const py = self.y / TILE_UNITS;
+    return (
+      shopCatalog.merchants.find(
+        (merchant) => Math.hypot(px - merchant.tile.x, py - merchant.tile.y) <= SHOP_RANGE_TILES,
+      ) ?? null
+    );
+  }, [shopCatalog, self]);
+  const sellPriceByTemplate = useMemo(
+    () =>
+      new Map((shopCatalog?.sellPrices ?? []).map((entry) => [entry.templateId, entry.sellPrice])),
+    [shopCatalog],
+  );
   const reviveSeconds =
     state.reviveAt === null ? null : Math.max(0, Math.ceil((state.reviveAt - now) / 1_000));
   const autoAttack = state.autoAttack?.autoAttack === true ? state.autoAttack : null;
@@ -224,6 +275,21 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     }
   }, [chatDraft, sendChat]);
 
+  useEffect(() => {
+    if (nearbyMerchant === null) {
+      setShopOpen(false);
+    }
+  }, [nearbyMerchant]);
+
+  const buyOffer = useCallback(
+    (offer: ShopOffer, quantity: number) => {
+      if (nearbyMerchant !== null) {
+        shopBuy(nearbyMerchant.id, offer.templateId, quantity);
+      }
+    },
+    [nearbyMerchant, shopBuy],
+  );
+
   return (
     <div className="shell">
       <div className="canvas-layer" ref={containerRef} aria-hidden="true" />
@@ -234,7 +300,6 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <h1>Web Legend</h1>
           <p className="phase">
             {character.name} · {classDefinition.name} Lv.{level}
-            <span>阶段 6</span>
           </p>
           <p className="vitals" data-testid="vitals">
             HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
@@ -287,6 +352,20 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             >
               角色 C
             </button>
+            {nearbyMerchant !== null ? (
+              <button
+                type="button"
+                className="bag-toggle shop-toggle"
+                data-testid="shop-toggle"
+                aria-expanded={shopOpen}
+                onClick={() => {
+                  setShopTab('buy');
+                  setShopOpen((open) => !open);
+                }}
+              >
+                杂货商
+              </button>
+            ) : null}
             <button
               type="button"
               className="bag-toggle"
@@ -681,6 +760,143 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           </button>
         </form>
       </aside>
+
+      {shopOpen && nearbyMerchant !== null && shopCatalog !== null ? (
+        <aside className="hud shop-panel" data-testid="shop-panel" aria-label="杂货商">
+          <div className="panel-heading">
+            <h2>{nearbyMerchant.name}</h2>
+            <span data-testid="shop-gold">金币 {gold}</span>
+            <button
+              type="button"
+              className="panel-close"
+              onClick={() => {
+                setShopOpen(false);
+              }}
+            >
+              关闭
+            </button>
+          </div>
+
+          <div className="shop-tabs">
+            <button
+              type="button"
+              data-testid="shop-tab-buy"
+              aria-pressed={shopTab === 'buy'}
+              onClick={() => {
+                setShopTab('buy');
+              }}
+            >
+              购买
+            </button>
+            <button
+              type="button"
+              data-testid="shop-tab-sell"
+              aria-pressed={shopTab === 'sell'}
+              onClick={() => {
+                setShopTab('sell');
+              }}
+            >
+              出售
+            </button>
+          </div>
+
+          {shopTab === 'buy' ? (
+            <ul className="shop-list" data-testid="shop-offers">
+              {shopCatalog.offers.map((offer) => (
+                <li
+                  key={offer.templateId}
+                  className="shop-offer"
+                  data-testid="shop-offer"
+                  data-template-id={offer.templateId}
+                  data-price={offer.buyPrice}
+                >
+                  <div className="shop-offer-main">
+                    <strong>{offer.name}</strong>
+                    <span className="shop-offer-meta">{describeShopOffer(offer)}</span>
+                    <span className="shop-offer-level">
+                      Lv.{offer.levelRequirement}
+                      {offer.levelRequirement > level ? ' · 等级不足' : ''}
+                    </span>
+                  </div>
+                  <span className="shop-price">{offer.buyPrice} 金币</span>
+                  <button
+                    type="button"
+                    data-testid="shop-buy"
+                    disabled={gold < offer.buyPrice}
+                    onClick={() => {
+                      buyOffer(offer, 1);
+                    }}
+                  >
+                    买 1
+                  </button>
+                  {offer.stackable ? (
+                    <button
+                      type="button"
+                      data-testid="shop-buy-five"
+                      disabled={gold < offer.buyPrice * 5}
+                      onClick={() => {
+                        buyOffer(offer, 5);
+                      }}
+                    >
+                      买 5
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+              {shopCatalog.offers.length === 0 ? (
+                <li className="empty">商人暂时没有可出售的商品</li>
+              ) : null}
+            </ul>
+          ) : (
+            <ul className="shop-list" data-testid="shop-sell-items">
+              {items
+                .filter((item) => sellPriceByTemplate.has(item.templateId))
+                .map((item) => {
+                  const unitPrice = sellPriceByTemplate.get(item.templateId) ?? 0;
+                  return (
+                    <li
+                      key={item.itemId}
+                      className="shop-offer"
+                      data-testid="shop-sell-item"
+                      data-item-id={item.itemId}
+                      data-price={unitPrice}
+                    >
+                      <div className="shop-offer-main">
+                        <strong>{item.name}</strong>
+                        <span className="shop-offer-meta">持有 {item.quantity}</span>
+                      </div>
+                      <span className="shop-price">{unitPrice} 金币/个</span>
+                      <button
+                        type="button"
+                        data-testid="shop-sell"
+                        onClick={() => {
+                          shopSell(nearbyMerchant.id, item.itemId, 1);
+                        }}
+                      >
+                        卖 1
+                      </button>
+                      {item.quantity > 1 ? (
+                        <button
+                          type="button"
+                          data-testid="shop-sell-all"
+                          onClick={() => {
+                            shopSell(nearbyMerchant.id, item.itemId, item.quantity);
+                          }}
+                        >
+                          全部
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              {items.every((item) => !sellPriceByTemplate.has(item.templateId)) ? (
+                <li className="empty">背包里没有商人愿意收购的物品</li>
+              ) : null}
+            </ul>
+          )}
+          <p className="shop-hint">交易由服务器结算：金币与背包同时更新，刷新或重登不会丢失。</p>
+        </aside>
+      ) : null}
 
       {bagOpen && inventory !== null ? (
         <aside className="hud bag-panel" data-testid="inventory-panel" aria-label="背包与装备">

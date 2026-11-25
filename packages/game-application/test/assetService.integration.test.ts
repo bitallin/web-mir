@@ -21,7 +21,7 @@ import {
   type Database,
   type DatabaseHandle,
 } from '@web-legend/persistence';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AssetError, AssetService } from '../src/index';
@@ -47,7 +47,7 @@ function suffix(): string {
 async function createCharacter(
   db: Database,
   classId: CharacterClassId,
-  options: { level?: number; exp?: number; hp?: number; mp?: number } = {},
+  options: { level?: number; exp?: number; hp?: number; mp?: number; gold?: number } = {},
 ): Promise<Character> {
   const [realm] = await db.select().from(realms).where(eq(realms.code, REALM_CODE)).limit(1);
   if (realm === undefined) {
@@ -81,6 +81,7 @@ async function createCharacter(
       facing: 2,
     },
     STARTER_KIT[classId],
+    options.gold ?? 0,
   );
   return character;
 }
@@ -124,7 +125,11 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
       .insert(realms)
       .values({ code: REALM_CODE, name: '经典一区', status: 'active' })
       .onConflictDoNothing({ target: realms.code });
-    clock = new Date('2026-11-25T00:00:00.000Z');
+    // Start ahead of real time. The test database is shared with game-server
+    // integration tests whose rooms purge expired drops on a real clock; a
+    // fixture dated in the past would be deleted before this file can assert
+    // on it (TD-QA-10).
+    clock = new Date(Date.now() + 24 * 60 * 60 * 1_000);
     service = new AssetService(db, { now: () => clock, rng: () => 0 });
   });
 
@@ -652,5 +657,249 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     });
     expect(outcome?.expGained).toBe(999);
     expect(outcome?.drops.map((drop) => drop.displayName)).toContain('训练凝胶');
+  });
+
+  it('buys from the merchant with wallet and ledger committed once', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 100 });
+    const commandId = randomUUID();
+
+    const outcome = await service.buy({
+      characterId: character.id,
+      commandId,
+      merchantId: 'town_merchant',
+      templateId: 'small_hp_potion',
+      quantity: 2,
+    });
+    expect(outcome.purchased).toEqual({
+      templateId: 'small_hp_potion',
+      quantity: 2,
+      unitPrice: 15,
+      totalCost: 30,
+    });
+    expect(outcome.snapshot.gold).toBe(70);
+
+    const ledgerRows = await db
+      .select()
+      .from(currencyLedger)
+      .where(
+        and(
+          eq(currencyLedger.characterId, character.id),
+          eq(currencyLedger.reason, 'shop_purchase'),
+        ),
+      );
+    expect(ledgerRows).toHaveLength(1);
+    expect(ledgerRows[0]?.delta).toBe(-30);
+    expect(ledgerRows[0]?.balanceAfter).toBe(70);
+
+    const replay = await service.buy({
+      characterId: character.id,
+      commandId,
+      merchantId: 'town_merchant',
+      templateId: 'small_hp_potion',
+      quantity: 2,
+    });
+    expect(replay.deduplicated).toBe(true);
+    expect(replay.snapshot.gold).toBe(70);
+    expect(
+      await db
+        .select()
+        .from(currencyLedger)
+        .where(
+          and(
+            eq(currencyLedger.characterId, character.id),
+            eq(currencyLedger.reason, 'shop_purchase'),
+          ),
+        ),
+    ).toHaveLength(1);
+  });
+
+  it('rejects purchases the character cannot afford without side effects', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 10 });
+    await expect(
+      service.buy({
+        characterId: character.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        templateId: 'small_hp_potion',
+        quantity: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_GOLD' } satisfies Partial<AssetError>);
+
+    const loaded = await service.loadAssets(character.id);
+    expect(loaded.snapshot.gold).toBe(10);
+    expect(
+      await db
+        .select()
+        .from(currencyLedger)
+        .where(
+          and(
+            eq(currencyLedger.characterId, character.id),
+            eq(currencyLedger.reason, 'shop_purchase'),
+          ),
+        ),
+    ).toHaveLength(0);
+  });
+
+  it('rolls a purchase back when the bag is full', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 100 });
+    await db.delete(itemInstances).where(eq(itemInstances.characterId, character.id));
+    await db.insert(itemInstances).values(
+      Array.from({ length: INVENTORY_CAPACITY }, (_, slot) => ({
+        templateId: 'wolf_pelt',
+        characterId: character.id,
+        container: 'inventory' as const,
+        slotIndex: slot,
+        quantity: 1,
+      })),
+    );
+
+    await expect(
+      service.buy({
+        characterId: character.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        templateId: 'small_hp_potion',
+        quantity: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'INVENTORY_FULL' } satisfies Partial<AssetError>);
+
+    const loaded = await service.loadAssets(character.id);
+    expect(loaded.snapshot.gold).toBe(100);
+  });
+
+  it('never lets concurrent purchases overdraw the wallet', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 20 });
+    const buy = () =>
+      service.buy({
+        characterId: character.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        templateId: 'small_hp_potion',
+        quantity: 1,
+      });
+    const results = await Promise.allSettled([buy(), buy()]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected?.status === 'rejected' ? rejected.reason : null).toMatchObject({
+      code: 'INSUFFICIENT_GOLD',
+    });
+
+    const loaded = await service.loadAssets(character.id);
+    expect(loaded.snapshot.gold).toBe(5);
+  });
+
+  it('sells a stack partially and then clears it', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    const potion = await inventoryItem(db, character.id, 'small_hp_potion');
+    expect(potion.quantity).toBeGreaterThanOrEqual(2);
+
+    const partial = await service.sell({
+      characterId: character.id,
+      commandId: randomUUID(),
+      merchantId: 'town_merchant',
+      itemId: potion.id,
+      quantity: 1,
+    });
+    expect(partial.sold?.totalValue).toBe(5);
+    expect(partial.snapshot.gold).toBe(5);
+
+    const rest = await service.sell({
+      characterId: character.id,
+      commandId: randomUUID(),
+      merchantId: 'town_merchant',
+      itemId: potion.id,
+      quantity: potion.quantity - 1,
+    });
+    expect(rest.sold?.quantity).toBe(potion.quantity - 1);
+    expect(rest.snapshot.gold).toBe(5 * potion.quantity);
+    const rows = await db.select().from(itemInstances).where(eq(itemInstances.id, potion.id));
+    expect(rows).toHaveLength(0);
+
+    const ledgerRows = await db
+      .select()
+      .from(currencyLedger)
+      .where(
+        and(eq(currencyLedger.characterId, character.id), eq(currencyLedger.reason, 'shop_sale')),
+      );
+    expect(ledgerRows).toHaveLength(2);
+    expect(ledgerRows.reduce((sum, row) => sum + row.delta, 0)).toBe(5 * potion.quantity);
+  });
+
+  it('refuses to buy what the merchant does not stock or sell', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 500 });
+    await expect(
+      service.buy({
+        characterId: character.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        templateId: 'slime_gel',
+        quantity: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_SOLD_HERE' } satisfies Partial<AssetError>);
+    await expect(
+      service.buy({
+        characterId: character.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        templateId: 'cloth_armor',
+        quantity: 2,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_QUANTITY' } satisfies Partial<AssetError>);
+  });
+
+  it('refuses to sell equipped, foreign or price-less items', async () => {
+    const warrior = await createCharacter(db, 'warrior', { gold: 0 });
+    const sword = await inventoryItem(db, warrior.id, 'warrior_sword');
+    await service.equip({ characterId: warrior.id, commandId: randomUUID(), itemId: sword.id });
+    await expect(
+      service.sell({
+        characterId: warrior.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        itemId: sword.id,
+        quantity: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'ITEM_NOT_FOUND' } satisfies Partial<AssetError>);
+
+    const other = await createCharacter(db, 'warrior', { gold: 0 });
+    const otherPotion = await inventoryItem(db, other.id, 'small_hp_potion');
+    await expect(
+      service.sell({
+        characterId: warrior.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        itemId: otherPotion.id,
+        quantity: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'ITEM_NOT_FOUND' } satisfies Partial<AssetError>);
+
+    const bundle = JSON.parse(JSON.stringify(DEFAULT_CONTENT_BUNDLE)) as ContentBundle;
+    const gel = bundle.items['slime_gel'];
+    expect(gel).toBeDefined();
+    if (gel === undefined) {
+      return;
+    }
+    gel.sellPrice = 0;
+    const noSale = new AssetService(db, { now: () => clock, rng: () => 0, content: bundle });
+    await db.delete(itemInstances).where(eq(itemInstances.characterId, warrior.id));
+    const [item] = await db
+      .insert(itemInstances)
+      .values({
+        templateId: 'slime_gel',
+        characterId: warrior.id,
+        container: 'inventory',
+        slotIndex: 0,
+        quantity: 3,
+      })
+      .returning();
+    await expect(
+      noSale.sell({
+        characterId: warrior.id,
+        commandId: randomUUID(),
+        merchantId: 'town_merchant',
+        itemId: item!.id,
+        quantity: 1,
+      }),
+    ).rejects.toMatchObject({ code: 'CANNOT_SELL' } satisfies Partial<AssetError>);
   });
 });

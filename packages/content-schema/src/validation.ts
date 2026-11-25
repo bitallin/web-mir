@@ -177,6 +177,12 @@ function validateItems(bundle: ContentBundle, issues: ContentIssue[]): void {
     if (item.stackable && item.maxStack < 2) {
       issue(issues, 'error', `${path}.maxStack`, '可堆叠物品的堆叠上限必须大于 1');
     }
+
+    const buyPrice = item.buyPrice ?? 0;
+    const sellPrice = item.sellPrice ?? 0;
+    if (buyPrice > 0 && sellPrice >= buyPrice) {
+      issue(issues, 'error', path, '收购价必须低于出售价，否则玩家可无限兑换金币');
+    }
   }
 }
 

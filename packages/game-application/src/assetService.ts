@@ -18,9 +18,14 @@ import {
   experienceForNextLevel,
   findInventoryPlacement,
   isConsumable,
+  isShopQuantityAllowed,
+  itemBuyPrice,
+  itemSellPrice,
+  purchaseCost,
   requireItem,
   requireLootTable,
   rollLoot,
+  saleValue,
   statsWithEquipment,
   type CombatStats,
   type ItemCatalog,
@@ -45,7 +50,7 @@ import {
   type ExpiredDropCleanup,
   type ItemInstance,
 } from '@web-legend/persistence';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 
 import { AssetError } from './errors';
 
@@ -132,6 +137,41 @@ export type UseInput = {
   commandId: string;
   itemId: string;
   vitals: { hp: number; mp: number };
+};
+
+export type BuyInput = {
+  characterId: string;
+  commandId: string;
+  merchantId: string;
+  templateId: string;
+  quantity: number;
+};
+
+export type SellInput = {
+  characterId: string;
+  commandId: string;
+  merchantId: string;
+  itemId: string;
+  quantity: number;
+};
+
+export type ShopBuyOutcome = AssetCommandOutcome & {
+  purchased: {
+    templateId: string;
+    quantity: number;
+    unitPrice: number;
+    totalCost: number;
+  } | null;
+};
+
+export type ShopSellOutcome = AssetCommandOutcome & {
+  sold: {
+    itemId: string;
+    templateId: string;
+    quantity: number;
+    unitPrice: number;
+    totalValue: number;
+  } | null;
 };
 
 function itemView(row: ItemInstance, catalog: ItemCatalog): ItemView {
@@ -392,6 +432,15 @@ export class AssetService {
   async pickup(input: PickupInput): Promise<PickupOutcome> {
     const now = this.now();
     return this.db.transaction(async (tx) => {
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
       const inserted = await this.claimCommand(
         tx,
         input.characterId,
@@ -438,15 +487,6 @@ export class AssetService {
         .for('update');
       if (item === undefined || item.container !== 'ground' || item.characterId !== null) {
         throw new AssetError('ITEM_NOT_FOUND');
-      }
-
-      const [character] = await tx
-        .select()
-        .from(characters)
-        .where(eq(characters.id, input.characterId))
-        .for('update');
-      if (character === undefined) {
-        throw new AssetError('INVALID_SESSION');
       }
 
       const inventory = await listInventoryItems(tx, input.characterId);
@@ -520,11 +560,6 @@ export class AssetService {
   async equip(input: EquipInput): Promise<AssetCommandOutcome> {
     const now = this.now();
     return this.db.transaction(async (tx) => {
-      if (!(await this.claimCommand(tx, input.characterId, 'inventory_equip', input.commandId))) {
-        const current = await this.loadAssetsWithin(tx, input.characterId);
-        return { snapshot: current.snapshot, stats: current.stats, deduplicated: true };
-      }
-
       const [character] = await tx
         .select()
         .from(characters)
@@ -533,6 +568,11 @@ export class AssetService {
       if (character === undefined) {
         throw new AssetError('INVALID_SESSION');
       }
+      if (!(await this.claimCommand(tx, input.characterId, 'inventory_equip', input.commandId))) {
+        const current = await this.loadAssetsWithin(tx, input.characterId);
+        return { snapshot: current.snapshot, stats: current.stats, deduplicated: true };
+      }
+
       const [item] = await tx
         .select()
         .from(itemInstances)
@@ -608,13 +648,10 @@ export class AssetService {
   async unequip(input: UnequipInput): Promise<AssetCommandOutcome> {
     const now = this.now();
     return this.db.transaction(async (tx) => {
-      if (!(await this.claimCommand(tx, input.characterId, 'inventory_unequip', input.commandId))) {
-        const current = await this.loadAssetsWithin(tx, input.characterId);
-        return { snapshot: current.snapshot, stats: current.stats, deduplicated: true };
-      }
-
       // Serialize every bag mutation for this character so two operations can
-      // never pick the same free slot.
+      // never pick the same free slot. The character lock must come before the
+      // idempotency insert: its foreign key takes a share lock on the same row,
+      // and share-then-exclusive ordering deadlocks under concurrency (EL-012).
       const [character] = await tx
         .select()
         .from(characters)
@@ -622,6 +659,10 @@ export class AssetService {
         .for('update');
       if (character === undefined) {
         throw new AssetError('INVALID_SESSION');
+      }
+      if (!(await this.claimCommand(tx, input.characterId, 'inventory_unequip', input.commandId))) {
+        const current = await this.loadAssetsWithin(tx, input.characterId);
+        return { snapshot: current.snapshot, stats: current.stats, deduplicated: true };
       }
 
       const [equipped] = await tx
@@ -677,11 +718,6 @@ export class AssetService {
   async use(input: UseInput): Promise<AssetCommandOutcome> {
     const now = this.now();
     return this.db.transaction(async (tx) => {
-      if (!(await this.claimCommand(tx, input.characterId, 'inventory_use', input.commandId))) {
-        const current = await this.loadAssetsWithin(tx, input.characterId);
-        return { snapshot: current.snapshot, stats: current.stats, deduplicated: true };
-      }
-
       const [character] = await tx
         .select()
         .from(characters)
@@ -690,6 +726,11 @@ export class AssetService {
       if (character === undefined) {
         throw new AssetError('INVALID_SESSION');
       }
+      if (!(await this.claimCommand(tx, input.characterId, 'inventory_use', input.commandId))) {
+        const current = await this.loadAssetsWithin(tx, input.characterId);
+        return { snapshot: current.snapshot, stats: current.stats, deduplicated: true };
+      }
+
       const [item] = await tx
         .select()
         .from(itemInstances)
@@ -761,6 +802,231 @@ export class AssetService {
         stats: loaded.stats,
         deduplicated: false,
         vitals: { hp: nextHp, mp: nextMp },
+      };
+    });
+  }
+
+  async buy(input: BuyInput): Promise<ShopBuyOutcome> {
+    const now = this.now();
+    return this.db.transaction(async (tx) => {
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
+      const inserted = await this.claimCommand(tx, input.characterId, 'shop_buy', input.commandId);
+      if (!inserted) {
+        const current = await this.loadAssetsWithin(tx, input.characterId);
+        return {
+          snapshot: current.snapshot,
+          stats: current.stats,
+          deduplicated: true,
+          purchased: null,
+        };
+      }
+
+      const definition = this.content.items[input.templateId];
+      if (definition === undefined || itemBuyPrice(definition) <= 0) {
+        throw new AssetError('NOT_SOLD_HERE');
+      }
+      if (definition.classId !== undefined && definition.classId !== character.classId) {
+        throw new AssetError('CLASS_RESTRICTED');
+      }
+      if (!isShopQuantityAllowed(definition, input.quantity)) {
+        throw new AssetError('INVALID_QUANTITY');
+      }
+
+      const unitPrice = itemBuyPrice(definition);
+      const totalCost = purchaseCost(definition, input.quantity);
+
+      // Conditional update makes the balance check and the debit one atomic
+      // step; a concurrent purchase can never drive the wallet negative.
+      const [wallet] = await tx
+        .update(wallets)
+        .set({
+          balance: sql`${wallets.balance} - ${totalCost}`,
+          version: sql`${wallets.version} + 1`,
+          updatedAt: now,
+        })
+        .where(and(eq(wallets.characterId, input.characterId), gte(wallets.balance, totalCost)))
+        .returning({ balance: wallets.balance });
+      if (wallet === undefined) {
+        throw new AssetError('INSUFFICIENT_GOLD');
+      }
+
+      const inventory = await listInventoryItems(tx, input.characterId);
+      const placement = findInventoryPlacement(
+        {
+          items: inventory.map((entry) => ({
+            itemId: entry.id,
+            templateId: entry.templateId,
+            quantity: entry.quantity,
+            slotIndex: entry.slotIndex ?? 0,
+          })),
+          templateId: input.templateId,
+          quantity: input.quantity,
+          capacity: INVENTORY_CAPACITY,
+        },
+        this.content.items,
+      );
+      if (placement === null) {
+        throw new AssetError('INVENTORY_FULL');
+      }
+
+      if (placement.kind === 'merge') {
+        await tx
+          .update(itemInstances)
+          .set({
+            quantity: sql`${itemInstances.quantity} + ${input.quantity}`,
+            version: sql`${itemInstances.version} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(itemInstances.id, placement.targetItemId));
+      } else {
+        await tx.insert(itemInstances).values({
+          templateId: input.templateId,
+          characterId: input.characterId,
+          container: 'inventory',
+          slotIndex: placement.slotIndex,
+          quantity: input.quantity,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      await tx.insert(currencyLedger).values({
+        characterId: input.characterId,
+        currencyType: 'gold',
+        delta: -totalCost,
+        balanceAfter: wallet.balance,
+        reason: 'shop_purchase',
+        referenceId: `${input.merchantId}:${input.templateId}`,
+        idempotencyKey: `shop:${input.characterId}:${input.commandId}:gold`,
+        createdAt: now,
+      });
+
+      const loaded = await this.loadAssetsWithin(tx, input.characterId);
+      return {
+        snapshot: loaded.snapshot,
+        stats: loaded.stats,
+        deduplicated: false,
+        purchased: {
+          templateId: input.templateId,
+          quantity: input.quantity,
+          unitPrice,
+          totalCost,
+        },
+      };
+    });
+  }
+
+  async sell(input: SellInput): Promise<ShopSellOutcome> {
+    const now = this.now();
+    return this.db.transaction(async (tx) => {
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
+      const inserted = await this.claimCommand(tx, input.characterId, 'shop_sell', input.commandId);
+      if (!inserted) {
+        const current = await this.loadAssetsWithin(tx, input.characterId);
+        return {
+          snapshot: current.snapshot,
+          stats: current.stats,
+          deduplicated: true,
+          sold: null,
+        };
+      }
+
+      const [item] = await tx
+        .select()
+        .from(itemInstances)
+        .where(eq(itemInstances.id, input.itemId))
+        .for('update');
+      if (
+        item === undefined ||
+        item.characterId !== input.characterId ||
+        item.container !== 'inventory'
+      ) {
+        throw new AssetError('ITEM_NOT_FOUND');
+      }
+
+      const definition = requireItem(item.templateId, this.content.items);
+      const unitPrice = itemSellPrice(definition);
+      if (unitPrice <= 0) {
+        throw new AssetError('CANNOT_SELL');
+      }
+      if (!isShopQuantityAllowed(definition, input.quantity) || input.quantity > item.quantity) {
+        throw new AssetError('INVALID_QUANTITY');
+      }
+
+      const totalValue = saleValue(definition, input.quantity);
+      if (input.quantity === item.quantity) {
+        await tx.delete(itemInstances).where(eq(itemInstances.id, item.id));
+      } else {
+        await tx
+          .update(itemInstances)
+          .set({
+            quantity: sql`${itemInstances.quantity} - ${input.quantity}`,
+            version: sql`${itemInstances.version} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(itemInstances.id, item.id));
+      }
+
+      const [wallet] = await tx
+        .insert(wallets)
+        .values({
+          characterId: input.characterId,
+          balance: totalValue,
+          version: 1,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: wallets.characterId,
+          set: {
+            balance: sql`${wallets.balance} + ${totalValue}`,
+            version: sql`${wallets.version} + 1`,
+            updatedAt: now,
+          },
+        })
+        .returning({ balance: wallets.balance });
+      if (wallet === undefined) {
+        throw new AssetError('SERVICE_UNAVAILABLE');
+      }
+
+      await tx.insert(currencyLedger).values({
+        characterId: input.characterId,
+        currencyType: 'gold',
+        delta: totalValue,
+        balanceAfter: wallet.balance,
+        reason: 'shop_sale',
+        referenceId: `${input.merchantId}:${item.id}`,
+        idempotencyKey: `shop:${input.characterId}:${input.commandId}:gold`,
+        createdAt: now,
+      });
+
+      const loaded = await this.loadAssetsWithin(tx, input.characterId);
+      return {
+        snapshot: loaded.snapshot,
+        stats: loaded.stats,
+        deduplicated: false,
+        sold: {
+          itemId: item.id,
+          templateId: item.templateId,
+          quantity: input.quantity,
+          unitPrice,
+          totalValue,
+        },
       };
     });
   }

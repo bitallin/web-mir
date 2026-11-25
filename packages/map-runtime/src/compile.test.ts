@@ -153,6 +153,20 @@ describe('Tiled map compilation', () => {
     expect(() => compileMapSet([town], options())).toThrow(/not reachable/);
   });
 
+  it('rejects an NPC id the shop protocol cannot address', () => {
+    const town = mutableSource('starter_town');
+    const npcs = layers(town.data).find((layer) => layer.name === 'npc_points');
+    const merchant = npcs?.objects?.[0];
+    if (merchant?.properties === undefined) {
+      throw new Error('town has no NPC');
+    }
+    merchant.properties = merchant.properties.map((property) =>
+      property.name === 'npcId' ? { ...property, value: 'Town Merchant' } : property,
+    );
+
+    expect(() => compileMapSet([town], options())).toThrow(/invalid npcId/);
+  });
+
   it('rejects duplicate map ids', () => {
     expect(() =>
       compileMapSet([source('starter_town'), source('starter_town')], options()),

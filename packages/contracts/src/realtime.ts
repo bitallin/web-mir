@@ -25,6 +25,8 @@ export const CLIENT_MESSAGES = {
   inventoryEquip: 'inventory.equip',
   inventoryUnequip: 'inventory.unequip',
   inventoryUse: 'inventory.use',
+  shopBuy: 'shop.buy',
+  shopSell: 'shop.sell',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -42,6 +44,7 @@ export const SERVER_MESSAGES = {
   characterProgress: 'character.progress',
   characterLevelUp: 'character.levelUp',
   lootClaimed: 'loot.claimed',
+  shopCatalog: 'shop.catalog',
 } as const;
 
 export const FACING = {
@@ -182,6 +185,11 @@ export const COMMAND_REJECTION_CODES = [
   'ALREADY_CLAIMED',
   'SAFE_ZONE',
   'CHAT_BLOCKED',
+  'SHOP_UNAVAILABLE',
+  'INSUFFICIENT_GOLD',
+  'CANNOT_SELL',
+  'NOT_SOLD_HERE',
+  'INVALID_QUANTITY',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -213,6 +221,11 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   ALREADY_CLAIMED: '掉落已被拾取',
   SAFE_ZONE: '安全区内禁止攻击其他玩家',
   CHAT_BLOCKED: '消息包含不允许的内容',
+  SHOP_UNAVAILABLE: '附近没有可交易的商人',
+  INSUFFICIENT_GOLD: '金币不足',
+  CANNOT_SELL: '商人不会收购这件物品',
+  NOT_SOLD_HERE: '商人不出售这件物品',
+  INVALID_QUANTITY: '数量不合法',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

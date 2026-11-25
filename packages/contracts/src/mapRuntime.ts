@@ -54,11 +54,17 @@ export const mapPortalSchema = z
 
 export type MapPortal = z.infer<typeof mapPortalSchema>;
 
+export const MAP_NPC_ROLES = ['merchant', 'guard'] as const;
+export const mapNpcRoleSchema = z.enum(MAP_NPC_ROLES);
+export type MapNpcRole = z.infer<typeof mapNpcRoleSchema>;
+
 export const mapNpcPointSchema = z
   .object({
     id: z.string().min(1).max(32),
     name: z.string().min(1).max(32),
     tile: tilePointSchema,
+    /** Interaction the server enforces; absent NPCs are decoration only. */
+    role: mapNpcRoleSchema.optional(),
   })
   .strict();
 

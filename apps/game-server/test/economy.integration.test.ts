@@ -5,18 +5,23 @@ import { Client, type Room as SdkRoom } from '@colyseus/sdk';
 import {
   MONSTER_STATE_CODES,
   PROTOCOL_VERSION,
+  STARTER_TOWN_MAP_ID,
   STARTER_WILDS_MAP_ID,
   assetResultSchema,
   characterProgressSchema,
   combatProfileSchema,
+  commandRejectedSchema,
   inventorySnapshotSchema,
   lootClaimedSchema,
+  shopCatalogSchema,
   worldRoomNameFor,
   type AssetResult,
   type CharacterProgress,
+  type CommandRejected,
   type CombatProfile,
   type InventorySnapshot,
   type LootClaimed,
+  type ShopCatalog,
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
 import { createLogger } from '@web-legend/observability';
@@ -147,9 +152,12 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     return instance;
   }
 
-  async function createWorld(ticket: string): Promise<WorldRoom> {
+  async function createWorld(
+    ticket: string,
+    mapId: string = STARTER_WILDS_MAP_ID,
+  ): Promise<WorldRoom> {
     const room = (await client().create(
-      worldRoomNameFor(STARTER_WILDS_MAP_ID),
+      worldRoomNameFor(mapId),
       joinOptions(ticket),
       WorldState,
     )) as WorldRoom;
@@ -179,6 +187,14 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     return createActor(db, 'Econ', {
       mapId: STARTER_WILDS_MAP_ID,
       position: tileUnits({ x: 7, y: 15 }),
+      ...options,
+    });
+  }
+
+  function townActor(options: CreateActorOptions = {}): Promise<TestActor> {
+    return createActor(db, 'Shop', {
+      mapId: STARTER_TOWN_MAP_ID,
+      position: tileUnits({ x: 12, y: 9 }),
       ...options,
     });
   }
@@ -445,5 +461,118 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     );
     expect(reloaded.equipment.weapon?.templateId).toBe('warrior_sword');
     expect(reloaded.attack).toBe(18);
+  });
+
+  it('serves the town merchant catalog and settles buy and sell over the socket', async () => {
+    const actor = await townActor({ gold: 100 });
+    const room = await createWorld(actor.ticket, STARTER_TOWN_MAP_ID);
+    const catalogs: ShopCatalog[] = [];
+    const results: AssetResult[] = [];
+    room.onMessage('shop.catalog', (payload: unknown) => {
+      catalogs.push(shopCatalogSchema.parse(payload));
+    });
+    room.onMessage('asset.result', (payload: unknown) => {
+      results.push(assetResultSchema.parse(payload));
+    });
+
+    await waitUntil(() => catalogs.length > 0, 5_000, 'shop catalog');
+    const catalog = catalogs[0];
+    expect(catalog?.merchants.map((merchant) => merchant.id)).toContain('town_merchant');
+    expect(catalog?.offers.find((offer) => offer.templateId === 'small_hp_potion')?.buyPrice).toBe(
+      15,
+    );
+    expect(catalog?.sellPrices.find((price) => price.templateId === 'slime_gel')?.sellPrice).toBe(
+      4,
+    );
+
+    const buyCommandId = randomUUID();
+    room.send('shop.buy', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: buyCommandId,
+      clientSequence: 0,
+      merchantId: 'town_merchant',
+      templateId: 'small_hp_potion',
+      quantity: 1,
+    });
+    await waitUntil(() => results.length > 0, 5_000, 'buy result');
+    expect(results[0]?.kind).toBe('shop_buy');
+    expect(results[0]?.snapshot.gold).toBe(85);
+    const potion = results[0]?.snapshot.items.find((item) => item.templateId === 'small_hp_potion');
+    expect(potion?.quantity).toBe(1);
+
+    room.send('shop.buy', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: buyCommandId,
+      clientSequence: 0,
+      merchantId: 'town_merchant',
+      templateId: 'small_hp_potion',
+      quantity: 1,
+    });
+    await waitUntil(() => results.length > 1, 5_000, 'duplicate buy result');
+    expect(results[1]?.deduplicated).toBe(true);
+    expect(results[1]?.snapshot.gold).toBe(85);
+
+    const sellItem = results[1]?.snapshot.items.find(
+      (item) => item.templateId === 'small_hp_potion',
+    );
+    expect(sellItem).toBeDefined();
+    room.send('shop.sell', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 1,
+      merchantId: 'town_merchant',
+      itemId: sellItem!.itemId,
+      quantity: 1,
+    });
+    await waitUntil(() => results.length > 2, 5_000, 'sell result');
+    expect(results[2]?.kind).toBe('shop_sell');
+    expect(results[2]?.snapshot.gold).toBe(90);
+    expect(results[2]?.snapshot.items.some((item) => item.itemId === sellItem!.itemId)).toBe(false);
+  });
+
+  it('rejects shop commands away from the merchant or for the wrong NPC', async () => {
+    const far = await createActor(db, 'FarS', { mapId: STARTER_TOWN_MAP_ID, gold: 100 });
+    const farRoom = await createWorld(far.ticket, STARTER_TOWN_MAP_ID);
+    const farRejections: CommandRejected[] = [];
+    farRoom.onMessage('command.rejected', (payload: unknown) => {
+      farRejections.push(commandRejectedSchema.parse(payload));
+    });
+    await waitUntil(
+      () => farRoom.state.players.get(far.character.id) !== undefined,
+      5_000,
+      'far player joined',
+    );
+    farRoom.send('shop.buy', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      merchantId: 'town_merchant',
+      templateId: 'small_hp_potion',
+      quantity: 1,
+    });
+    await waitUntil(() => farRejections.length > 0, 5_000, 'far rejection');
+    expect(farRejections[0]?.code).toBe('SHOP_UNAVAILABLE');
+
+    const near = await townActor({ gold: 100 });
+    const nearRoom = await createWorld(near.ticket, STARTER_TOWN_MAP_ID);
+    const nearRejections: CommandRejected[] = [];
+    nearRoom.onMessage('command.rejected', (payload: unknown) => {
+      nearRejections.push(commandRejectedSchema.parse(payload));
+    });
+    await waitUntil(
+      () => nearRoom.state.players.get(near.character.id) !== undefined,
+      5_000,
+      'near player joined',
+    );
+    nearRoom.send('shop.buy', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      merchantId: 'town_guard',
+      templateId: 'small_hp_potion',
+      quantity: 1,
+    });
+    await waitUntil(() => nearRejections.length > 0, 5_000, 'wrong merchant rejection');
+    expect(nearRejections[0]?.code).toBe('SHOP_UNAVAILABLE');
   });
 });

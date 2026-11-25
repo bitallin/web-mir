@@ -3,6 +3,7 @@ export { AssetService } from './assetService';
 export type {
   AssetCommandOutcome,
   AssetServiceOptions,
+  BuyInput,
   EquipInput,
   KillRewardInput,
   KillRewardOutcome,
@@ -10,6 +11,9 @@ export type {
   LootDropView,
   PickupInput,
   PickupOutcome,
+  SellInput,
+  ShopBuyOutcome,
+  ShopSellOutcome,
   UnequipInput,
   UseInput,
 } from './assetService';

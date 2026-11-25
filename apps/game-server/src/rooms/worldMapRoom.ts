@@ -38,9 +38,13 @@ import {
   lootPickupSchema,
   moveToCommandSchema,
   sessionTransferSchema,
+  shopBuySchema,
+  shopCatalogSchema,
+  shopSellSchema,
   skillCastSchema,
   systemNoticeSchema,
   tilePointSchema,
+  SHOP_RANGE_TILES,
   worldJoinOptionsSchema,
   type AdminCommandEnvelope,
   type AdminRoom,
@@ -62,6 +66,9 @@ import {
   type MapMonsterSpawn,
   type MapPortal,
   type SessionTransfer,
+  type ShopCatalog,
+  type ShopOffer,
+  type ShopSellPrice,
   type SystemNotice,
   type TilePoint,
 } from '@web-legend/contracts';
@@ -84,6 +91,8 @@ import {
 import {
   CombatWorld,
   defaultChatFilter,
+  itemBuyPrice,
+  itemSellPrice,
   type ChatFilter,
   type CombatCommandResult,
   type CombatStats,
@@ -431,6 +440,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.inventoryUse, (client, message) => {
       this.handleInventoryUse(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.shopBuy, (client, message) => {
+      this.handleShopBuy(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.shopSell, (client, message) => {
+      this.handleShopSell(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
@@ -625,6 +640,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       if (session !== undefined) {
         this.sendProfile(session.client, session.playerId);
         this.sendAssetSnapshot(session.client, session);
+        this.sendShopCatalog(session.client, session);
         this.broadcastSystemNotice(
           'info',
           `${auth.displayName} 来到了 ${this.map.runtime.manifest.name}`,
@@ -2343,6 +2359,113 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         }
       },
     );
+  }
+
+  private handleShopBuy(client: Client, raw: unknown): void {
+    const parsed = shopBuySchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    void this.runAssetCommand(
+      client,
+      command,
+      'shop_buy',
+      (session) => {
+        const alive = this.requireAlive(session);
+        return alive ?? this.validateMerchant(session, command.merchantId);
+      },
+      (session) =>
+        this.assets.buy({
+          characterId: session.playerId,
+          commandId: command.commandId,
+          merchantId: command.merchantId,
+          templateId: command.templateId,
+          quantity: command.quantity,
+        }),
+      () => undefined,
+    );
+  }
+
+  private handleShopSell(client: Client, raw: unknown): void {
+    const parsed = shopSellSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    void this.runAssetCommand(
+      client,
+      command,
+      'shop_sell',
+      (session) => {
+        const alive = this.requireAlive(session);
+        return alive ?? this.validateMerchant(session, command.merchantId);
+      },
+      (session) =>
+        this.assets.sell({
+          characterId: session.playerId,
+          commandId: command.commandId,
+          merchantId: command.merchantId,
+          itemId: command.itemId,
+          quantity: command.quantity,
+        }),
+      () => undefined,
+    );
+  }
+
+  private validateMerchant(
+    session: SessionRecord,
+    merchantId: string,
+  ): CommandRejectionCode | null {
+    const player = this.combat.getPlayer(session.playerId);
+    if (player === undefined) {
+      return 'INVALID_SESSION';
+    }
+    const merchant = this.map.runtime.manifest.npcPoints.find(
+      (npc) => npc.id === merchantId && npc.role === 'merchant',
+    );
+    if (merchant === undefined) {
+      return 'SHOP_UNAVAILABLE';
+    }
+    const tile = tileOfUnits(player);
+    const distance = Math.hypot(tile.x - merchant.tile.x, tile.y - merchant.tile.y);
+    return distance > SHOP_RANGE_TILES ? 'SHOP_UNAVAILABLE' : null;
+  }
+
+  private sendShopCatalog(client: Client, session: SessionRecord): void {
+    const player = this.state.players.get(session.playerId);
+    const merchants = this.map.runtime.manifest.npcPoints
+      .filter((npc) => npc.role === 'merchant')
+      .map((npc) => ({ id: npc.id, name: npc.name, tile: npc.tile }));
+    const items = Object.values(this.content.bundle.items);
+    const offers: ShopOffer[] = items
+      .filter(
+        (item) =>
+          itemBuyPrice(item) > 0 &&
+          (item.classId === undefined || item.classId === player?.classId),
+      )
+      .map((item) => ({
+        templateId: item.id,
+        name: item.name,
+        kind: item.kind,
+        buyPrice: itemBuyPrice(item),
+        levelRequirement: item.levelRequirement,
+        stackable: item.stackable,
+        maxStack: item.maxStack,
+        attackBonus: item.attackBonus,
+        defenseBonus: item.defenseBonus,
+        maxHpBonus: item.maxHpBonus,
+        maxMpBonus: item.maxMpBonus,
+        healHp: item.healHp,
+        healMp: item.healMp,
+      }));
+    const sellPrices: ShopSellPrice[] = items
+      .filter((item) => itemSellPrice(item) > 0)
+      .map((item) => ({ templateId: item.id, sellPrice: itemSellPrice(item) }));
+    const catalog: ShopCatalog = { merchants, offers, sellPrices };
+    client.send(SERVER_MESSAGES.shopCatalog, shopCatalogSchema.parse(catalog));
   }
 
   private requireAlive(session: SessionRecord): CommandRejectionCode | null {

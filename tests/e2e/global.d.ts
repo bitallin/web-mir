@@ -36,7 +36,11 @@ declare global {
         expiresAt: number;
       }[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
-      inventoryState: () => { characterId: string } | null;
+      inventoryState: () => {
+        characterId: string;
+        gold: number;
+        items: { itemId: string; templateId: string; name: string; quantity: number }[];
+      } | null;
       lastMoveIntentAt?: number;
       lastAckAt?: number;
       lastSnapshotAt?: number;

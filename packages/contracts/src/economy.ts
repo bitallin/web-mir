@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { tilePointSchema } from './map';
+
 /**
  * Phase-5 asset wire contract. The browser only ever asks to pick up a drop or
  * to move an item it already owns; every quantity, price, stat and reward is
@@ -15,6 +17,10 @@ export const PICKUP_RANGE_TILES = 1.5 as const;
 export const LOOT_OWNER_WINDOW_MS = 30_000 as const;
 /** Unclaimed drops disappear this long after they were created. */
 export const LOOT_EXPIRY_MS = 120_000 as const;
+/** A merchant can be used from this many tiles away. */
+export const SHOP_RANGE_TILES = 3 as const;
+/** One shop command may move at most this many units. */
+export const SHOP_MAX_QUANTITY = 99 as const;
 
 export const ITEM_KINDS = ['weapon', 'armor', 'consumable', 'material'] as const;
 export const itemKindSchema = z.enum(ITEM_KINDS);
@@ -100,6 +106,8 @@ export const assetCommandKindSchema = z.enum([
   'inventory_equip',
   'inventory_unequip',
   'inventory_use',
+  'shop_buy',
+  'shop_sell',
 ]);
 
 export type AssetCommandKind = z.infer<typeof assetCommandKindSchema>;
@@ -145,6 +153,89 @@ export const inventoryUseSchema = z
   .strict();
 
 export type InventoryUse = z.infer<typeof inventoryUseSchema>;
+
+const merchantIdSchema = z
+  .string()
+  .min(3)
+  .max(32)
+  .regex(/^[a-z][a-z0-9_]*$/, 'merchant id must be lowercase snake_case');
+
+export const shopBuySchema = z
+  .object({
+    ...assetCommandBase,
+    merchantId: merchantIdSchema,
+    templateId: templateIdSchema,
+    quantity: z.number().int().min(1).max(SHOP_MAX_QUANTITY),
+  })
+  .strict();
+
+export type ShopBuy = z.infer<typeof shopBuySchema>;
+
+export const shopSellSchema = z
+  .object({
+    ...assetCommandBase,
+    merchantId: merchantIdSchema,
+    itemId: z.uuid(),
+    quantity: z.number().int().min(1).max(SHOP_MAX_QUANTITY),
+  })
+  .strict();
+
+export type ShopSell = z.infer<typeof shopSellSchema>;
+
+export const shopMerchantSchema = z
+  .object({
+    id: merchantIdSchema,
+    name: z.string().min(1).max(32),
+    tile: tilePointSchema,
+  })
+  .strict();
+
+export type ShopMerchant = z.infer<typeof shopMerchantSchema>;
+
+/** One purchasable template. Prices always come from the server content bundle. */
+export const shopOfferSchema = z
+  .object({
+    templateId: templateIdSchema,
+    name: z.string().min(1).max(24),
+    kind: itemKindSchema,
+    buyPrice: z.number().int().positive(),
+    levelRequirement: z.number().int().min(1),
+    stackable: z.boolean(),
+    maxStack: z.number().int().min(1).max(1_000),
+    attackBonus: z.number().int().nonnegative(),
+    defenseBonus: z.number().int().nonnegative(),
+    maxHpBonus: z.number().int().nonnegative(),
+    maxMpBonus: z.number().int().nonnegative(),
+    healHp: z.number().int().nonnegative(),
+    healMp: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type ShopOffer = z.infer<typeof shopOfferSchema>;
+
+export const shopSellPriceSchema = z
+  .object({
+    templateId: templateIdSchema,
+    sellPrice: z.number().int().positive(),
+  })
+  .strict();
+
+export type ShopSellPrice = z.infer<typeof shopSellPriceSchema>;
+
+/**
+ * Private shop state for one map. Offers are already filtered to the player's
+ * class; prices are display values copied from the room's fixed content
+ * release. The server recomputes every price when a command arrives.
+ */
+export const shopCatalogSchema = z
+  .object({
+    merchants: z.array(shopMerchantSchema).max(16),
+    offers: z.array(shopOfferSchema).max(200),
+    sellPrices: z.array(shopSellPriceSchema).max(200),
+  })
+  .strict();
+
+export type ShopCatalog = z.infer<typeof shopCatalogSchema>;
 
 /** Sent only after the transaction that owns the asset change has committed. */
 export const assetResultSchema = z

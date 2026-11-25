@@ -32,6 +32,8 @@ declare global {
       equipItem: (itemId: string) => boolean;
       unequipSlot: (slot: EquipmentSlot) => boolean;
       useItem: (itemId: string) => boolean;
+      buyFromShop: (merchantId: string, templateId: string, quantity: number) => boolean;
+      sellToShop: (merchantId: string, itemId: string, quantity: number) => boolean;
       lootDrops: () => LootView[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
       inventoryState: () => InventorySnapshot | null;

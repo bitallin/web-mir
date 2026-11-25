@@ -3,7 +3,27 @@
 > 更新日期：2026-11-25
 > 维护规则：每个重要任务或阶段结束后更新；阶段门禁未通过不得标记完成。
 
-## 0. Alpha 0.1 完成情况（2026-11-25）
+## 0. Alpha 0.2 切片 1：主城杂货商与经济闭环（2026-11-25）
+
+**切片完成：玩家可用初始金币买药/护甲、出售材料与多余装备；金币/背包/账本
+同事务；真实浏览器 E2E 通过。**
+
+- 执行计划：`docs/ALPHA_02_EXECUTION_PLAN.md`
+- 阶段报告：`docs/phase-reports/alpha-02/ALPHA_02_SHOP_REPORT.md`
+- ADR：`docs/ADR/ADR-026-town-merchant-and-gold-sink.md`
+- 证据：`docs/phase-reports/alpha-02/shop/`
+
+关键结果：
+
+1. 内容驱动价格（`buyPrice`/`sellPrice` 可选，旧 Release checksum 不变）；
+   内容校验阻断“收购价 ≥ 出售价”的套利配置。
+2. 新角色 50 金币启动资金；主城杂货商按 `npc role=merchant` 服务端校验距离。
+3. 买卖复用资产事务、账本与幂等键；并发测试暴露并修复了资产命令死锁
+   （统一先锁角色行再写幂等命令）。
+4. 客户端商店面板（购买/出售）、距离提示、金币不足禁用；移除“阶段 6”标签。
+5. 未验证：50 人容量回归、远端 CI、开发栈重启后的人工试玩。
+
+## 0.1 Alpha 0.1 完成情况（2026-11-25）
 
 **Alpha 0.1 工程目标完成：8 项 P1 全部关闭；345 个测试与 21 个浏览器 E2E
 通过；50 人 10 分钟容量回归、恢复演练与资产不变量通过。**
@@ -32,11 +52,15 @@
 
 ## 1. 当前阶段
 
-**Alpha 0.1 已完成，等待进入 Alpha 0.2（游戏体验完善）。**
+**Alpha 0.2 进行中：切片 1（主城杂货商与经济闭环）已完成。**
 
-Alpha 0.2 的前置条件见阶段报告 §9：复用服务端自动攻击、资产事务与内容发布
-校验；新玩法进入 domain/application；保持独立 E2E 与容量回归门禁；首周复测
-容量 p95 与掉落视图性能。Alpha 0.2 范围见 `docs/POST_MVP_ROADMAP.md` 第 3 节。
+Alpha 0.2 以“30 分钟有事做、有成长、有危险”为目标，按四个可玩切片推进：
+S1 商店与经济（已完成）、S2 三职业技能与定位、S3 怪物威胁与死亡代价、
+S4 装备/掉落/背包与美术。范围见 `docs/POST_MVP_ROADMAP.md` 第 3 节与
+`docs/ALPHA_02_EXECUTION_PLAN.md`。
+
+本切片完成后的门禁缺口：50 人容量回归、远端 CI、8584 人工试玩。开发栈 84–87
+仍运行 Alpha 0.1 服务端代码，重启并发布新内容 Release 后商店才可见。
 
 ## 2. 阶段进度
 
@@ -605,6 +629,20 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
 
 ## 9. 最近一次测试结果
 
+### Alpha 0.2 切片 1（2026-11-25，`docs/phase-reports/alpha-02/`）
+
+| 检查           | 命令/方式                | 结果                                         |
+| -------------- | ------------------------ | -------------------------------------------- |
+| 格式/lint/类型 | `pnpm verify` 前三步     | 全部通过（Node 26.13.1）                     |
+| 单元/集成      | `pnpm test`              | 63 文件、**362 测试**通过                    |
+| 构建           | `pnpm build`             | 4 个应用成功                                 |
+| 浏览器 E2E     | `pnpm test:e2e`          | **22/22 通过**（2.3 分钟，独立库/端口）      |
+| 商店 E2E       | `shop.spec.ts`           | 金币 50 → 35 → 40；离开重进后金币与药水保持  |
+| 资产不变量     | `pnpm verify:invariants` | 7 项全部 0 违例（`alpha-02/invariants.txt`） |
+
+未执行：50 人 × 10 分钟容量回归（开发栈仍运行 Alpha 0.1 代码，需重启后补跑）；
+远端 CI。
+
 ### Alpha 0.1（2026-11-25，`docs/phase-reports/alpha-01/`）
 
 | 检查           | 命令/方式                | 结果                                                            |
@@ -705,7 +743,9 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
   主题：`feat(phase-8): deliver production deployment, observability and recovery`
 - 阶段 9 主提交：`8e3e534`
   主题：`feat(phase-9): isolate test databases and complete websocket metrics`
-- Alpha 0.1：工作区已完成、尚未提交（等待用户审阅与远端 CI 确认）
+- Alpha 0.1 主提交：`fc9ad63`
+  主题：`feat(alpha-01): close the eight P1 debts and add server-authoritative auto attack`
+- Alpha 0.2 切片 1：本轮实现完成，提交哈希在提交后补记
 
 ## 11. 当前环境事实
 
@@ -713,7 +753,8 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
 - Docker 24.0.5，Docker Compose v5.7.0；PostgreSQL 18.3。
 - SSH 容器端口映射：宿主机 `8580-8589` → 容器 `80-89`；项目使用 84–87。
 - 开发栈当前运行：game-web 84（8584）、admin-web 85（8585）、control-api 86
-  （8586）、game-server 87（8587）。
+  （8586）、game-server 87（8587）。**进程启动于 Alpha 0.1 代码；Alpha 0.2
+  商店需要重启后端并发布新内容 Release 后才会生效。**
 - PostgreSQL 从 SSH 容器通过网关 `192.51.0.1:5432` 访问。
 - Playwright 使用预装 Chromium 131；默认 2 workers，软件渲染约 22–27 FPS。
 - 开发库当前约 3,017 账号、2,850 角色、3,562 物品实例、295 条掉落、212 条
@@ -726,13 +767,14 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
 
 ## 12. 下一步
 
-1. 推送并确认远端 CI 的 verify 与 e2e job：本地隔离流程为 21/21，本环境未推送。
-2. 用户验收 `http://<LAN-IP>:8584/`：点击怪物一次自动靠近并持续攻击、攻击条、
-   Esc/停止、Toast 自动消失且不遮挡战斗面板；`8585` 验证 Kick/Ban 与内容发布。
-3. Alpha 0.2 首周：降低掉落/视图同步的 tick 开销并复测 50 人 p95；当前
-   10.25ms 作为已知风险记录。
-4. Alpha 0.2 前补齐正式美术（tileset/三职业/怪物/图标）与三职业技能设计。
-5. 保持 345 个测试与 21 个浏览器 E2E 为回归门禁；E2E 固定使用独立数据库，
-   软件渲染环境默认 2 个 Playwright worker。
+1. 重启开发栈（84–87），在 8585 发布并激活包含价格的新内容 Release；随后在
+   `http://<LAN-IP>:8584/` 试玩“买药 → 打怪 → 卖材料 → 买护甲”。
+2. 补跑 50 人 × 10 分钟容量回归与 `pnpm verify:invariants`，确认商店代码未
+   劣化 tick 与资产 p95；Alpha 0.1 的 10.25ms 仍作为已知风险。
+3. 推送并确认远端 CI 的 verify 与 e2e job（本环境未推送）。
+4. 进入切片 2：三职业技能与定位（DoT/位移/护盾/回蓝、等级解锁、三套外观）；
+   开始前处理 TD-DATA-05（装备槽可延迟唯一约束）。
+5. 保持全量测试与隔离 E2E 为回归门禁；软件渲染环境默认 2 个 Playwright
+   worker。
 6. 多 Realm、动态实例、独立 Outbox worker、审计归档按 `docs/POST_MVP_ROADMAP.md`
    的触发条件推进，不提前引入分布式架构。

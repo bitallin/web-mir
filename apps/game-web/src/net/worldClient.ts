@@ -18,6 +18,7 @@ import {
   monsterStateKindFromCode,
   sessionKickedSchema,
   sessionTransferSchema,
+  shopCatalogSchema,
   systemNoticeSchema,
   worldRoomNameFor,
   type AssetResult,
@@ -34,6 +35,7 @@ import {
   type LootClaimed,
   type MonsterStateKind,
   type SessionKicked,
+  type ShopCatalog,
   type SystemNotice,
   type TilePoint,
 } from '@web-legend/contracts';
@@ -118,6 +120,7 @@ export type WorldClientCallbacks = {
   onTransfer: (mapId: string) => void;
   onLatency: (latencyMs: number) => void;
   onInventory: (snapshot: InventorySnapshot) => void;
+  onShopCatalog: (catalog: ShopCatalog) => void;
   onAssetResult: (result: AssetResult) => void;
   onProgress: (progress: CharacterProgress) => void;
   onLevelUp: (levelUp: LevelUp) => void;
@@ -375,6 +378,40 @@ export class WorldClient {
     return true;
   }
 
+  sendShopBuy(merchantId: string, templateId: string, quantity: number): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.shopBuy, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      merchantId,
+      templateId,
+      quantity,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendShopSell(merchantId: string, itemId: string, quantity: number): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.shopSell, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      merchantId,
+      itemId,
+      quantity,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
   sendChat(text: string): boolean {
     const room = this.room;
     const message = text.trim();
@@ -577,6 +614,15 @@ export class WorldClient {
         const parsed = inventorySnapshotSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onInventory(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.shopCatalog, (payload: unknown) => {
+        const parsed = shopCatalogSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onShopCatalog(parsed.data);
         }
       }),
     );

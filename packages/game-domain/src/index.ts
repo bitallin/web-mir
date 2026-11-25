@@ -38,12 +38,18 @@ export type { CombatStats } from './stats';
 
 export {
   ITEM_CATALOG,
+  STARTER_GOLD,
   STARTER_KIT,
   canEquip,
   equipmentBonuses,
   findInventoryPlacement,
   isConsumable,
+  isShopQuantityAllowed,
+  itemBuyPrice,
+  itemSellPrice,
+  purchaseCost,
   requireItem,
+  saleValue,
   starterKitFor,
   statsWithEquipment,
 } from './items';

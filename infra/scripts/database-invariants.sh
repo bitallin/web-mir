@@ -7,7 +7,9 @@ set -euo pipefail
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 PG_TOOL_IMAGE=${PG_TOOL_IMAGE:-docker.m.daocloud.io/postgres@sha256:a9abf4275f9e99bff8e6aed712b3b7dfec9cac1341bba01c1ffdfce9ff9fc34a}
 SQL="$ROOT_DIR/infra/scripts/database-invariants.sql"
-OUT=${1:-"$ROOT_DIR/docs/phase-reports/alpha-01/database-invariants.txt"}
+# Default to a rolling "latest" file so a routine check never overwrites a
+# historical phase report (AGENTS §11: history is append-only).
+OUT=${1:-"$ROOT_DIR/docs/phase-reports/database-invariants.txt"}
 
 if [[ -z "${DATABASE_URL:-}" && -f "$ROOT_DIR/.env" ]]; then
   set -a

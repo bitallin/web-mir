@@ -1676,3 +1676,119 @@ body {
     width: auto;
   }
 }
+
+/* Alpha 0.2 slice 1: town merchant. */
+.shop-panel {
+  left: 50%;
+  top: 50%;
+  z-index: 4;
+  width: min(560px, calc(100% - 48px));
+  max-height: min(560px, calc(100% - 160px));
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #2b323a;
+  background: var(--ink-raised);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.shop-panel .panel-heading {
+  gap: 10px;
+}
+
+.shop-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #232a32;
+}
+
+.shop-tabs button {
+  padding: 3px 12px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.shop-tabs button[aria-pressed='true'] {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(201, 162, 39, 0.12);
+}
+
+.shop-list {
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.shop-offer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+.shop-offer + .shop-offer {
+  border-top: 1px solid rgba(35, 42, 50, 0.7);
+}
+
+.shop-offer-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.shop-offer-meta,
+.shop-offer-level {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.shop-price {
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.shop-offer button {
+  padding: 2px 8px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.shop-offer button:hover:not(:disabled) {
+  background: rgba(201, 162, 39, 0.12);
+}
+
+.shop-offer button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.shop-list li.empty {
+  padding: 10px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.shop-hint {
+  margin: 0;
+  padding: 8px 14px 12px;
+  color: var(--muted);
+  font-size: 11px;
+}

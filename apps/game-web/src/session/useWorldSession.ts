@@ -10,6 +10,7 @@ import type {
   LevelUp,
   LootClaimed,
   SessionKicked,
+  ShopCatalog,
   SystemNotice,
   TilePoint,
 } from '@web-legend/contracts';
@@ -71,6 +72,7 @@ export type SessionState = {
   selectedTargetId: string | null;
   skillCooldowns: Record<string, number>;
   inventory: InventorySnapshot | null;
+  shopCatalog: ShopCatalog | null;
   levelUpNotice: LevelUp | null;
   /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
   notices: SessionNotice[];
@@ -113,6 +115,7 @@ function initialState(character: CharacterView): SessionState {
     selectedTargetId: null,
     skillCooldowns: {},
     inventory: null,
+    shopCatalog: null,
     levelUpNotice: null,
     notices: [],
     autoAttack: null,
@@ -422,6 +425,9 @@ class WorldSession {
           this.inventory = snapshot;
           this.updateState((previous) => ({ ...previous, inventory: snapshot }));
         },
+        onShopCatalog: (catalog) => {
+          this.updateState((previous) => ({ ...previous, shopCatalog: catalog }));
+        },
         onAssetResult: (result) => {
           this.inventory = result.snapshot;
           if (import.meta.env.DEV) {
@@ -605,6 +611,24 @@ class WorldSession {
     return sent;
   }
 
+  shopBuy(merchantId: string, templateId: string, quantity: number): boolean {
+    const sent = this.client?.sendShopBuy(merchantId, templateId, quantity) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  shopSell(merchantId: string, itemId: string, quantity: number): boolean {
+    const sent = this.client?.sendShopSell(merchantId, itemId, quantity) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
   sendChat(text: string): boolean {
     return this.client?.sendChat(text) ?? false;
   }
@@ -767,6 +791,7 @@ class WorldSession {
       combatLog: [],
       selectedTargetId: null,
       skillCooldowns: {},
+      shopCatalog: null,
       levelUpNotice: null,
       notices: [],
       autoAttack: null,
@@ -817,6 +842,9 @@ class WorldSession {
       equipItem: (itemId) => this.equip(itemId),
       unequipSlot: (slot) => this.unequip(slot),
       useItem: (itemId) => this.consumeItem(itemId),
+      buyFromShop: (merchantId, templateId, quantity) =>
+        this.shopBuy(merchantId, templateId, quantity),
+      sellToShop: (merchantId, itemId, quantity) => this.shopSell(merchantId, itemId, quantity),
       lootDrops: () => this.latestLoot,
       lootScreenPoint: (dropId) => this.bridge.lootScreenPoint(dropId),
       inventoryState: () => this.inventory,
@@ -845,6 +873,8 @@ export type WorldSessionControls = {
   equip: (itemId: string) => boolean;
   unequip: (slot: EquipmentSlot) => boolean;
   consumeItem: (itemId: string) => boolean;
+  shopBuy: (merchantId: string, templateId: string, quantity: number) => boolean;
+  shopSell: (merchantId: string, itemId: string, quantity: number) => boolean;
   toggleSfx: () => void;
 };
 
@@ -916,6 +946,16 @@ export function useWorldSession(
     (itemId: string) => sessionRef.current?.consumeItem(itemId) ?? false,
     [],
   );
+  const shopBuy = useCallback(
+    (merchantId: string, templateId: string, quantity: number) =>
+      sessionRef.current?.shopBuy(merchantId, templateId, quantity) ?? false,
+    [],
+  );
+  const shopSell = useCallback(
+    (merchantId: string, itemId: string, quantity: number) =>
+      sessionRef.current?.shopSell(merchantId, itemId, quantity) ?? false,
+    [],
+  );
   const toggleSfx = useCallback(() => {
     sessionRef.current?.toggleSfx();
   }, []);
@@ -933,6 +973,8 @@ export function useWorldSession(
     equip,
     unequip,
     consumeItem,
+    shopBuy,
+    shopSell,
     toggleSfx,
   };
 }

@@ -161,6 +161,8 @@ const RAW_BASE_CONTENT = {
       respawnMs: 10_000,
     },
   },
+  // Starter weapons have no sellPrice (bound): selling the only weapon would
+  // leave a new character unable to obtain another one.
   items: {
     warrior_sword: {
       id: 'warrior_sword',
@@ -224,6 +226,8 @@ const RAW_BASE_CONTENT = {
       maxMpBonus: 0,
       healHp: 0,
       healMp: 0,
+      buyPrice: 40,
+      sellPrice: 12,
     },
     leather_armor: {
       id: 'leather_armor',
@@ -239,6 +243,8 @@ const RAW_BASE_CONTENT = {
       maxMpBonus: 0,
       healHp: 0,
       healMp: 0,
+      buyPrice: 120,
+      sellPrice: 35,
     },
     small_hp_potion: {
       id: 'small_hp_potion',
@@ -253,6 +259,8 @@ const RAW_BASE_CONTENT = {
       maxMpBonus: 0,
       healHp: 40,
       healMp: 0,
+      buyPrice: 15,
+      sellPrice: 5,
     },
     small_mp_potion: {
       id: 'small_mp_potion',
@@ -267,6 +275,8 @@ const RAW_BASE_CONTENT = {
       maxMpBonus: 0,
       healHp: 0,
       healMp: 30,
+      buyPrice: 18,
+      sellPrice: 6,
     },
     slime_gel: {
       id: 'slime_gel',
@@ -281,6 +291,7 @@ const RAW_BASE_CONTENT = {
       maxMpBonus: 0,
       healHp: 0,
       healMp: 0,
+      sellPrice: 4,
     },
     wolf_pelt: {
       id: 'wolf_pelt',
@@ -295,6 +306,7 @@ const RAW_BASE_CONTENT = {
       maxMpBonus: 0,
       healHp: 0,
       healMp: 0,
+      sellPrice: 8,
     },
   },
   lootTables: {

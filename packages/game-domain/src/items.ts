@@ -44,6 +44,47 @@ export function requireItem(
   return item;
 }
 
+/** New characters start with this much gold so the first city trip matters. */
+export const STARTER_GOLD = 50 as const;
+
+export function itemBuyPrice(definition: ItemDefinition): number {
+  return definition.buyPrice ?? 0;
+}
+
+export function itemSellPrice(definition: ItemDefinition): number {
+  return definition.sellPrice ?? 0;
+}
+
+/** Whether one merchant command may move this many units of the template. */
+export function isShopQuantityAllowed(definition: ItemDefinition, quantity: number): boolean {
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    return false;
+  }
+  return definition.stackable ? quantity <= definition.maxStack : quantity === 1;
+}
+
+export function purchaseCost(definition: ItemDefinition, quantity: number): number {
+  if (!isShopQuantityAllowed(definition, quantity)) {
+    throw new RangeError(`invalid purchase quantity ${String(quantity)}`);
+  }
+  const total = itemBuyPrice(definition) * quantity;
+  if (!Number.isSafeInteger(total)) {
+    throw new RangeError('purchase cost is not a safe integer');
+  }
+  return total;
+}
+
+export function saleValue(definition: ItemDefinition, quantity: number): number {
+  if (!isShopQuantityAllowed(definition, quantity)) {
+    throw new RangeError(`invalid sale quantity ${String(quantity)}`);
+  }
+  const total = itemSellPrice(definition) * quantity;
+  if (!Number.isSafeInteger(total)) {
+    throw new RangeError('sale value is not a safe integer');
+  }
+  return total;
+}
+
 export function canEquip(
   definition: ItemDefinition,
   classId: CharacterClass,

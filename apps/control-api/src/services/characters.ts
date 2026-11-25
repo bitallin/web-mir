@@ -5,6 +5,7 @@ import {
   type CreateCharacterRequest,
 } from '@web-legend/contracts';
 import { STARTER_TOWN_MAP } from '@web-legend/contracts/maps';
+import { STARTER_GOLD } from '@web-legend/game-domain';
 import {
   findCharacterForAccount,
   findRealmById,
@@ -84,6 +85,7 @@ export class CharacterService {
           facing: 2,
         },
         definition.starterKit,
+        STARTER_GOLD,
       );
       return { ...character, realmCode: realm.code };
     } catch (error) {

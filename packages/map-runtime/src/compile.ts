@@ -262,7 +262,27 @@ function compileSingle(source: MapSource, options: MapCompileOptions): MapRuntim
           `NPC object ${String(object.id)} needs npcId and npcName`,
         );
       }
-      return { id, name, tile: objectTile(map, source.name, object) };
+      // The shop protocol addresses merchants by npcId; reject ids that the
+      // wire schema cannot carry instead of failing on a player join.
+      if (!/^[a-z][a-z0-9_]{2,31}$/u.test(id)) {
+        throw new MapCompileError(
+          source.name,
+          `NPC object ${String(object.id)} has an invalid npcId "${id}"`,
+        );
+      }
+      const role = tiledStringProperty(object, 'role');
+      if (role !== undefined && role !== 'merchant' && role !== 'guard') {
+        throw new MapCompileError(
+          source.name,
+          `NPC ${String(object.id)} has unsupported role "${role}"`,
+        );
+      }
+      return {
+        id,
+        name,
+        tile: objectTile(map, source.name, object),
+        ...(role === undefined ? {} : { role }),
+      };
     },
   );
 

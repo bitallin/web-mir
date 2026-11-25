@@ -153,6 +153,8 @@ export {
   LOOT_EXPIRY_MS,
   LOOT_OWNER_WINDOW_MS,
   PICKUP_RANGE_TILES,
+  SHOP_MAX_QUANTITY,
+  SHOP_RANGE_TILES,
   assetCommandKindSchema,
   assetResultSchema,
   characterProgressSchema,
@@ -168,6 +170,12 @@ export {
   levelUpSchema,
   lootClaimedSchema,
   lootPickupSchema,
+  shopBuySchema,
+  shopCatalogSchema,
+  shopMerchantSchema,
+  shopOfferSchema,
+  shopSellPriceSchema,
+  shopSellSchema,
 } from './economy';
 export type {
   AssetCommandKind,
@@ -184,6 +192,12 @@ export type {
   LevelUp,
   LootClaimed,
   LootPickup,
+  ShopBuy,
+  ShopCatalog,
+  ShopMerchant,
+  ShopOffer,
+  ShopSell,
+  ShopSellPrice,
 } from './economy';
 
 export {
@@ -330,6 +344,7 @@ export type {
 } from './admin';
 
 export {
+  MAP_NPC_ROLES,
   MAP_RUNTIME_SCHEMA_VERSION,
   STARTER_TOWN_MAP_ID,
   STARTER_WILDS_MAP_ID,
@@ -340,6 +355,7 @@ export {
   mapIdSchema,
   mapMonsterSpawnSchema,
   mapNpcPointSchema,
+  mapNpcRoleSchema,
   mapPortalSchema,
   mapRuntimeManifestSchema,
   worldRoomNameFor,
@@ -347,6 +363,7 @@ export {
 export type {
   MapMonsterSpawn,
   MapNpcPoint,
+  MapNpcRole,
   MapPortal,
   MapPvpMode,
   MapRuntimeManifest,

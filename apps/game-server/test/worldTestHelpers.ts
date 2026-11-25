@@ -8,11 +8,13 @@ import {
 } from '@web-legend/contracts';
 import { STARTER_TOWN_MAP, findMapManifest } from '@web-legend/contracts/maps';
 import {
+  currencyLedger,
   findRealmByCode,
   insertAccount,
   insertCharacter,
   insertGameTicket,
   realms,
+  wallets,
   type Character,
   type Database,
 } from '@web-legend/persistence';
@@ -91,6 +93,7 @@ export type CreateActorOptions = {
   level?: number;
   hp?: number;
   mp?: number;
+  gold?: number;
 };
 
 /**
@@ -132,6 +135,19 @@ export async function createActor(
     y: position.y,
     facing: options.facing ?? 2,
   });
+
+  if ((options.gold ?? 0) > 0) {
+    const gold = options.gold ?? 0;
+    await db.insert(wallets).values({ characterId: character.id, balance: gold, version: 1 });
+    await db.insert(currencyLedger).values({
+      characterId: character.id,
+      delta: gold,
+      balanceAfter: gold,
+      reason: 'test_gold',
+      referenceId: character.id,
+      idempotencyKey: `test:${character.id}:gold`,
+    });
+  }
 
   const actor: TestActor = {
     accountId: account.id,

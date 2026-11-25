@@ -3,12 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { combatStatsFor } from './stats';
 import {
   ITEM_CATALOG,
+  STARTER_GOLD,
   STARTER_KIT,
   canEquip,
   equipmentBonuses,
   findInventoryPlacement,
   isConsumable,
+  isShopQuantityAllowed,
+  itemBuyPrice,
+  itemSellPrice,
+  purchaseCost,
   requireItem,
+  saleValue,
   statsWithEquipment,
   type InventoryStack,
 } from './items';
@@ -136,5 +142,35 @@ describe('inventory placement', () => {
         capacity: 24,
       }),
     ).toBeNull();
+  });
+});
+
+describe('merchant pricing', () => {
+  it('reads prices from content and keeps buy price above sell price', () => {
+    for (const item of Object.values(ITEM_CATALOG)) {
+      const buy = itemBuyPrice(item);
+      const sell = itemSellPrice(item);
+      expect(buy).toBeGreaterThanOrEqual(0);
+      expect(sell).toBeGreaterThanOrEqual(0);
+      if (buy > 0) {
+        expect(sell).toBeLessThan(buy);
+      }
+    }
+    expect(itemBuyPrice(requireItem('small_hp_potion'))).toBe(15);
+    expect(itemSellPrice(requireItem('slime_gel'))).toBe(4);
+    expect(STARTER_GOLD).toBeGreaterThan(0);
+  });
+
+  it('computes unit totals and rejects impossible quantities', () => {
+    const potion = requireItem('small_hp_potion');
+    expect(purchaseCost(potion, 3)).toBe(45);
+    expect(saleValue(potion, 3)).toBe(15);
+
+    const armor = requireItem('cloth_armor');
+    expect(isShopQuantityAllowed(armor, 1)).toBe(true);
+    expect(isShopQuantityAllowed(armor, 2)).toBe(false);
+    expect(() => purchaseCost(armor, 2)).toThrow(RangeError);
+    expect(isShopQuantityAllowed(potion, 21)).toBe(false);
+    expect(isShopQuantityAllowed(potion, 0)).toBe(false);
   });
 });
