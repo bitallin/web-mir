@@ -1,0 +1,28 @@
+{
+  "service": "game-server",
+  "rooms": [],
+  "totals": {
+    "activeRooms": 0,
+    "roomsCreated": 26,
+    "acceptedCommands": 51976,
+    "rejectedCommands": 11075,
+    "wsSentBytes": 321899814,
+    "wsPatchBytes": 153179570,
+    "chatMessages": 1,
+    "chatFiltered": 1,
+    "chatMuted": 0,
+    "transfers": 8,
+    "combatCommands": 956,
+    "combatEvents": 8183,
+    "monsterKills": 326,
+    "playerDeaths": 1,
+    "pvpKills": 1,
+    "assetCommands": 2,
+    "assetFailures": 0,
+    "lootSpawned": 406,
+    "lootPickedUp": 1,
+    "goldGranted": 1789,
+    "expGranted": 6252
+  },
+  "timestamp": "2026-11-25T13:24:11.108Z"
+}

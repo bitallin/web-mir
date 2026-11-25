@@ -10,9 +10,27 @@ export type TickStats = {
   maxMs: number;
 };
 
+export type AssetQueueStats = {
+  samples: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+};
+
+export type RoomMetricInfo = {
+  mapId?: string;
+  instanceId?: string;
+  contentVersion?: string;
+};
+
 export type RoomMetricsSnapshot = {
   roomId: string;
+  mapId: string;
+  instanceId: string;
+  contentVersion: string;
   players: number;
+  wsSentBytes: number;
+  wsPatchBytes: number;
   acceptedCommands: number;
   rejectedCommands: number;
   rejectionsByCode: Record<string, number>;
@@ -32,6 +50,8 @@ export type RoomMetricsSnapshot = {
   goldGranted: number;
   expGranted: number;
   tick: TickStats;
+  /** Latency of queued asset transactions (queue wait + commit). */
+  assetTx: AssetQueueStats;
 };
 
 function percentile(sorted: readonly number[], fraction: number): number {
@@ -49,6 +69,8 @@ function round(value: number): number {
 export class RoomMetrics {
   private readonly tickDurations: number[] = [];
   private players = 0;
+  private wsSentBytes = 0;
+  private wsPatchBytes = 0;
   private acceptedCommands = 0;
   private rejectedCommands = 0;
   private chatMessages = 0;
@@ -62,6 +84,7 @@ export class RoomMetrics {
   private pvpKills = 0;
   private assetCommands = 0;
   private assetFailures = 0;
+  private readonly assetDurations: number[] = [];
   private lootSpawned = 0;
   private lootPickedUp = 0;
   private goldGranted = 0;
@@ -71,12 +94,23 @@ export class RoomMetrics {
   constructor(
     private readonly roomId: string,
     private readonly windowSize = DEFAULT_WINDOW_SIZE,
+    private readonly info: RoomMetricInfo = {},
   ) {}
 
   recordTick(durationMs: number): void {
     this.tickDurations.push(durationMs);
     if (this.tickDurations.length > this.windowSize) {
       this.tickDurations.shift();
+    }
+  }
+
+  recordWsSent(bytes: number, patching: boolean): void {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return;
+    }
+    this.wsSentBytes += bytes;
+    if (patching) {
+      this.wsPatchBytes += bytes;
     }
   }
 
@@ -133,6 +167,26 @@ export class RoomMetrics {
     this.assetFailures += 1;
   }
 
+  recordAssetDuration(durationMs: number): void {
+    if (!Number.isFinite(durationMs) || durationMs < 0) {
+      return;
+    }
+    this.assetDurations.push(durationMs);
+    if (this.assetDurations.length > this.windowSize) {
+      this.assetDurations.shift();
+    }
+  }
+
+  assetQueueStats(): AssetQueueStats {
+    const sorted = [...this.assetDurations].sort((left, right) => left - right);
+    return {
+      samples: sorted.length,
+      p50Ms: round(percentile(sorted, 0.5)),
+      p95Ms: round(percentile(sorted, 0.95)),
+      p99Ms: round(percentile(sorted, 0.99)),
+    };
+  }
+
   recordLootSpawned(count: number): void {
     this.lootSpawned += count;
   }
@@ -167,7 +221,12 @@ export class RoomMetrics {
   snapshot(): RoomMetricsSnapshot {
     return {
       roomId: this.roomId,
+      mapId: this.info.mapId ?? '',
+      instanceId: this.info.instanceId ?? '',
+      contentVersion: this.info.contentVersion ?? '',
       players: this.players,
+      wsSentBytes: this.wsSentBytes,
+      wsPatchBytes: this.wsPatchBytes,
       acceptedCommands: this.acceptedCommands,
       rejectedCommands: this.rejectedCommands,
       rejectionsByCode: Object.fromEntries(this.rejectionsByCode),
@@ -187,6 +246,7 @@ export class RoomMetrics {
       goldGranted: this.goldGranted,
       expGranted: this.expGranted,
       tick: this.tickStats(),
+      assetTx: this.assetQueueStats(),
     };
   }
 }
@@ -199,6 +259,8 @@ export type MetricsSnapshot = {
     roomsCreated: number;
     acceptedCommands: number;
     rejectedCommands: number;
+    wsSentBytes: number;
+    wsPatchBytes: number;
     chatMessages: number;
     chatFiltered: number;
     chatMuted: number;
@@ -223,6 +285,8 @@ export class MetricsRegistry {
   private roomsCreated = 0;
   private acceptedCommands = 0;
   private rejectedCommands = 0;
+  private wsSentBytes = 0;
+  private wsPatchBytes = 0;
   private chatMessages = 0;
   private chatFiltered = 0;
   private chatMuted = 0;
@@ -239,8 +303,8 @@ export class MetricsRegistry {
   private goldGranted = 0;
   private expGranted = 0;
 
-  register(roomId: string): RoomMetrics {
-    const metrics = new RoomMetrics(roomId);
+  register(roomId: string, info: RoomMetricInfo = {}): RoomMetrics {
+    const metrics = new RoomMetrics(roomId, DEFAULT_WINDOW_SIZE, info);
     this.rooms.set(roomId, metrics);
     this.roomsCreated += 1;
     return metrics;
@@ -254,6 +318,8 @@ export class MetricsRegistry {
     const snapshot = metrics.snapshot();
     this.acceptedCommands += snapshot.acceptedCommands;
     this.rejectedCommands += snapshot.rejectedCommands;
+    this.wsSentBytes += snapshot.wsSentBytes;
+    this.wsPatchBytes += snapshot.wsPatchBytes;
     this.chatMessages += snapshot.chatMessages;
     this.chatFiltered += snapshot.chatFiltered;
     this.chatMuted += snapshot.chatMuted;
@@ -279,6 +345,8 @@ export class MetricsRegistry {
 
     const activeAccepted = rooms.reduce((total, room) => total + room.acceptedCommands, 0);
     const activeRejected = rooms.reduce((total, room) => total + room.rejectedCommands, 0);
+    const activeWsSent = rooms.reduce((total, room) => total + room.wsSentBytes, 0);
+    const activeWsPatch = rooms.reduce((total, room) => total + room.wsPatchBytes, 0);
     const activeChat = rooms.reduce((total, room) => total + room.chatMessages, 0);
     const activeChatFiltered = rooms.reduce((total, room) => total + room.chatFiltered, 0);
     const activeChatMuted = rooms.reduce((total, room) => total + room.chatMuted, 0);
@@ -303,6 +371,8 @@ export class MetricsRegistry {
         roomsCreated: this.roomsCreated,
         acceptedCommands: this.acceptedCommands + activeAccepted,
         rejectedCommands: this.rejectedCommands + activeRejected,
+        wsSentBytes: this.wsSentBytes + activeWsSent,
+        wsPatchBytes: this.wsPatchBytes + activeWsPatch,
         chatMessages: this.chatMessages + activeChat,
         chatFiltered: this.chatFiltered + activeChatFiltered,
         chatMuted: this.chatMuted + activeChatMuted,

@@ -201,6 +201,7 @@ describe.runIf(databaseUrl !== undefined)('admin command delivery to the game se
       GAME_SERVER_PORT: port,
       DATABASE_URL: requireDatabaseUrl(),
       GAME_SERVER_ID: 'game-server-admin-test',
+      GAME_SERVER_REALM: 'classic-01',
       INTERNAL_ADMIN_TOKEN: INTERNAL_TOKEN,
     };
     runtime = createGameServer({
@@ -394,6 +395,7 @@ describe.runIf(databaseUrl !== undefined)('admin command delivery to the game se
       GAME_SERVER_PORT: port,
       DATABASE_URL: requireDatabaseUrl(),
       GAME_SERVER_ID: 'game-server-content-test',
+      GAME_SERVER_REALM: 'classic-01',
       INTERNAL_ADMIN_TOKEN: INTERNAL_TOKEN,
     };
     const secondRuntime = createGameServer({

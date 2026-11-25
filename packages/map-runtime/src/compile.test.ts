@@ -77,8 +77,9 @@ describe('Tiled map compilation', () => {
     expect(wilds?.pvpMode).toBe('open');
     expect(town?.npcPoints).toHaveLength(2);
     expect(town?.monsterSpawns).toHaveLength(0);
-    expect(wilds?.monsterSpawns).toHaveLength(6);
-    expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.id)).size).toBe(6);
+    // 30 spawns meet the phase-8 load target of 20–40 monsters per map.
+    expect(wilds?.monsterSpawns).toHaveLength(30);
+    expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.id)).size).toBe(30);
     expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.monsterId))).toEqual(
       new Set(['wild_slime', 'forest_wolf']),
     );

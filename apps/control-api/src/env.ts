@@ -26,6 +26,8 @@ export const controlApiEnvSchema = z
       .regex(/^https?:\/\/\S+$/u, 'must be an http(s) URL')
       .optional(),
     INTERNAL_ADMIN_TOKEN: z.string().min(16).max(128).default(DEV_INTERNAL_ADMIN_TOKEN),
+    /** Set to "true" only when the API is reachable solely through a trusted proxy. */
+    TRUST_PROXY: z.enum(['true', 'false']).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.INTERNAL_ADMIN_TOKEN === DEV_INTERNAL_ADMIN_TOKEN) {

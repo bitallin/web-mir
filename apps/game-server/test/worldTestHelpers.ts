@@ -8,6 +8,7 @@ import {
 } from '@web-legend/contracts';
 import { STARTER_TOWN_MAP, findMapManifest } from '@web-legend/contracts/maps';
 import {
+  findRealmByCode,
   insertAccount,
   insertCharacter,
   insertGameTicket,
@@ -45,7 +46,9 @@ function uniqueSuffix(): string {
 
 async function firstRealmId(db: Database): Promise<string> {
   await ensureTestRealm(db);
-  const [realm] = await db.select({ id: realms.id }).from(realms).limit(1);
+  // Servers under test bind GAME_SERVER_REALM=classic-01 (ADR-023), so actors
+  // must belong to that realm rather than whichever row the database returns.
+  const realm = await findRealmByCode(db, 'classic-01');
   if (realm === undefined) {
     throw new Error('no realm available for tests');
   }

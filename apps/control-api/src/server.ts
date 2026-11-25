@@ -7,12 +7,25 @@ import {
   PROTOCOL_VERSION,
   readinessResponseSchema,
 } from '@web-legend/contracts';
+import {
+  renderPrometheus,
+  RuntimeMetrics,
+  runtimeMetricSamples,
+  type PrometheusMetric,
+} from '@web-legend/observability';
 import type { Database } from '@web-legend/persistence';
 import Fastify, { type FastifyError } from 'fastify';
+import { performance } from 'node:perf_hooks';
 import type { Logger } from 'pino';
 
 import { ADMIN_LOGIN_RATE_LIMIT } from './http/adminCookies';
 import { gameServerInternalUrl, type ControlApiEnv } from './env';
+import {
+  HttpMetrics,
+  httpMetricSamples,
+  OperationalMetrics,
+  operationalMetricSamples,
+} from './metrics';
 import { AppError, codeForStatus, errorEnvelope } from './http/errors';
 import { createOriginGuard } from './http/origin';
 import { createRateLimiter } from './http/rateLimit';
@@ -73,6 +86,47 @@ export async function buildServer(options: BuildServerOptions) {
     genReqId: (request) => resolveRequestId(request.headers['x-request-id']),
     // Authentication payloads are tiny; reject oversized bodies early.
     bodyLimit: 16_384,
+    // Only enable behind the production reverse proxy; otherwise a direct
+    // client could spoof X-Forwarded-For and evade per-IP rate limits.
+    trustProxy: options.env.TRUST_PROXY === 'true',
+  });
+
+  const httpMetrics = new HttpMetrics();
+  const operationalMetrics = new OperationalMetrics(options.database, options.logger);
+  const runtimeMetrics = new RuntimeMetrics();
+  runtimeMetrics.start();
+  operationalMetrics.start();
+  const requestStartedAt = new WeakMap<object, number>();
+
+  // Fastify 5 treats non-async onRequest hooks as callback-style and never
+  // completes the request if the hook does not invoke `done`; keep it async.
+  // eslint-disable-next-line @typescript-eslint/require-await
+  app.addHook('onRequest', async (request) => {
+    requestStartedAt.set(request, performance.now());
+    httpMetrics.startRequest();
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    const startedAt = requestStartedAt.get(request) ?? performance.now();
+    requestStartedAt.delete(request);
+    const route = request.routeOptions.url ?? 'unmatched';
+    httpMetrics.endRequest(
+      request.method,
+      route,
+      reply.statusCode,
+      Math.max(0, performance.now() - startedAt) / 1000,
+    );
+  });
+
+  app.addHook('onSend', async (_request, reply) => {
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('x-frame-options', 'DENY');
+    reply.header('referrer-policy', 'no-referrer');
+  });
+
+  app.addHook('onClose', () => {
+    operationalMetrics.stop();
+    runtimeMetrics.stop();
   });
 
   await app.register(cors, {
@@ -128,6 +182,21 @@ export async function buildServer(options: BuildServerOptions) {
     });
 
     return reply.status(healthy ? 200 : 503).send(body);
+  });
+
+  app.get('/metrics/prometheus', async (_request, reply) => {
+    const metrics: PrometheusMetric[] = [
+      {
+        name: 'web_legend_control_api_up',
+        help: 'Control API liveness as seen by the process itself.',
+        type: 'gauge',
+        points: [{ labels: { version: SERVICE_VERSION }, value: 1 }],
+      },
+      ...httpMetricSamples(httpMetrics.snapshot(), httpMetrics.inFlightCount()),
+      ...operationalMetricSamples(operationalMetrics.snapshot()),
+      ...runtimeMetricSamples(runtimeMetrics.snapshot()),
+    ];
+    return reply.type('text/plain; version=0.0.4; charset=utf-8').send(renderPrometheus(metrics));
   });
 
   registerAuthRoutes(app, dependencies);

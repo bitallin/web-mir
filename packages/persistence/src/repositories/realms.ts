@@ -11,3 +11,8 @@ export async function findRealmById(db: Database, id: string): Promise<Realm | u
   const [realm] = await db.select().from(realms).where(eq(realms.id, id)).limit(1);
   return realm;
 }
+
+export async function findRealmByCode(db: Database, code: string): Promise<Realm | undefined> {
+  const [realm] = await db.select().from(realms).where(eq(realms.code, code)).limit(1);
+  return realm;
+}

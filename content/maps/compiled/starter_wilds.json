@@ -292,8 +292,200 @@
         "x": 35,
         "y": 24
       }
+    },
+    {
+      "id": "wilds_slime_4",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 42,
+        "y": 1
+      }
+    },
+    {
+      "id": "wilds_wolf_4",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 1,
+        "y": 1
+      }
+    },
+    {
+      "id": "wilds_slime_5",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 1,
+        "y": 30
+      }
+    },
+    {
+      "id": "wilds_wolf_5",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 20,
+        "y": 30
+      }
+    },
+    {
+      "id": "wilds_slime_6",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 29,
+        "y": 1
+      }
+    },
+    {
+      "id": "wilds_wolf_6",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 42,
+        "y": 14
+      }
+    },
+    {
+      "id": "wilds_slime_7",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 13,
+        "y": 1
+      }
+    },
+    {
+      "id": "wilds_wolf_7",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 33,
+        "y": 10
+      }
+    },
+    {
+      "id": "wilds_slime_8",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 42,
+        "y": 30
+      }
+    },
+    {
+      "id": "wilds_wolf_8",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 10,
+        "y": 29
+      }
+    },
+    {
+      "id": "wilds_slime_9",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 1,
+        "y": 21
+      }
+    },
+    {
+      "id": "wilds_wolf_9",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 29,
+        "y": 30
+      }
+    },
+    {
+      "id": "wilds_slime_10",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 20,
+        "y": 21
+      }
+    },
+    {
+      "id": "wilds_wolf_10",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 21,
+        "y": 2
+      }
+    },
+    {
+      "id": "wilds_slime_11",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 1,
+        "y": 9
+      }
+    },
+    {
+      "id": "wilds_wolf_11",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 24,
+        "y": 16
+      }
+    },
+    {
+      "id": "wilds_slime_12",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 42,
+        "y": 22
+      }
+    },
+    {
+      "id": "wilds_wolf_12",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 16,
+        "y": 19
+      }
+    },
+    {
+      "id": "wilds_slime_13",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 26,
+        "y": 7
+      }
+    },
+    {
+      "id": "wilds_wolf_13",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 36,
+        "y": 4
+      }
+    },
+    {
+      "id": "wilds_slime_14",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 15,
+        "y": 25
+      }
+    },
+    {
+      "id": "wilds_wolf_14",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 25,
+        "y": 25
+      }
+    },
+    {
+      "id": "wilds_slime_15",
+      "monsterId": "wild_slime",
+      "tile": {
+        "x": 36,
+        "y": 17
+      }
+    },
+    {
+      "id": "wilds_wolf_15",
+      "monsterId": "forest_wolf",
+      "tile": {
+        "x": 7,
+        "y": 2
+      }
     }
   ],
   "assetManifestVersion": "phase3.1",
-  "checksum": "f3a70b0df14a10b92bd0a404b06a732f7af8426b35f0269a62893b3fb77662e3"
+  "checksum": "e87706af4d3a7dbd8d4a921c745a052a86db1e3f0f5146cd0e55d2c559993e93"
 }

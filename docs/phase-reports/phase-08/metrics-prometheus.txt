@@ -1,0 +1,75 @@
+# HELP web_legend_game_server_up Game server liveness as seen by the process itself.
+# TYPE web_legend_game_server_up gauge
+web_legend_game_server_up{realm="classic-01",version="0.1.0"} 1
+# HELP web_legend_game_server_rooms_active Number of live map rooms.
+# TYPE web_legend_game_server_rooms_active gauge
+web_legend_game_server_rooms_active{realm="classic-01"} 0
+# HELP web_legend_game_server_rooms_created_total Rooms created since process start.
+# TYPE web_legend_game_server_rooms_created_total counter
+web_legend_game_server_rooms_created_total{realm="classic-01"} 26
+# HELP web_legend_game_server_room_players Players connected to each room.
+# TYPE web_legend_game_server_room_players gauge
+# HELP web_legend_game_server_tick_duration_ms Room tick duration percentiles.
+# TYPE web_legend_game_server_tick_duration_ms gauge
+# HELP web_legend_game_server_tick_samples Tick samples currently in the sliding window.
+# TYPE web_legend_game_server_tick_samples gauge
+# HELP web_legend_game_server_commands_total Player commands accepted by result.
+# TYPE web_legend_game_server_commands_total counter
+# HELP web_legend_game_server_command_rejections_total Player commands rejected by reason.
+# TYPE web_legend_game_server_command_rejections_total counter
+# HELP web_legend_game_server_ws_sent_bytes_total WebSocket bytes written to clients, including state patches.
+# TYPE web_legend_game_server_ws_sent_bytes_total counter
+# HELP web_legend_game_server_patch_bytes_total WebSocket bytes written during Colyseus state patch broadcasts.
+# TYPE web_legend_game_server_patch_bytes_total counter
+# HELP web_legend_game_server_chat_messages_total Chat messages broadcast, filtered or blocked by mute.
+# TYPE web_legend_game_server_chat_messages_total counter
+# HELP web_legend_game_server_combat_events_total Combat events broadcast.
+# TYPE web_legend_game_server_combat_events_total counter
+# HELP web_legend_game_server_kills_total Monster and player kills.
+# TYPE web_legend_game_server_kills_total counter
+# HELP web_legend_game_server_asset_commands_total Asset commands, split by success and failure.
+# TYPE web_legend_game_server_asset_commands_total counter
+# HELP web_legend_game_server_asset_tx_duration_ms Asset transaction queue latency percentiles (queue wait + commit).
+# TYPE web_legend_game_server_asset_tx_duration_ms gauge
+# HELP web_legend_game_server_loot_total Ground loot spawned and picked up.
+# TYPE web_legend_game_server_loot_total counter
+# HELP web_legend_game_server_progress_total Experience and gold granted through committed asset transactions.
+# TYPE web_legend_game_server_progress_total counter
+# HELP web_legend_game_server_transfers_total Map transfers completed.
+# TYPE web_legend_game_server_transfers_total counter
+# HELP web_legend_game_server_room_content_info Content version and checksum fixed when the room was created.
+# TYPE web_legend_game_server_room_content_info gauge
+# HELP process_uptime_seconds Process uptime in seconds.
+# TYPE process_uptime_seconds gauge
+process_uptime_seconds 1375.126
+# HELP process_resident_memory_bytes Resident set size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 242253824
+# HELP nodejs_heap_used_bytes V8 heap used in bytes.
+# TYPE nodejs_heap_used_bytes gauge
+nodejs_heap_used_bytes 82251328
+# HELP nodejs_heap_total_bytes V8 heap total in bytes.
+# TYPE nodejs_heap_total_bytes gauge
+nodejs_heap_total_bytes 126541824
+# HELP nodejs_external_memory_bytes Memory allocated for C++ objects bound to JavaScript objects.
+# TYPE nodejs_external_memory_bytes gauge
+nodejs_external_memory_bytes 21919421
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total{kind="user"} 64.332
+process_cpu_seconds_total{kind="system"} 15.745
+# HELP nodejs_event_loop_lag_seconds Event loop delay percentiles.
+# TYPE nodejs_event_loop_lag_seconds gauge
+nodejs_event_loop_lag_seconds{quantile="0.5"} 0.020103000000000003
+nodejs_event_loop_lag_seconds{quantile="0.95"} 0.020708999999999998
+nodejs_event_loop_lag_seconds{quantile="0.99"} 0.022168
+nodejs_event_loop_lag_seconds{quantile="1"} 0.060457000000000004
+# HELP nodejs_event_loop_utilization Event loop utilization between 0 and 1.
+# TYPE nodejs_event_loop_utilization gauge
+nodejs_event_loop_utilization 0.047
+# HELP nodejs_gc_pause_seconds_total Total GC pause time in seconds.
+# TYPE nodejs_gc_pause_seconds_total counter
+nodejs_gc_pause_seconds_total 1.047
+# HELP nodejs_gc_runs_total Total observed GC runs.
+# TYPE nodejs_gc_runs_total counter
+nodejs_gc_runs_total 622

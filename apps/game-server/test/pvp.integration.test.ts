@@ -173,6 +173,7 @@ describe.runIf(databaseUrl !== undefined)('world_map player combat and chat', ()
       GAME_SERVER_PORT: port,
       DATABASE_URL: requireDatabaseUrl(),
       GAME_SERVER_ID: 'game-server-pvp-test',
+      GAME_SERVER_REALM: 'classic-01',
       INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
 
@@ -188,6 +189,9 @@ describe.runIf(databaseUrl !== undefined)('world_map player combat and chat', ()
         playerRespawnMs: 1_500,
         chatRateCapacity: 4,
         chatRateRefillPerSecond: 2,
+        // The wilds map is densely populated for the load scenario; player
+        // combat assertions need a room where only the two actors fight.
+        monsterSpawns: [],
       },
     });
 

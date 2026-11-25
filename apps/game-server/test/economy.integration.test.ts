@@ -229,6 +229,7 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
       GAME_SERVER_PORT: port,
       DATABASE_URL: requireDatabaseUrl(),
       GAME_SERVER_ID: 'game-server-economy-test',
+      GAME_SERVER_REALM: 'classic-01',
       INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
 

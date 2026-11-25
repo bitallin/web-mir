@@ -5,48 +5,48 @@
 
 ## 1. 当前阶段
 
-**阶段 7：运营后台与内容发布 —— 实现完成，自动化验收通过；待用户在
-`http://<LAN-IP>:8584/` 与 `http://<LAN-IP>:8585/` 实测确认。**
+**阶段 8：质量、压测、部署与恢复 —— 实现与自动化验收完成，等待用户确认。**
 
-阶段 0–3 已通过用户验收。阶段 4–6 的实现和自动化验收完成；阶段 6 的用户实测
-仍未单独记录。本次会话按用户“继续研发下一阶段”的指示交付阶段 7：独立管理员
-身份与 RBAC、总览/玩家/Room/审计/运营指令、Kick/Ban/Mute 审计 + PostgreSQL
-Outbox + Game Server 幂等执行、内容草稿/校验/不可变 Release/按区服激活与回滚，
-以及自定义运营工作台。在用户实测通过前不标记“阶段完成”，也不进入阶段 8。
+阶段 0–3 已通过用户验收；阶段 4–7 的实现和自动化验收完成，阶段 6/7 的用户
+实测仍未单独记录。阶段 8 由上一会话开始、因环境配置中断，本会话完成：生产
+镜像与 nginx edge（HTTPS/WSS/安全头/限流）、Prometheus 指标与告警、Game Server
+按 Realm 绑定内容、发布/回滚脚本、数据库备份与真实恢复演练、Game Server 正常/
+崩溃重启与 Outbox 重试演练、30+10 玩家 10 分钟与 50 玩家容量场景。阶段 7 的
+后台功能与 8584/8585 实测仍按原计划等待用户确认。
 
 ## 2. 阶段进度
 
-| 阶段                           | 状态       | 说明                                                                |
-| ------------------------------ | ---------- | ------------------------------------------------------------------- |
-| 阶段 0：工程底座               | 已完成     | 工程、依赖、质量门禁、数据库、健康检查、文档                        |
-| 阶段 1：双浏览器联机切片       | 已完成     | 测试地图、world_map Room、服务端移动、双浏览器可见、重连、HUD、E2E  |
-| 阶段 2：账号与票据             | 已完成     | 账号/会话、Argon2id、角色、一次性 ticket、角色租约、位置持久化、E2E |
-| 阶段 3：地图与世界状态         | 已完成     | Tiled 地图、map-runtime、地图实例/传送、AOI、节流 checkpoint、聊天  |
-| 阶段 4：怪物与战斗             | 自动化完成 | game-domain、两怪物、技能、CombatEvent、复活；手工验收未单独记录    |
-| 阶段 5：掉落与资产持久化       | 自动化完成 | game-application、物品/掉落/背包/装备/金币/经验、重登恢复、E2E      |
-| 阶段 6：聊天、PK 与体验        | 自动化完成 | 安全区、PvP、死亡复活、聊天过滤、系统消息、小地图/角色面板、音效    |
-| 阶段 7：运营后台与内容发布     | 待实测     | 管理员 RBAC、审计、Outbox、Kick/Ban/Mute、内容 Draft/Release/回滚   |
-| 阶段 8：质量、压测、部署与恢复 | 未开始     | 等待阶段 7 用户验收                                                 |
+| 阶段                           | 状态       | 说明                                                                  |
+| ------------------------------ | ---------- | --------------------------------------------------------------------- |
+| 阶段 0：工程底座               | 已完成     | 工程、依赖、质量门禁、数据库、健康检查、文档                          |
+| 阶段 1：双浏览器联机切片       | 已完成     | 测试地图、world_map Room、服务端移动、双浏览器可见、重连、HUD、E2E    |
+| 阶段 2：账号与票据             | 已完成     | 账号/会话、Argon2id、角色、一次性 ticket、角色租约、位置持久化、E2E   |
+| 阶段 3：地图与世界状态         | 已完成     | Tiled 地图、map-runtime、地图实例/传送、AOI、节流 checkpoint、聊天    |
+| 阶段 4：怪物与战斗             | 自动化完成 | game-domain、两怪物、技能、CombatEvent、复活；手工验收未单独记录      |
+| 阶段 5：掉落与资产持久化       | 自动化完成 | game-application、物品/掉落/背包/装备/金币/经验、重登恢复、E2E        |
+| 阶段 6：聊天、PK 与体验        | 自动化完成 | 安全区、PvP、死亡复活、聊天过滤、系统消息、小地图/角色面板、音效      |
+| 阶段 7：运营后台与内容发布     | 待实测     | 管理员 RBAC、审计、Outbox、Kick/Ban/Mute、内容 Draft/Release/回滚     |
+| 阶段 8：质量、压测、部署与恢复 | 自动化完成 | 生产镜像/edge、指标告警、Realm 绑定、备份恢复、重启/Outbox 演练、压测 |
 
 ## 3. 当前正在进行的任务
 
-阶段 7 用户实测验收：
+阶段 7 实测（仍待用户确认）：
 
 1. 游戏侧在 `http://<LAN-IP>:8584/` 用两个独立窗口进入主城/野外，确认阶段 6 的
    移动、战斗、掉落、聊天、PvP 与复活无回归。
 2. 后台在 `http://<LAN-IP>:8585/` 使用 `admin` / `web-legend-admin` 登录（如
-   设置过 `ADMIN_SEED_PASSWORD` 则使用该密码）。
-3. 总览/世界与 Room 显示在线人数、Room、tick p95 与内容版本；玩家搜索可打开
-   角色详情。
-4. 对一个在线角色执行 Kick 并填写原因：客户端显示断开原因；运营指令从
-   `pending` 变为 `applied`；审计日志出现 `player.kick` 成功记录。
-5. 对一个账号执行 Mute/Ban：账号状态与禁言到期时间持久化；Ban 后无法再次登录。
-6. 内容工作台编辑掉落表或物品草稿，保存 → 校验 → 发布 → 激活 → 回滚；发布
-   历史不可修改，回滚是新的激活记录。
-7. 重启 Game Server 后新 Room 使用当前激活版本；已有 Room 保持创建时版本（可用
-   集成测试与 Room 列表中的内容版本核对）。
+   设置过 `ADMIN_SEED_PASSWORD` 则使用该密码），按阶段 7 报告逐项检查 Kick/
+   Mute/Ban、内容发布与回滚。
 
-验收通过后再启动阶段 8。
+阶段 8 确认（自动化证据已就绪）：
+
+1. 阅读 `docs/phase-reports/PHASE_08_REPORT.md` 与
+   `docs/phase-reports/phase-08/` 下的证据。
+2. 生产拓扑演练已在本地 compose 完成（HTTPS/WSS/安全头/限流/内部端点隔离/
+   Prometheus 抓取与告警）；用户可按
+   `docs/runbooks/DEPLOYMENT_AND_RECOVERY.md` 在自己的证书与镜像仓库上复跑。
+3. 容量与恢复结论：30+10 玩家 10 分钟、50 玩家短时、SIGTERM/SIGKILL、数据库
+   中断、Outbox 重试与真实恢复。
 
 ## 4. 已完成内容
 
@@ -366,13 +366,57 @@ Outbox + Game Server 幂等执行、内容草稿/校验/不可变 Release/按区
   内容发布/激活/回滚）。
 - ADR-022；AGENTS/ESLint 边界；阶段 7 报告、截图、负载、数据库与指标证据。
 
+### 阶段 8：质量、压测、部署与恢复
+
+`observability` / `game-server` / `control-api`：
+
+- 手写 Prometheus 文本渲染器（无 `prom-client`）与运行时采集器（事件循环、
+  RSS/堆、CPU、GC、ELU），渲染器单测覆盖转义、直方图与非法名称。
+- Game Server `/metrics/prometheus`：Room/玩家/tick/命令/聊天/战斗/资产/掉落/
+  WebSocket 出站与 patch 字节、资产事务队列 p50/95/99，全部带 Realm 标签。
+- Control API `/metrics/prometheus`：HTTP 计数与延迟直方图、Outbox 状态与最老
+  pending、DB 探测、运行时指标；`TRUST_PROXY` 只在可信代理后启用。
+- edge 内部端口提供合成 `/metrics`；Prometheus 抓取 4 个目标，10 条告警规则
+  健康。
+
+`game-server`：
+
+- `GAME_SERVER_REALM` 绑定进程，Room 校验角色区服；`ContentStore` 按 Realm 读取
+  激活 Release，生产启动时区服缺失直接失败；内部状态与指标带 `realm`。
+- `new Server({ gracefullyShutdown: false })` 由 `index.ts` 独占 SIGTERM：
+  先 drain/释放租约/checkpoint，再关闭连接池。
+- `WorldRoomTuning.monsterSpawns` 注入点（测试用空刷怪列表隔离 PvP）。
+- 新增数据库中断集成测试：`/health/ready` 503 → 恢复 200，`/health/live` 保持
+  200；`pingDatabase` 有 2 秒超时。
+
+`infra`：
+
+- 四个生产镜像（Node 运行镜像 + nginx 静态镜像）、非 root、健康检查；基础镜像
+  可用 `NODE_IMAGE`/`NGINX_IMAGE` 覆盖，构建包含 `content/`。
+- nginx edge：HTTPS/WSS、HSTS/CSP/XFO/Referrer/Permissions、16KB body、限流、
+  `/internal` 与 `/metrics` 404；compose 生产拓扑含 PostgreSQL/Prometheus。
+- `compose.drill.yml` 演练覆盖：发布 PostgreSQL 与 edge 到空闲宿主端口。
+- `deploy.sh`/`rollback.sh`（`prod:deploy`/`prod:rollback`）：不可变标签、
+  `up --wait`、容器内指标与 edge 健康检查、record previous tag、无数据库反向
+  迁移。
+- `db-backup.sh`/`db-restore-drill.sh`/`verifyRestore.ts`：自定义格式备份、
+  manifest、SHA-256；独立演练库真实恢复并比较行数与资产不变量。
+- `recoveryDrill.ts`/`worldScenario.ts`/`outbox-drill.ts`/`prod-check.mjs`。
+
+`content` / `tests` / 文档：
+
+- `starter_wilds` 刷点 6 → 30；两只狼移出 PvP E2E 决斗区域，决斗点改到
+  (12,10)/(13,10)。
+- 新增 Control API / Game Server 数据库中断测试、Realm 绑定部署测试、资产队列
+  指标测试；E2E 20/20 通过。
+- ADR-023、部署与恢复 runbook、AGENTS/README、阶段 8 报告与证据目录。
+
 ## 5. 尚未完成内容
 
-- 阶段 8：生产镜像、HTTPS/WSS、CORS/限流/负载上限、Prometheus/告警、50 人
-  10 分钟压测、patch bytes、崩溃/断网/DB 不可用/Outbox 重试演练、备份恢复与
-  Room drain runbook。
-- 多区服独立内容：激活已按区服记录，但 Game Server 的 Room 尚未绑定 Realm，
-  当前使用第一个活跃区服的激活版本；阶段 8 必须显式绑定。
+- 多 Game Server / 多 Realm 路由与实例注册：阶段 8 已让每个 Game Server 进程
+  绑定一个 Realm，但没有进程注册、连接路由或按人数开新实例。
+- 独立 Outbox worker、审计/Release/Outbox 归档与独立测试数据库仍未建立。
+- 负载脚本未统计重连率与入站字节；WebSocket 指标只覆盖下行。
 - 聊天持久化、人工审核、敏感词热更新、禁言历史查询、举报与跨图频道。
 - 红名、爆装、罪恶值、死亡惩罚、竞技匹配与野外局部安全区（MVP 不做）。
 - NPC 对话/商店/任务；当前只有编译 NPC 标记。
@@ -389,24 +433,26 @@ Outbox + Game Server 幂等执行、内容草稿/校验/不可变 Release/按区
 
 | 风险                                | 影响                                | 缓解                                                                    |
 | ----------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
-| 单地图固定实例                      | 无法按人数开线路                    | MVP 单实例；阶段 8 增加实例与路由                                       |
-| 多区服内容未绑定 Room               | 激活只对默认活跃区服生效            | MVP 单活跃区服；阶段 8 让 Room 显式归属 Realm                           |
+| 单地图固定实例                      | 无法按人数开线路                    | MVP 单实例；扩容时按架构文档 6.4 增加实例与路由                         |
+| 单 Game Server 绑定单 Realm         | 无法水平扩展或跨区服共进程          | `GAME_SERVER_REALM` 显式绑定；扩容时按区服拆进程 + 连接路由             |
 | 内容激活只影响新 Room               | 旧 Room 需重新进入才用新数值        | ADR-008/022 明确固定快照；运营流程提示重启或等待新实例                  |
-| 内部管理端点与 Game Server 同端口   | 若反向代理暴露 `/internal` 可被伪造 | 共享令牌 + 生产代理必须只允许 Control API；阶段 8 runbook               |
+| 内部管理端点与 Game Server 同端口   | 若反向代理暴露 `/internal` 可被伪造 | 共享令牌 + nginx 对 `/internal` 返回 404；runbook 明确禁止暴露          |
 | 开发默认 `INTERNAL_ADMIN_TOKEN`     | 生产误用会暴露内部端点              | 生产 schema 拒绝默认值；部署时显式设置                                  |
 | Outbox 与 Control API 同进程        | 进程终止时投递暂停                  | PostgreSQL 保留 pending；stale dispatched 60 秒后重投                   |
 | Outbox dispatcher 单实例            | 吞吐有限                            | SKIP LOCKED 支持多实例；当前命令量小                                    |
-| 内容草稿为全局 section              | 多区服/多人编辑会互相覆盖           | 当前单区服单运营；阶段 8 评估按 Realm/按人草稿                          |
+| 资产事务队列串行                    | 压测 p95 反映排队+提交（约 35ms）   | tick 不等待事务；队列指标可观测；扩容前评估批量/并行                    |
+| 生产会话/证书由部署方提供           | 自签证书只用于演练                  | runbook 要求 CA 证书与过期轮换；edge reload 不影响在线连接              |
+| 内容草稿为全局 section              | 多区服/多人编辑会互相覆盖           | 当前单区服单运营；扩容前评估按 Realm/按人草稿                           |
 | 内容 JSON 直接编辑                  | 运营误改需要校验拦截                | Schema + 引用/范围校验 + 差异预览 + 不可变 Release                      |
-| 审计/Outbox/Release 表持续增长      | 长期数据量上升                      | append-only 设计；阶段 8 增加归档与保留策略                             |
+| 审计/Outbox/Release 表持续增长      | 长期数据量上升                      | append-only 设计；归档与保留策略仍待数据库专项                          |
 | 后台会话无 refresh                  | 8 小时后重新登录                    | MVP 可接受；后续接入 OIDC/MFA                                           |
 | Playwright 并行数过高               | 250ms 可见性/攻击时序抖动           | 默认 2 worker；`PLAYWRIGHT_WORKERS` 可覆盖                              |
-| 共享开发库残留内容 Release/审计     | 后台列表较长、测试数据混杂          | 测试使用唯一 ID；阶段 8 建立独立测试库                                  |
+| 共享开发库残留内容 Release/审计     | 后台列表较长、测试数据混杂          | 测试使用唯一 ID；独立测试库仍未建立                                     |
 | 传送为离开/重新加入                 | 切换有短暂加载                      | 服务端先提交再通知；客户端重建场景；后续优化体验                        |
 | AOI 依赖 Colyseus StateView 行为    | 升级可能改变过滤/带宽               | 集成测试锁定远处不可见、近处可见、离开释放                              |
-| CombatEvent 全 Room 广播            | 远处玩家收到战斗表现事件            | MVP 事件量小；阶段 8 评估 AOI 事件过滤与带宽                            |
+| CombatEvent 全 Room 广播            | 远处玩家收到战斗表现事件            | MVP 事件量小；扩容前评估 AOI 事件过滤与带宽                             |
 | 怪物/玩家无碰撞                     | 可重叠站位、点击判定重叠            | 不改变权威位置；后续增加软碰撞                                          |
-| 怪物 AI 每 400ms 重算路径           | 大量怪物时寻路成本上升              | 当前 6 只；阶段 8 压测并优化                                            |
+| 怪物 AI 每 400ms 重算路径           | 大量怪物时寻路成本上升              | 野外 30 只压测 tick p95 仍低于 25ms；扩容前优化                         |
 | 战斗/怪物状态仅内存                 | 进程崩溃丢失怪物 HP 与冷却          | 允许按规则重建；资产与经验不在战斗中                                    |
 | checkpoint 20 秒                    | 崩溃最多丢 20 秒瞬时状态            | 正常离开立即保存；资产不在 tick/内存中                                  |
 | 软件渲染下浏览器约 22–27 FPS        | 客户端帧率与可见延迟受影响          | 静态地表合批、nearest 渲染、20Hz patch；真机应更高                      |
@@ -446,6 +492,17 @@ Outbox + Game Server 幂等执行、内容草稿/校验/不可变 Release/按区
   API 的 CSRF Origin 校验会拒绝局域网来源；已修复并验证 LAN 登录 200。
 - 阶段 6 的安全区、PvP、聊天过滤、小地图、音效与阶段 1–5 行为保持不变；本次
   回归门禁 20/20 通过。
+- 阶段 8 的生产演练在本机 docker compose 完成：7 个容器 healthy，HTTPS/WSS/
+  安全头/内部端点隔离/Prometheus 12 项检查通过；本环境的浏览器无法访问
+  compose 在宿主机发布的端口，因此未采集生产页面截图。
+- 生产镜像构建需可访问基础镜像仓库；本环境通过镜像站覆盖
+  `NODE_IMAGE`/`NGINX_IMAGE`/`PROMETHEUS_IMAGE`，默认值仍为官方镜像。
+- 演练 compose 使用 38180/38443/38444/38543，避免占用宿主机 80/443 与已占用
+  端口；`compose.drill.yml` 仅用于演练，不用于生产流量。
+- edge 的 Prometheus 目标是内部合成指标（`web_legend_edge_up`），不含 nginx
+  内部状态；需要时增加 exporter。
+- 资产事务队列指标包含排队与提交时间（30 人压测 p95 约 35ms），不是纯 SQL
+  耗时；入站 WebSocket 字节未计数。
 - 技术占位 tileset、角色 Sprite 与怪物几何造型仍为占位；Tiled 源图为正交逻辑
   网格，客户端做伪等距投影（ADR-018）。
 - 背包 24 格、装备槽仅武器/护甲；没有背包整理、丢弃、出售或物品图标。
@@ -453,58 +510,52 @@ Outbox + Game Server 幂等执行、内容草稿/校验/不可变 Release/按区
 
 ## 8. 阻塞事项
 
-无技术阻塞。阶段 7 等待用户在 8584（游戏）与 8585（后台）实测验收；验收通过前
-不启动阶段 8。
+无技术阻塞。阶段 7 等待用户在 8584（游戏）与 8585（后台）实测验收；阶段 8
+自动化验收已完成，等待用户确认证据与生产演练方式。两项确认前不进入下一阶段。
 
 ## 9. 最近一次测试结果
 
 日期：2026-11-25
 
-| 检查        | 命令                         | 结果                                          |
-| ----------- | ---------------------------- | --------------------------------------------- |
-| 格式        | `pnpm format:check`          | 通过                                          |
-| Lint / 边界 | `pnpm lint`                  | 通过（0 error / 0 warning）                   |
-| 类型        | `pnpm typecheck`             | 通过（根配置 + 15 个 workspace）              |
-| 单元/集成   | `pnpm test`                  | 53 个文件，307 个测试全部通过（约 12.4s）     |
-| 浏览器      | `pnpm test:e2e`（2 workers） | 20 个测试全部通过（约 1.9 分钟）              |
-| 构建        | `pnpm build`                 | 4 个应用全部成功                              |
-| 迁移        | `pnpm db:migrate`            | 6 条迁移、19 张表                             |
-| 负载        | `pnpm load:world`            | 30/30 玩家、750 接受、0 拒绝、tick p95 1.13ms |
-| 指标        | `GET /metrics`               | 143 个 Room、1040 接受、47 拒绝、0 资产失败   |
+| 检查        | 命令                                                                                                    | 结果                                                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 格式        | `pnpm format:check`                                                                                     | 通过                                                                                        |
+| Lint / 边界 | `pnpm lint`                                                                                             | 通过（0 error / 0 warning）                                                                 |
+| 类型        | `pnpm typecheck`                                                                                        | 通过（根配置 + 15 个 workspace）                                                            |
+| 单元/集成   | `pnpm test`                                                                                             | 60 个文件，325 个测试全部通过（约 12.4s）                                                   |
+| 浏览器      | `pnpm test:e2e`（2 workers）                                                                            | 20 个测试全部通过（约 1.8 分钟）                                                            |
+| 构建        | `pnpm build`                                                                                            | 4 个应用全部成功                                                                            |
+| 迁移        | `pnpm db:migrate`                                                                                       | 6 条迁移、19 张表                                                                           |
+| 容量 A      | `LOAD_PLAYERS=30 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 pnpm load:scenario`                          | 30/30、36000 接受、11069 拒绝、tick p95 4.3ms / p99 5.84ms、资产队列 p95 33.3ms、0 资产失败 |
+| 容量 B      | `LOAD_PLAYERS=50 LOAD_DURATION_MS=150000 pnpm load:scenario`                                            | 50/50、15000 接受、0 拒绝、tick p95 6.05ms / p99 7.83ms、0 资产失败                         |
+| 生产演练    | `docker compose -f compose.prod.yml -f compose.drill.yml up -d --wait` + `infra/scripts/prod-check.mjs` | 7 容器 healthy，12/12 检查通过                                                              |
+| 回滚        | `rollback.sh`（drill-b → drill-a）                                                                      | 镜像标签与 state 正确，12/12 检查通过                                                       |
+| 恢复        | `pnpm db:restore-drill`                                                                                 | 19 张表、6 条迁移、行数与不变量一致，演练库删除                                             |
+| 重启演练    | `pnpm drill:recovery`                                                                                   | SIGTERM 租约 1ms 释放；SIGKILL 周期 checkpoint 生效                                         |
+| Outbox      | `pnpm drill:outbox`                                                                                     | 失败退避 → applied → 重复 commandId duplicate                                               |
 
-阶段 7 关键证据：
+阶段 8 关键证据：
 
-- 契约：管理员角色矩阵单测；内部命令 envelope 严格拒绝未知字段；内容 schema
-  拒绝未知 effect。
-- `content-schema`：基线 bundle 无错误；checksum 与对象键顺序无关；引用缺失、
-  怪物缺少掉落表、初始装备超堆叠、槽位错误、治疗目标错误均被拒绝；差异与草稿
-  合并正确。
-- 领域/应用：Room 内容注入改变怪物 HP/名称、职业属性、物品属性与掉落经验；
-  资产服务使用注入内容的名称与经验。
-- Control API 集成（真实 PostgreSQL）：管理员登录/401/错误密码；玩家服务端分页
-  与详情；Kick 写入 Outbox + 审计；短原因 422 也写失败审计；Mute 持久化到期
-  时间；Ban 后玩家登录 403；analyst 越权写 FORBIDDEN 审计；内容草稿校验/差异、
-  designer 发布 403、approver 发布/激活/回滚；Release UPDATE 被数据库触发器拒绝；
-  非法引用发布 422。
-- Game Server 集成（真实 PostgreSQL + Colyseus）：内部端点无令牌 401；状态端点
-  返回 Room 内容版本/checksum；Kick 发 `session.kicked` 并断开，重复 commandId
-  返回 duplicate/applied 0；Mute 拦截聊天并计入 `chatMuted`；Ban 断开账号会话；
-  封禁后旧票据无法加入；Room 创建时固定内容快照，新 Room 使用新快照且旧 Room
-  不变。
-- 双浏览器 E2E：管理员总览/Room；搜索在线玩家并 Kick，客户端显示原因，Outbox
-  `applied`，审计成功；内容编辑→校验→发布→激活→回滚；阶段 1–6 回归 20/20。
-- 负载：30/30 玩家、750 接受、0 拒绝、tick p50 0.1ms、p95 1.13ms、p99 1.67ms、
-  max 1.93ms（231 个样本）。
-- 数据库：6 条迁移、19 张表、2131 账号、1989 角色、2359 物品实例、130 钱包、
-  114 条审计（98 成功/16 失败）、24 条 Outbox（全部 applied）、17 个 Release、
-  31 条激活、激活内容 `baseline`；钱包与流水不一致 0，流水幂等键缺失 0。
-- 证据目录：`docs/phase-reports/phase-07/`（11 张截图、`load.txt`、
-  `database.txt`、`metrics.json`；阶段 1–6 回归证据仍在各自目录）。
+- Realm：跨区服角色被拒绝；绑定区服使用自己的激活版本；内部状态/指标带
+  `realm`。
+- 指标：Game Server 与 Control API `/metrics/prometheus` 可抓取；10 条告警规则
+  加载健康；JSON `/metrics` 保留给负载脚本。
+- 生产边界：HTTPS/WSS、HSTS/CSP/XFO、16KB body、认证限流、`/internal` 与
+  `/metrics` 404、控制 API 经 `/api` 代理可用、Prometheus 4 个目标 up。
+- 恢复：备份 dump + manifest + SHA-256；独立库真实恢复并校验行数与资产不变量；
+  SIGTERM 优雅保存并释放租约，SIGKILL 保留 20 秒 checkpoint。
+- 数据库中断：Control API / Game Server `/health/ready` 503、`/health/live` 200，
+  恢复后自动 200。
+- 容量：30+10 玩家 10 分钟 tick p95 4.3ms、p99 5.84ms；50 玩家 tick p95 6.05ms；
+  0 资产失败、0 重复或丢失（不变量 0）。
+- 证据目录：`docs/phase-reports/phase-08/`（deployment-check、rollback-drill、
+  recovery-drill.json、restore-drill、backup、outbox-drill、database.txt、
+  metrics、两份容量 JSON）。
 
 用户验收（历史）：
 
 - 阶段 3 已于 2026-11-24 在 `http://<LAN-IP>:8584/` 通过用户实测验收。
-- 阶段 4–7 自动化验收已通过；阶段 6/7 尚未单独记录手工验收结论。
+- 阶段 4–8 自动化验收已通过；阶段 6/7 手工实测与阶段 8 证据确认仍待用户完成。
 
 ## 10. 最近一次 Git 提交
 
@@ -528,20 +579,23 @@ Outbox + Game Server 幂等执行、内容草稿/校验/不可变 Release/按区
   （8586）、game-server 87（8587）。
 - PostgreSQL 从 SSH 容器通过网关 `192.51.0.1:5432` 访问。
 - Playwright 使用预装 Chromium 131；默认 2 workers，软件渲染约 22–27 FPS。
-- 开发库当前有 2131 账号、1989 角色、2359 物品实例、130 钱包、21 管理员、
-  114 条审计、24 条 Outbox、17 个 Release、31 条激活、0 个活跃租约。
+- 开发库当前有 2748 账号、2586 角色、3731 物品实例、196 钱包、43 管理员、
+  191 条审计（159 成功/32 失败）、44 条 Outbox（全部 applied）、32 个 Release、
+  54 条激活、8 个区服、0 个活跃租约；钱包/流水、物品放置不变量均为 0。
 - 开发管理员：`admin` / `web-legend-admin`（除非 `ADMIN_SEED_PASSWORD` 覆盖）。
 - 激活内容为 `baseline`，checksum
   `732f923b8c9a0637af7f78644aa5e2d6be616376d2d649af4b5004f268ed245c`。
 
 ## 12. 下一步
 
-1. 在 `http://<LAN-IP>:8584/` 与 `http://<LAN-IP>:8585/` 按第 3 节实测阶段 7，
-   并确认阶段 1–6 游戏行为无回归。
-2. 用户验收通过后标记阶段 7 完成，再启动阶段 8：生产镜像、HTTPS/WSS、指标告警、
-   50 人 10 分钟压测、备份/恢复与故障演练。
-3. 阶段 8 前评估独立测试数据库、Outbox 独立 worker、审计/Release 归档、
-   多区服内容路由与聊天持久化/审核。
-4. 保持阶段 1–7 的测试与 20 个浏览器 E2E 为回归门禁；软件渲染环境默认 2 个
-   Playwright worker。
-5. 正式音效与美术资源仍在阶段 8 门禁后替换。
+1. 在 `http://<LAN-IP>:8584/` 与 `http://<LAN-IP>:8585/` 按第 3 节完成阶段 7
+   实测，并确认阶段 1–6 游戏行为无回归。
+2. 确认阶段 8 证据与部署方式（`docs/phase-reports/PHASE_08_REPORT.md`、
+   `docs/runbooks/DEPLOYMENT_AND_RECOVERY.md`）；在自己的证书与镜像仓库上复跑
+   一次 `prod:deploy` / `prod:rollback`。
+3. 下一阶段前评估：独立测试数据库、Outbox 独立 worker、审计/Release/Outbox
+   归档、多 Realm 路由与聊天持久化/审核。
+4. 保持阶段 1–8 的 325 个测试与 20 个浏览器 E2E 为回归门禁；软件渲染环境默认
+   2 个 Playwright worker。新增压测/演练脚本已并入 `pnpm load:scenario`、
+   `pnpm drill:*` 与 `pnpm db:*`。
+5. 正式音效与美术资源在用户确认阶段 8 后替换。

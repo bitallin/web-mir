@@ -82,7 +82,7 @@ export type {
   UpsertContentDraftInput,
 } from './content';
 
-export { findRealmById, listActiveRealms } from './realms';
+export { findRealmByCode, findRealmById, listActiveRealms } from './realms';
 
 export { findWallet, listEquippedItems, listInventoryItems, listOpenWorldDrops } from './items';
 export type { OpenWorldDrop } from './items';

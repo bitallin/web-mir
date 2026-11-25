@@ -79,7 +79,7 @@ export type InsertContentReleaseInput = {
   checksum: string;
   payload: unknown;
   changeSummary: unknown;
-  createdBy: string;
+  createdBy: string | null;
   createdByUsername: string;
   note: string | null;
   createdAt: Date;
@@ -201,7 +201,7 @@ export async function listContentActivations(
 export type ActivateContentInput = {
   realmId: string;
   releaseId: string;
-  adminUserId: string;
+  adminUserId: string | null;
   adminUsername: string;
   reason: string;
   now: Date;

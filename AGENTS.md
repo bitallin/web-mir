@@ -200,6 +200,12 @@ ADR-013 中的包均已创建；阶段 8 如需新包必须先有真实消费者
   受信内部端点投递；Game Server 必须按 `commandId` 幂等执行，客户端不得触发。
 - 聊天内容必须经过服务端过滤与限频后才能广播；被拦截消息只向发送者返回警告。
 - Room 启动时固定 Content Release 和 Asset Manifest 版本。
+- Game Server 进程通过 `GAME_SERVER_REALM` 绑定一个区服（ADR-023）；Room 在
+  `onAuth` 校验角色所属区服，不再取“第一个活跃区服”的内容。生产启动时区服
+  不存在应直接失败。
+- 生产 WebSocket 必须校验 Origin（`GAME_SERVER_ALLOWED_ORIGINS`，生产必填）。
+- `/metrics` JSON 与 `/metrics/prometheus` 文本读取同一内存注册表；运营指标
+  端点只能在内网/Prometheus 可达，不得经公网反向代理暴露。
 - 私有数据（背包、账号、GM 标记）不得进入公开 Room State。
 - 重连、断线、Room 崩溃必须按架构文档第 8.7 节处理。
 
@@ -224,7 +230,17 @@ pnpm build
 pnpm maps:compile        # 从 Tiled 源图生成编译产物；提交产物后测试会校验一致性
 pnpm repair:maps         # 幂等迁移退役地图上的角色（阶段 3 一次性维护命令）
 pnpm load:world          # 30 人地图负载检查，读取 /metrics 的 tick 指标
+pnpm load:scenario       # 阶段 8 容量场景；LOAD_PLAYERS/LOAD_ATTACKERS/LOAD_DURATION_MS 可调
+pnpm drill:recovery      # Game Server SIGTERM/SIGKILL 恢复演练（先 pnpm build）
+pnpm drill:outbox        # Outbox 重试、退避与重复 commandId 演练
+pnpm db:backup           # 自定义格式备份 + manifest + SHA-256
+pnpm db:restore-drill <dump> <manifest>  # 独立演练库真实恢复并校验
+pnpm cert:dev            # 生成自签名 TLS 证书（仅演练）
+pnpm prod:deploy         # 生产 compose 发布（IMAGE_TAG 等变量见 runbook）
+pnpm prod:rollback       # 回滚到 previous-tag，无数据库反向迁移
 ```
+
+阶段 8 运行手册见 `docs/runbooks/DEPLOYMENT_AND_RECOVERY.md`。
 
 测试要求：
 
@@ -297,6 +313,16 @@ pnpm load:world          # 30 人地图负载检查，读取 /metrics 的 tick �
 - Node 的 `fetch`（含 Colyseus SDK 的 matchmaking）拒绝 87 端口（WHATWG
   bad port）。负载脚本因此通过 Vite 的 `/ws` 代理连接实时服务器，并用
   `node:http` 读取 `/metrics`；不要把负载脚本改成直连 `fetch`。
+- Docker Hub 在本环境不可达；镜像通过本地镜像站拉取。构建生产镜像时用
+  `--build-arg NODE_IMAGE=docker.1ms.run/library/node:26-bookworm-slim`、
+  `--build-arg NGINX_IMAGE=docker.1ms.run/library/nginx:1.27-alpine`，compose
+  用 `NODE_IMAGE`/`NGINX_IMAGE`/`PROMETHEUS_IMAGE`/`POSTGRES_IMAGE` 覆盖；
+  默认值留给能访问 Docker Hub 的环境。不得把镜像站地址写成唯一来源。
+- 生产 compose 的容器网络在 Docker daemon 所在的宿主机上；从本 SSH 容器
+  不能直接访问其发布端口。演练用 `infra/docker/compose.drill.yml` 暴露
+  PostgreSQL 到宿主机端口，再经网关 `192.51.0.1:<port>` 访问。
+- 本机没有 `psql`/`pg_dump` 客户端，备份/恢复脚本自动回退到固定的 PostgreSQL
+  容器镜像；`pg_restore` 从 stdin 读取归档（不能传 `-`）。
 - Redis 属于扩容阶段，当前未启动；本地镜像不可用时不得用其他版本冒充 8.2。
 
 ## 13. 禁止事项

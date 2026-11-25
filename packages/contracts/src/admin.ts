@@ -146,6 +146,8 @@ export const adminGameServerStatusSchema = z
   .object({
     service: z.literal('game-server'),
     serverId: z.string().min(1),
+    /** Realm bound to this process (ADR-023); rooms only accept its characters. */
+    realm: z.string().min(1).max(32),
     uptimeSeconds: z.number().nonnegative(),
     rooms: z.array(adminRoomSchema).max(64),
     totals: z

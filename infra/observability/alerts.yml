@@ -1,0 +1,98 @@
+groups:
+  - name: web-legend-availability
+    rules:
+      - alert: GameServerDown
+        expr: up{job="game-server"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Game Server is unreachable by Prometheus
+          description: 'No scrape from {{ $labels.instance }} for one minute.'
+
+      - alert: ControlApiDown
+        expr: up{job="control-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Control API is unreachable by Prometheus
+          description: 'No scrape from {{ $labels.instance }} for one minute.'
+
+      - alert: DatabaseProbeFailing
+        expr: web_legend_db_probe_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Control API cannot reach PostgreSQL
+          description: 'The last database probe failed for more than one minute.'
+
+  - name: web-legend-simulation
+    rules:
+      - alert: RoomTickP95High
+        expr: max by (room, map) (web_legend_game_server_tick_duration_ms{quantile="0.95"}) > 25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Room tick p95 above the 25ms MVP target
+          description: 'Room {{ $labels.room }} ({{ $labels.map }}) p95 is {{ $value }}ms.'
+
+      - alert: RoomTickP99High
+        expr: max by (room, map) (web_legend_game_server_tick_duration_ms{quantile="0.99"}) > 40
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Room tick p99 above the 40ms MVP target
+          description: 'Room {{ $labels.room }} ({{ $labels.map }}) p99 is {{ $value }}ms.'
+
+      - alert: EventLoopLagHigh
+        expr: max by (job) (nodejs_event_loop_lag_seconds{quantile="0.99"}) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Event loop lag above 100ms
+          description: '{{ $labels.job }} event loop p99 lag is {{ $value }}s.'
+
+  - name: web-legend-operations
+    rules:
+      - alert: OutboxOldestPendingStale
+        expr: web_legend_outbox_oldest_pending_age_seconds > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Admin command stuck in the outbox
+          description: 'Oldest pending command is {{ $value }}s old.'
+
+      - alert: OutboxCommandsFailed
+        expr: increase(web_legend_outbox_commands{status="failed"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Admin command delivery exhausted its retries
+          description: 'A command moved to failed in the last ten minutes.'
+
+      - alert: AssetTransactionFailures
+        expr: increase(web_legend_game_server_asset_commands_total{result="failed"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Asset command failures detected
+          description: 'Room {{ $labels.room }} reported failed asset commands.'
+
+      - alert: HighHttp5xxRate
+        expr: |
+          sum(rate(web_legend_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(web_legend_http_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Control API 5xx rate above 5%
+          description: 'The 5xx share over five minutes is {{ $value | humanizePercentage }}.'

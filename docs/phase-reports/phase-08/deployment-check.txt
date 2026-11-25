@@ -1,0 +1,76 @@
+PASS edge https healthz — 200
+PASS game web over https — 200, csp=true, hsts=true, xfo=DENY
+PASS security headers present
+PASS admin web over https — 200
+PASS control api proxied — 200 {"service":"control-api","version":"0.1.0","protocolVersion"
+PASS readiness through edge — 200
+PASS /internal not public — 404
+PASS /metrics not public — 404
+PASS login reaches control api (401 for bad credentials) — 401 {"error":{"code":"INVALID_CREDENTIALS","message":"账号或密码错误","
+PASS http redirects to https — 308 https://edge/
+PASS wss upgrade through edge — 101
+PASS prometheus targets up — [{"job":"control-api","health":"up"},{"job":"edge","health":"up"},{"job":"game-server","health":"up"}]
+{
+  "ranAt": "2026-11-25T13:13:39.338Z",
+  "results": [
+    {
+      "name": "edge https healthz",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "game web over https",
+      "ok": true,
+      "detail": "200, csp=true, hsts=true, xfo=DENY"
+    },
+    {
+      "name": "security headers present",
+      "ok": true
+    },
+    {
+      "name": "admin web over https",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "control api proxied",
+      "ok": true,
+      "detail": "200 {\"service\":\"control-api\",\"version\":\"0.1.0\",\"protocolVersion\""
+    },
+    {
+      "name": "readiness through edge",
+      "ok": true,
+      "detail": "200"
+    },
+    {
+      "name": "/internal not public",
+      "ok": true,
+      "detail": "404"
+    },
+    {
+      "name": "/metrics not public",
+      "ok": true,
+      "detail": "404"
+    },
+    {
+      "name": "login reaches control api (401 for bad credentials)",
+      "ok": true,
+      "detail": "401 {\"error\":{\"code\":\"INVALID_CREDENTIALS\",\"message\":\"账号或密码错误\",\""
+    },
+    {
+      "name": "http redirects to https",
+      "ok": true,
+      "detail": "308 https://edge/"
+    },
+    {
+      "name": "wss upgrade through edge",
+      "ok": true,
+      "detail": "101"
+    },
+    {
+      "name": "prometheus targets up",
+      "ok": true,
+      "detail": "[{\"job\":\"control-api\",\"health\":\"up\"},{\"job\":\"edge\",\"health\":\"up\"},{\"job\":\"game-server\",\"health\":\"up\"}]"
+    }
+  ]
+}

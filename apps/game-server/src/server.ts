@@ -8,9 +8,11 @@ import {
   adminGameServerStatusSchema,
   healthResponseSchema,
   readinessResponseSchema,
+  type MapMonsterSpawn,
 } from '@web-legend/contracts';
 import { MAP_MANIFESTS } from '@web-legend/contracts/maps';
 import type { ChatFilter } from '@web-legend/game-domain';
+import { RuntimeMetrics } from '@web-legend/observability';
 import { pingDatabase, type Database } from '@web-legend/persistence';
 import express from 'express';
 import type { Logger } from 'pino';
@@ -18,6 +20,7 @@ import type { Logger } from 'pino';
 import { AdminCommandHub } from './admin/commandHub';
 import type { GameServerEnv } from './env';
 import { MetricsRegistry } from './metrics';
+import { renderGameServerPrometheus } from './prometheus';
 import { DiagnosticsRoom } from './rooms/diagnosticsRoom';
 import { WorldMapRoom } from './rooms/worldMapRoom';
 import { ContentStore, type ContentProvider } from './world/contentStore';
@@ -40,6 +43,8 @@ export type WorldRoomTuning = {
   economyRng?: () => number;
   monsterRespawnMs?: number;
   playerRespawnMs?: number;
+  /** Overrides compiled monster spawns; tests disable them to isolate combat. */
+  monsterSpawns?: readonly MapMonsterSpawn[];
 };
 
 export type CreateGameServerOptions = {
@@ -62,6 +67,28 @@ export type GameServerRuntime = {
   shutdown: () => Promise<void>;
 };
 
+/**
+ * Browsers always send Origin on a WebSocket upgrade. Rejecting a missing or
+ * unlisted origin in production prevents a third-party page from opening a
+ * socket with the victim's cookies; development keeps the permissive default
+ * so local tooling and the load client can connect without a browser.
+ */
+function createOriginCheck(
+  allowedOrigins: readonly string[] | undefined,
+): (request: Request) => Response | void {
+  if (allowedOrigins === undefined || allowedOrigins.length === 0) {
+    return () => undefined;
+  }
+  const allowAll = allowedOrigins.includes('*');
+  return (request: Request) => {
+    const origin = request.headers.get('origin');
+    if (allowAll || (origin !== null && allowedOrigins.includes(origin))) {
+      return undefined;
+    }
+    return new Response('websocket origin not allowed', { status: 403 });
+  };
+}
+
 function tokenMatches(expected: string, provided: unknown): boolean {
   if (typeof provided !== 'string') {
     return false;
@@ -75,16 +102,27 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
   const startedAt = Date.now();
   const { env, logger, database } = options;
   const metrics = new MetricsRegistry();
+  const runtimeMetrics = new RuntimeMetrics();
   const contentStore =
-    options.contentStore ?? new ContentStore(database, logger, options.contentRefreshMs ?? 5_000);
+    options.contentStore ??
+    new ContentStore(database, logger, {
+      realmCode: env.GAME_SERVER_REALM,
+      requireRealm: env.NODE_ENV === 'production',
+      refreshMs: options.contentRefreshMs ?? 5_000,
+    });
   const adminHub = options.adminHub ?? new AdminCommandHub(logger);
 
   const server = new Server({
+    // index.ts owns SIGTERM/SIGINT so it can drain rooms, stop metrics and
+    // close the DB in order; Colyseus' own handler would call process.exit()
+    // as soon as its branch finishes, racing the lease release (ADR-023).
+    gracefullyShutdown: false,
     transport: new WebSocketTransport({
       pingInterval: 10_000,
       pingMaxRetries: 3,
       // Realtime commands are small; reject oversized frames before decoding.
       maxPayload: 4_096,
+      beforeUpgrade: createOriginCheck(env.GAME_SERVER_ALLOWED_ORIGINS),
     }),
     greet: false,
     logger,
@@ -132,6 +170,20 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
         response.status(200).json(metrics.snapshot());
       });
 
+      app.get('/metrics/prometheus', (_request, response) => {
+        response.setHeader('content-type', 'text/plain; version=0.0.4; charset=utf-8');
+        response
+          .status(200)
+          .send(
+            renderGameServerPrometheus(
+              metrics.snapshot(),
+              runtimeMetrics.snapshot(),
+              env.GAME_SERVER_REALM,
+              SERVICE_VERSION,
+            ),
+          );
+      });
+
       // Internal control plane for the admin outbox. The reverse proxy must
       // never expose /internal publicly (phase 8 runbook).
       app.use('/internal', express.json({ limit: '16kb' }));
@@ -145,6 +197,7 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
         const status = adminGameServerStatusSchema.parse({
           service: 'game-server',
           serverId: env.GAME_SERVER_ID,
+          realm: env.GAME_SERVER_REALM,
           uptimeSeconds: Math.max(0, (Date.now() - startedAt) / 1_000),
           rooms,
           totals: {
@@ -191,6 +244,7 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
       mapInstance,
       contentStore,
       adminHub,
+      realmCode: env.GAME_SERVER_REALM,
       ...options.world,
     });
   }
@@ -205,11 +259,18 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
     contentStore,
     adminHub,
     listen: async () => {
-      await contentStore.start();
+      runtimeMetrics.start();
+      try {
+        await contentStore.start();
+      } catch (error) {
+        runtimeMetrics.stop();
+        throw error;
+      }
       await server.listen(env.GAME_SERVER_PORT, env.GAME_SERVER_HOST);
     },
     shutdown: async () => {
       contentStore.stop();
+      runtimeMetrics.stop();
       await server.gracefullyShutdown(false);
     },
   };

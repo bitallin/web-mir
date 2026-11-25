@@ -53,6 +53,7 @@ import {
   type Facing,
   type InventorySnapshot,
   type LevelUp,
+  type MapMonsterSpawn,
   type MapPortal,
   type SessionTransfer,
   type SystemNotice,
@@ -124,6 +125,10 @@ export type WorldMapRoomOptions = {
   /** Fixed content snapshot source; omitted in unit fixtures means baseline. */
   contentStore?: ContentProvider;
   adminHub?: AdminCommandHub;
+  /** Realm this process serves; characters from other realms are rejected. */
+  realmCode?: string;
+  /** Overrides the compiled map's monster spawns; tests use an empty list. */
+  monsterSpawns?: readonly MapMonsterSpawn[];
   tickHz?: number;
   patchRateMs?: number;
   reconnectGraceSeconds?: number;
@@ -275,6 +280,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private assets!: AssetService;
   private tick = 0;
   private killSequence = 0;
+  /** True while Colyseus is encoding and writing a state patch. */
+  private patching = false;
   private assetQueue: Promise<void> = Promise.resolve();
   private checkpointIntervalMs = DEFAULT_CHECKPOINT_INTERVAL_MS;
   private readonly sessions = new Map<string, SessionRecord>();
@@ -297,7 +304,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       throw new Error(`map "${this.map.mapId}" has no spawn point for combat respawn`);
     }
     this.combat = new CombatWorld({
-      spawns: this.map.runtime.manifest.monsterSpawns,
+      spawns: options.monsterSpawns ?? this.map.runtime.manifest.monsterSpawns,
       grid: this.map.runtime.grid,
       pathfinder: findPath,
       rng: options.combatRng ?? createCombatRng(),
@@ -334,7 +341,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       ...(options.economyRng === undefined ? {} : { rng: options.economyRng }),
     });
 
-    this.metrics = options.metrics.register(this.roomId);
+    this.metrics = options.metrics.register(this.roomId, {
+      mapId: this.map.mapId,
+      instanceId: this.map.instanceId,
+      contentVersion: this.content.version,
+    });
 
     const tickHz = options.tickHz ?? DEFAULT_TICK_HZ;
     const patchRateMs = options.patchRateMs ?? DEFAULT_PATCH_RATE_MS;
@@ -347,6 +358,19 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.state.tickHz = tickHz;
     this.state.speedUnitsPerSecond = PLAYER_SPEED_UNITS_PER_SECOND;
     this.setPatchRate(patchRateMs);
+
+    // Patch writes happen synchronously inside broadcastPatch(), so a flag
+    // around it lets the per-client byte counter separate patches from
+    // ordinary messages without touching Colyseus internals.
+    const broadcastPatch = this.broadcastPatch.bind(this);
+    this.broadcastPatch = (): boolean => {
+      this.patching = true;
+      try {
+        return broadcastPatch();
+      } finally {
+        this.patching = false;
+      }
+    };
 
     const stepMs = 1_000 / tickHz;
     this.runner = createFixedStepRunner({
@@ -443,6 +467,19 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   override onJoin(client: Client): void {
+    // Bandwidth attribution is per client and transport-owned; wrap the raw
+    // senders once so every state patch and message is counted.
+    const raw = client.raw.bind(client);
+    client.raw = (data, options, callback) => {
+      this.metrics.recordWsSent(data.byteLength, this.patching);
+      raw(data, options, callback);
+    };
+    const enqueueRaw = client.enqueueRaw.bind(client);
+    client.enqueueRaw = (data, options) => {
+      this.metrics.recordWsSent(data.byteLength, this.patching);
+      enqueueRaw(data, options);
+    };
+
     const auth = authDataSchema.parse(client.auth);
     if (this.sessionByPlayer.has(auth.characterId)) {
       throw new ServerError(ErrorCode.AUTH_FAILED, '该角色正在另一台设备上游戏');
@@ -683,6 +720,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const realm = await findRealmById(this.options.database, character.realmId);
     if (realm === undefined || realm.status !== 'active') {
       throw new ServerError(ErrorCode.AUTH_FAILED, '该区服当前不可进入');
+    }
+    if (this.options.realmCode !== undefined && realm.code !== this.options.realmCode) {
+      throw new ServerError(ErrorCode.AUTH_FAILED, '该角色不属于当前区服，请从对应区服进入');
     }
 
     // A ban persists on the account; an already-issued ticket cannot bypass it.
@@ -1588,7 +1628,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private enqueueAsset<T>(task: () => Promise<T>): Promise<T> {
+    const startedAt = performance.now();
     const run = this.assetQueue.then(task, task);
+    run.then(
+      () => this.metrics.recordAssetDuration(performance.now() - startedAt),
+      () => this.metrics.recordAssetDuration(performance.now() - startedAt),
+    );
     this.assetQueue = run.then(
       () => undefined,
       () => undefined,

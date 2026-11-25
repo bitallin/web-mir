@@ -6,19 +6,39 @@ Fastify Control API 和 Colyseus 实时服务器。
 
 ## 当前状态
 
-**阶段 7：运营后台与内容发布，实现与自动化验收完成，等待用户在
-8584 / 8585 实测确认。**
+**阶段 8：质量、压测、部署与恢复，实现与自动化验收完成，等待用户确认。**
+
+阶段 7 的运营后台与内容发布已通过自动化验收，等待用户在 8584 / 8585 实测
+确认（阶段 8 不改变其功能）。
 
 - 阶段 0–3 已通过用户验收；阶段 4–6 的自动化验收完成，阶段 6 的实测仍待用户
   确认。
 - 阶段 7 交付：独立管理员身份与 RBAC、总览/玩家/Room/审计/运营指令查询、
   Kick/Ban/Mute 审计 + PostgreSQL Outbox 投递与 Game Server 幂等执行、
   内容草稿 → 校验 → 不可变 Release → 按区服激活/回滚，以及自定义运营工作台。
-- 尚未实现：压测/部署/恢复演练（阶段 8）、正式音效与美术资源；聊天持久化、
-  禁言历史查询与多区服内容路由仍待后续阶段。
+- 阶段 8 交付：生产镜像与反向代理、HTTPS/WSS 与安全头、Prometheus 指标与
+  告警、按区服绑定内容、发布/回滚脚本、数据库备份与真实恢复演练、Game Server
+  正常/崩溃重启与 Outbox 重试演练、30+10 人与 50 人容量场景。
+- 尚未实现：正式音效与美术资源；聊天持久化、禁言历史查询；多 Game Server /
+  多 Realm 路由与独立 Outbox worker 留待真实扩容时评估。
 - 详细状态见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)，工作记录见
   [docs/WORKLOG.md](docs/WORKLOG.md)，阶段 7 报告见
   [docs/phase-reports/PHASE_07_REPORT.md](docs/phase-reports/PHASE_07_REPORT.md)。
+
+## 阶段 8：部署、可观测性与恢复
+
+- 生产拓扑：nginx edge（TLS/WSS、安全头、限流）→ game-web / admin-web /
+  control-api / game-server；PostgreSQL 与 Prometheus 只在内部网络。
+- 镜像：`infra/docker/Dockerfile.*`，标签使用不可变版本；发布/回滚脚本为
+  `pnpm prod:deploy` / `pnpm prod:rollback`，不执行数据库反向迁移。
+- 指标：`/metrics/prometheus`（Game Server / Control API / edge），Prometheus
+  抓取与告警定义在 `infra/observability/`。
+- 恢复：`pnpm db:backup` → `pnpm db:restore-drill <dump> <manifest>`；
+  `pnpm drill:recovery` 与 `pnpm drill:outbox` 为可重复演练脚本。
+- 完整流程、故障处置与 Room drain 见
+  [docs/runbooks/DEPLOYMENT_AND_RECOVERY.md](docs/runbooks/DEPLOYMENT_AND_RECOVERY.md)。
+- 阶段 8 报告与证据见
+  [docs/phase-reports/PHASE_08_REPORT.md](docs/phase-reports/PHASE_08_REPORT.md)。
 
 ## 阶段 7：如何体验运营后台
 
@@ -211,6 +231,14 @@ pnpm exec playwright install chromium
 | `pnpm maps:compile`      | Tiled 源图编译为运行时 manifest          |
 | `pnpm repair:maps`       | 幂等迁移退役地图上的角色                 |
 | `pnpm load:world`        | 30 人地图负载检查并读取 tick 指标        |
+| `pnpm load:scenario`     | 阶段 8 容量场景（30+10 / 50 人）         |
+| `pnpm drill:recovery`    | SIGTERM / SIGKILL 恢复演练（先 build）   |
+| `pnpm drill:outbox`      | Outbox 重试、退避与重复 commandId 演练   |
+| `pnpm db:backup`         | 备份数据库并生成校验 manifest            |
+| `pnpm db:restore-drill`  | 在独立库真实恢复并按 manifest 校验       |
+| `pnpm cert:dev`          | 生成自签名 TLS 证书（仅演练）            |
+| `pnpm prod:deploy`       | 生产 compose 发布（变量见 runbook）      |
+| `pnpm prod:rollback`     | 回滚到上一个镜像标签                     |
 
 E2E 会执行迁移与区服 seed，并启动 game-web、admin-web、control-api 和
 game-server 四个开发服务；如果开发栈已运行，可复用现有服务：

@@ -5,7 +5,7 @@ import {
   validateContentBundle,
 } from '@web-legend/content-schema';
 import type { ContentBundle } from '@web-legend/contracts';
-import { findDefaultActiveRelease, type Database } from '@web-legend/persistence';
+import { findRealmActiveContent, findRealmByCode, type Database } from '@web-legend/persistence';
 import type { Logger } from 'pino';
 
 export type RoomContent = {
@@ -27,28 +27,60 @@ export const BASE_ROOM_CONTENT: RoomContent = {
   bundle: BASE_CONTENT_BUNDLE,
 };
 
+export type ContentStoreOptions = {
+  /** Realm code this process serves (ADR-023). */
+  realmCode: string;
+  /** Production refuses to start when the realm is missing. */
+  requireRealm?: boolean;
+  refreshMs?: number;
+};
+
 /**
- * Polls the realm's active content release and exposes the latest snapshot.
- * A Room copies the snapshot only in `onCreate`, so an activation never mutates
- * a running battle (ADR-008 / ADR-022).
+ * Polls the bound realm's active content release and exposes the latest
+ * snapshot. A Room copies the snapshot only in `onCreate`, so an activation
+ * never mutates a running battle (ADR-008 / ADR-022 / ADR-023).
  */
 export class ContentStore implements ContentProvider {
   private current: RoomContent = BASE_ROOM_CONTENT;
   private timer: NodeJS.Timeout | null = null;
+  private realmId: string | null = null;
+  private readonly refreshMs: number;
 
   constructor(
     private readonly db: Database,
     private readonly logger: Logger,
-    private readonly refreshMs = 5_000,
-  ) {}
+    private readonly options: ContentStoreOptions,
+  ) {
+    this.refreshMs = options.refreshMs ?? 5_000;
+  }
 
   snapshot(): RoomContent {
     return this.current;
   }
 
+  private async resolveRealmId(): Promise<string | null> {
+    if (this.realmId !== null) {
+      return this.realmId;
+    }
+    const realm = await findRealmByCode(this.db, this.options.realmCode);
+    if (realm === undefined || realm.status !== 'active') {
+      return null;
+    }
+    this.realmId = realm.id;
+    return this.realmId;
+  }
+
   async refresh(): Promise<void> {
     try {
-      const active = await findDefaultActiveRelease(this.db);
+      const realmId = await this.resolveRealmId();
+      if (realmId === null) {
+        this.logger.error(
+          { realmCode: this.options.realmCode },
+          'bound realm is missing or inactive; keeping the previous content snapshot',
+        );
+        return;
+      }
+      const active = await findRealmActiveContent(this.db, realmId);
       if (active === undefined) {
         this.current = BASE_ROOM_CONTENT;
         return;
@@ -91,6 +123,10 @@ export class ContentStore implements ContentProvider {
   }
 
   async start(): Promise<void> {
+    const realmId = await this.resolveRealmId();
+    if (realmId === null && this.options.requireRealm === true) {
+      throw new Error(`bound realm "${this.options.realmCode}" is missing or inactive`);
+    }
     await this.refresh();
     if (this.timer !== null) {
       return;

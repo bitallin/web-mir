@@ -48,6 +48,17 @@ describe('RoomMetrics', () => {
     expect(snapshot.pvpKills).toBe(1);
   });
 
+  it('separates patch bytes from other outbound bytes', () => {
+    const metrics = new RoomMetrics('room-1');
+    metrics.recordWsSent(100, false);
+    metrics.recordWsSent(60, true);
+    metrics.recordWsSent(40, true);
+
+    const snapshot = metrics.snapshot();
+    expect(snapshot.wsSentBytes).toBe(200);
+    expect(snapshot.wsPatchBytes).toBe(100);
+  });
+
   it('counts accepted and filtered chat separately', () => {
     const metrics = new RoomMetrics('room-1');
     metrics.recordChatMessage();

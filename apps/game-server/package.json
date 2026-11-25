@@ -9,7 +9,9 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json",
     "dev:watch": "tsx watch src/index.ts",
-    "load:world": "tsx scripts/worldLoad.ts"
+    "load:world": "tsx scripts/worldLoad.ts",
+    "load:scenario": "tsx scripts/worldScenario.ts",
+    "drill:recovery": "tsx scripts/recoveryDrill.ts"
   },
   "dependencies": {
     "@colyseus/core": "0.18.28",

@@ -1,0 +1,25 @@
+$ tsx infra/scripts/outbox-drill.ts
+{
+  "commandId": "7247b634-898f-4e7d-9581-c1aeaffd2c4d",
+  "failedAttempt": {
+    "status": "pending",
+    "attempts": 1,
+    "lastError": "connect ECONNREFUSED 127.0.0.1:1"
+  },
+  "delivered": {
+    "status": "applied",
+    "attempts": 2,
+    "appliedAt": "2026-11-25T14:24:41.854Z"
+  },
+  "duplicateDelivery": {
+    "first": {
+      "status": "applied",
+      "applied": 0
+    },
+    "second": {
+      "status": "duplicate",
+      "applied": 0
+    }
+  }
+}
+outbox retry drill passed

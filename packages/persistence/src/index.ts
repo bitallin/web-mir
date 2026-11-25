@@ -92,6 +92,7 @@ export {
   findDefaultActiveRelease,
   findLatestActivation,
   findRealmActiveContent,
+  findRealmByCode,
   findRealmById,
   findSessionByAccessHash,
   findSessionByRefreshHash,

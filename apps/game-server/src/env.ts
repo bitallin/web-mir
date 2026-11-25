@@ -1,4 +1,5 @@
 import {
+  corsOriginsSchema,
   databaseUrlSchema,
   hostSchema,
   loadEnv,
@@ -22,6 +23,13 @@ export const gameServerEnvSchema = z
       .string()
       .regex(/^[A-Za-z0-9_.:-]{1,64}$/u)
       .default('game-server-local'),
+    /** Realm this process serves; rooms reject characters from other realms. */
+    GAME_SERVER_REALM: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]{1,31}$/u)
+      .default('classic-01'),
+    /** Browser origins allowed to open a WebSocket; production requires a list. */
+    GAME_SERVER_ALLOWED_ORIGINS: corsOriginsSchema.optional(),
     /** Shared secret for the Control API's internal command/status endpoints. */
     INTERNAL_ADMIN_TOKEN: z.string().min(16).max(128).default(DEV_INTERNAL_ADMIN_TOKEN),
   })
@@ -31,6 +39,17 @@ export const gameServerEnvSchema = z
         code: 'custom',
         path: ['INTERNAL_ADMIN_TOKEN'],
         message: 'must be changed for production',
+      });
+    }
+    if (
+      env.NODE_ENV === 'production' &&
+      (env.GAME_SERVER_ALLOWED_ORIGINS === undefined ||
+        env.GAME_SERVER_ALLOWED_ORIGINS.length === 0)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['GAME_SERVER_ALLOWED_ORIGINS'],
+        message: 'must list at least one browser origin in production',
       });
     }
   });

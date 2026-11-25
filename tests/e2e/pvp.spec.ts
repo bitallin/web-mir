@@ -165,11 +165,13 @@ test('wilds pvp kills, announces and revives without a reward', async ({ browser
   const bob = await joinWorld(browser, alice.roomId, 'DuelB');
   await transferBothToWilds(alice.page, bob.page);
 
-  await Promise.all([moveTo(alice.page, 12, 12), moveTo(bob.page, 13, 12)]);
+  // A spot at least one aggro radius away from every wilds spawn (ADR-023
+  // density), so monsters do not interrupt the duel.
+  await Promise.all([moveTo(alice.page, 12, 10), moveTo(bob.page, 13, 10)]);
   await expect(selfRow(alice.page)).toHaveAttribute('data-tile-x', '12', { timeout: 20_000 });
-  await expect(selfRow(alice.page)).toHaveAttribute('data-tile-y', '12');
+  await expect(selfRow(alice.page)).toHaveAttribute('data-tile-y', '10');
   await expect(selfRow(bob.page)).toHaveAttribute('data-tile-x', '13', { timeout: 20_000 });
-  await expect(selfRow(bob.page)).toHaveAttribute('data-tile-y', '12');
+  await expect(selfRow(bob.page)).toHaveAttribute('data-tile-y', '10');
 
   await expect(alice.page.getByTestId('pvp-mode')).toHaveAttribute('data-pvp', 'open');
   const bobId = await otherPlayerId(alice.page, bob.characterName);

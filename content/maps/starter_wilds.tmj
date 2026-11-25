@@ -6079,6 +6079,822 @@
           "width": 0,
           "x": 1136,
           "y": 784
+        },
+        {
+          "height": 0,
+          "id": 12,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 42
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 1
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_4"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 1360,
+          "y": 48
+        },
+        {
+          "height": 0,
+          "id": 13,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 1
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 1
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_4"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 48,
+          "y": 48
+        },
+        {
+          "height": 0,
+          "id": 14,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 1
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 30
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_5"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 48,
+          "y": 976
+        },
+        {
+          "height": 0,
+          "id": 15,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 20
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 30
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_5"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 656,
+          "y": 976
+        },
+        {
+          "height": 0,
+          "id": 16,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 29
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 1
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_6"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 944,
+          "y": 48
+        },
+        {
+          "height": 0,
+          "id": 17,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 42
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 14
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_6"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 1360,
+          "y": 464
+        },
+        {
+          "height": 0,
+          "id": 18,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 13
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 1
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_7"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 432,
+          "y": 48
+        },
+        {
+          "height": 0,
+          "id": 19,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 33
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 10
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_7"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 1072,
+          "y": 336
+        },
+        {
+          "height": 0,
+          "id": 20,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 42
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 30
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_8"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 1360,
+          "y": 976
+        },
+        {
+          "height": 0,
+          "id": 21,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 10
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 29
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_8"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 336,
+          "y": 944
+        },
+        {
+          "height": 0,
+          "id": 22,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 1
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 21
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_9"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 48,
+          "y": 688
+        },
+        {
+          "height": 0,
+          "id": 23,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 29
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 30
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_9"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 944,
+          "y": 976
+        },
+        {
+          "height": 0,
+          "id": 24,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 20
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 21
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_10"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 656,
+          "y": 688
+        },
+        {
+          "height": 0,
+          "id": 25,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 21
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 2
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_10"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 688,
+          "y": 80
+        },
+        {
+          "height": 0,
+          "id": 26,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 1
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 9
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_11"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 48,
+          "y": 304
+        },
+        {
+          "height": 0,
+          "id": 27,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 24
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 16
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_11"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 784,
+          "y": 528
+        },
+        {
+          "height": 0,
+          "id": 28,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 42
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 22
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_12"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 1360,
+          "y": 720
+        },
+        {
+          "height": 0,
+          "id": 29,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 16
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 19
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_12"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 528,
+          "y": 624
+        },
+        {
+          "height": 0,
+          "id": 30,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 26
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 7
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_13"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 848,
+          "y": 240
+        },
+        {
+          "height": 0,
+          "id": 31,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 36
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 4
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_13"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 1168,
+          "y": 144
+        },
+        {
+          "height": 0,
+          "id": 32,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 15
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 25
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_14"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 496,
+          "y": 816
+        },
+        {
+          "height": 0,
+          "id": 33,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 25
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 25
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_14"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 816,
+          "y": 816
+        },
+        {
+          "height": 0,
+          "id": 34,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 36
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 17
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_slime_15"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "wild_slime"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 1168,
+          "y": 560
+        },
+        {
+          "height": 0,
+          "id": 35,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 7
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 2
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "wilds_wolf_15"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "forest_wolf"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 240,
+          "y": 80
         }
       ],
       "opacity": 1,

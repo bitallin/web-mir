@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    deployment: web-legend
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: game-server
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ['game-server:2567']
+
+  - job_name: control-api
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ['control-api:3000']
+
+  # The edge's plain port is internal-only; its /metrics returns a synthetic
+  # liveness sample (Prometheus cannot scrape /healthz text).
+  - job_name: edge
+    metrics_path: /metrics
+    # nginx serves the synthetic sample without a negotiable content type.
+    fallback_scrape_protocol: PrometheusText0.0.4
+    static_configs:
+      - targets: ['edge:8080']

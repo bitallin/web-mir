@@ -1,3 +1,4 @@
+import { request } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 
 import { Client } from '@colyseus/sdk';
@@ -32,6 +33,33 @@ async function reservePort(): Promise<number> {
   });
 }
 
+function upgradeStatus(port: number, origin: string): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const req = request({
+      host: '127.0.0.1',
+      port,
+      path: '/',
+      headers: {
+        Connection: 'Upgrade',
+        Upgrade: 'websocket',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        Origin: origin,
+      },
+    });
+    req.on('response', (response) => {
+      response.resume();
+      resolve(response.statusCode ?? 0);
+    });
+    req.on('upgrade', (response) => {
+      response.socket?.destroy();
+      resolve(response.statusCode ?? 101);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 /**
  * Colyseus room handlers are process-global, so the production server is
  * exercised in its own test file (and therefore its own worker process) to
@@ -56,6 +84,8 @@ describe('production game server', () => {
       GAME_SERVER_PORT: port,
       DATABASE_URL: databaseUrl,
       GAME_SERVER_ID: 'game-server-production-test',
+      GAME_SERVER_REALM: 'classic-01',
+      GAME_SERVER_ALLOWED_ORIGINS: ['http://localhost:8584'],
       INTERNAL_ADMIN_TOKEN: 'test-internal-admin-token-123',
     };
     runtime = createGameServer({
@@ -77,7 +107,7 @@ describe('production game server', () => {
   });
 
   it('refuses a forged ticket even in production', async () => {
-    const client = new Client(baseUrl);
+    const client = new Client(baseUrl, { headers: { Origin: 'http://localhost:8584' } });
 
     await expect(
       client.create(worldRoomNameFor(STARTER_TOWN_MAP_ID), {
@@ -88,7 +118,7 @@ describe('production game server', () => {
   });
 
   it('refuses self-reported identity fields instead of a ticket', async () => {
-    const client = new Client(baseUrl);
+    const client = new Client(baseUrl, { headers: { Origin: 'http://localhost:8584' } });
 
     await expect(
       client.create(worldRoomNameFor(STARTER_TOWN_MAP_ID), {
@@ -100,8 +130,18 @@ describe('production game server', () => {
     ).rejects.toMatchObject({ code: 525 });
   });
 
+  it('rejects a WebSocket upgrade from an unlisted origin', async () => {
+    const port = Number(new URL(baseUrl).port);
+    await expect(upgradeStatus(port, 'http://evil.example')).resolves.toBe(403);
+  });
+
+  it('lets a listed origin reach the matchmaker', async () => {
+    const port = Number(new URL(baseUrl).port);
+    await expect(upgradeStatus(port, 'http://localhost:8584')).resolves.not.toBe(403);
+  });
+
   it('does not register the diagnostics room', async () => {
-    const client = new Client(baseUrl);
+    const client = new Client(baseUrl, { headers: { Origin: 'http://localhost:8584' } });
 
     await expect(client.create('diagnostics')).rejects.toMatchObject({ code: 520 });
   });

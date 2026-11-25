@@ -1213,3 +1213,149 @@ pnpm load:world
    备份恢复与故障演练。
 3. 阶段 8 前评估独立测试数据库、Outbox 独立 worker、审计与 Release 归档、
    多区服内容路由。
+
+## 2026-11-25 · 阶段 8：质量、压测、部署与恢复
+
+### 目标
+
+把项目推进到“可部署、可观测、可恢复”：生产镜像与 nginx edge（HTTPS/WSS、
+安全头、限流）、Prometheus 指标与告警、Game Server 按 Realm 绑定内容、不可变
+镜像发布/回滚、数据库备份与真实恢复、Game Server 正常/崩溃重启与 Outbox 重试
+演练，以及 30+10 玩家 10 分钟与 50 玩家短时容量场景。
+
+### 开工前状态
+
+- HEAD `291f200`；上一会话在阶段 8 中途因环境配置中断，留下大量未提交改动
+  （ADR-023、Prometheus 指标、infra 镜像/脚本/告警、部署集成测试、压测与恢复
+  脚本、30 个野外刷点），文档尚未更新，门禁未通过。
+- 本环境 shell 默认 Node 24，项目要求 26.13.1；需要用 nvm 路径运行所有命令。
+- `pnpm format:check` 11 个文件未格式化；`pnpm lint` 4 个错误；
+  `pnpm test` 53 个失败（16 个 Room 测试因 Realm 绑定拒绝、Control API 测试
+  整体 30 秒超时）。
+
+### 实际改动
+
+1. **门禁与既有代码修复**
+   - 重新编译地图并格式化产物；修复 Control API `onRequest`/`onClose` hook
+     与 `verifyRestore` 的 lint 错误（Fastify 5 的非 async onRequest 会挂起，
+     保留 async 并注明原因）。
+   - `worldTestHelpers` 改为按 `classic-01` 查询 Realm，不再取任意一行；共享库
+     中其他区服曾让所有 Room 测试被拒绝。
+   - 新增 `WorldRoomTuning.monsterSpawns` 注入点；PvP 集成测试注入空刷怪列表，
+     与 30 刷点的野外隔离。
+2. **指标与可观测性**
+   - `@web-legend/observability`：Prometheus 文本渲染器与运行时采集器（事件
+     循环、RSS/堆、CPU、GC、ELU），渲染器含单测；不引入 `prom-client`。
+   - Game Server：`/metrics/prometheus` 全部 Room 指标 + `realm` 标签；新增
+     WebSocket 出站/patch 字节与资产事务队列 p50/95/99（`assetTx`）。
+   - Control API：HTTP 计数/延迟直方图/并发、Outbox 状态与最老 pending、DB
+     探测、运行时指标；`TRUST_PROXY` 只在可信代理后启用。
+   - edge 内部端口提供合成 `/metrics`；Prometheus 边抓取需要
+     `fallback_scrape_protocol`。告警 10 条规则加载健康。
+3. **Realm 绑定**
+   - `GAME_SERVER_REALM`（默认 `classic-01`）绑定进程，Room 校验角色区服；
+     `ContentStore` 按 Realm 读取激活 Release，生产启动时区服缺失直接失败。
+   - 部署集成测试证明跨区服拒绝、绑定区服使用自己的激活版本。
+4. **生产镜像与 edge**
+   - 四个 Dockerfile（Node 运行镜像 / nginx 静态镜像），非 root、健康检查；
+     基础镜像支持 `NODE_IMAGE`/`NGINX_IMAGE` 覆盖；构建需包含 `content/`
+     （contracts 导入编译地图）。
+   - edge：HTTP→HTTPS、HSTS/CSP/XFO/Referrer/Permissions、16KB body、连接与
+     认证限流；`/ws` 转发 matchmaking 与 WebSocket；`/internal`、`/metrics`
+     返回 404；内部端口合成存活指标。
+   - `compose.drill.yml` 用于本机演练：发布 PostgreSQL 到宿主机并改用
+     38180/38443/38444 端口，避免占用真实 80/443。
+5. **发布/回滚与备份恢复**
+   - 根脚本 `deploy`/`rollback` 改名为 `prod:deploy`/`prod:rollback`：pnpm 11
+     会把 `deploy` 当作内置命令，与 `pnpm --filter <pkg> deploy` 冲突。
+   - 修复 `pg_restore` 从 stdin 读取（不能传 `-`）；恢复不变量只约束“未领取
+     掉落必须在 ground”，已领取物品保留 `world_drops` 历史行。
+   - `.gitignore` 忽略 `infra/docker/nginx/certs/` 与 `infra/docker/data/`。
+6. **故障演练与测试**
+   - `recoveryDrill`：启动生产构建、进程组 kill、关闭 SDK 自动重连；SIGKILL
+     场景等待越过第二个 checkpoint 周期（会话节流从 join 起算，首次周期保存
+     在 t+40s）。
+   - **关键修复**：Colyseus 默认注册自己的 SIGTERM 处理器并在 finally
+     `process.exit()`，与自有 shutdown 竞争，导致租约释放被提前关闭的数据库
+     打断；`new Server({ gracefullyShutdown: false })` 后由 `index.ts` 独占
+     信号，SIGTERM 租约释放从 28s 降到 1ms。
+   - `outboxDrill`：修复 raw SQL 时间戳为字符串的解析；增加相同 commandId
+     二次投递验证 `duplicate`。
+   - 新增 Control API / Game Server 数据库中断集成测试（TCP 代理断开与恢复，
+     readiness 503→200、liveness 200）；`pingDatabase` 增加 2 秒超时。
+   - `worldScenario`/`recoveryDrill` 从仓库根 `.env` 加载配置（pnpm 以包目录为
+     cwd 运行脚本）。
+7. **内容与 E2E**
+   - 野外刷点 6 → 30（阶段 8 目标 20–40）；移动靠近 PvP 决斗点的两只狼，PvP
+     E2E 决斗改到无仇恨 tile（12,10)/(13,10)，避免怪物击杀污染断言。
+8. **文档**
+   - ADR-023、`docs/runbooks/DEPLOYMENT_AND_RECOVERY.md`、AGENTS 命令/环境
+     约束、README、阶段 8 报告与证据目录。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm build
+pnpm test
+PLAYWRIGHT_SKIP_WEBSERVER=true pnpm test:e2e
+pnpm load:scenario
+pnpm drill:recovery
+pnpm drill:outbox
+pnpm db:backup
+pnpm db:restore-drill <dump> <manifest>
+```
+
+- 格式 / lint / typecheck / build：通过。
+- 单元/集成：见阶段 8 报告（最终门禁）。
+- 浏览器 E2E：20/20 通过（约 1.8 分钟，2 workers）。
+- 容量场景 A：30/30 加入、36000 接受、11069 拒绝、tick p50 1.12ms / p95 4.3ms / p99 5.84ms / max 7.17ms、资产队列 p95 33.3ms、324 击杀、0 资产失败。
+- 容量场景 B：50/50 加入、15000 接受、0 拒绝、tick p50 1.44ms / p95 6.05ms / p99 7.83ms / max 8.54ms、0 资产失败。
+- 恢复演练：SIGTERM 租约 1ms 释放、位置 checkpoint 正确；SIGKILL 周期
+  checkpoint 正确、物品实例数量不变。
+- Outbox 演练：不可达时 pending + 退避；可达后 applied；重复 commandId 返回
+  duplicate。
+- 备份/恢复：19 张表、6 条迁移、行数与资产不变量一致，演练库自动删除。
+- 生产演练：compose 全部 7 个容器 healthy；HTTPS/WSS/安全头/代理/404/登录/
+  Prometheus 12/12 通过；drill-b → drill-a 回滚后同样 12/12。
+
+### 遇到的问题及解决方法
+
+1. **Node 版本**：默认 Node 24 与 engines 不符；所有命令使用
+   `~/.nvm/versions/node/v26.13.1/bin`。
+2. **Realm 测试**：共享库存在 `other-*` 区服；helper 取第一行导致角色不属于
+   绑定区服。改为按 code 查询。
+3. **30 刷点与 PvP 测试**：野外刷点覆盖了原决斗点；注入 `monsterSpawns: []`
+   给集成测试，E2E 移动决斗点并挪走两只狼。
+4. **Fastify hook**：非 async `onRequest` 被视为 callback 风格且不调用 done，
+   请求永久挂起；保持 async 并加注释禁用 `require-await`。
+5. **pnpm 与 deploy 重名**：根脚本名 `deploy` 让 `pnpm --filter <pkg> deploy`
+   变成跑脚本；改名为 `prod:deploy`/`prod:rollback`。
+6. **Docker Hub 不可达**：镜像站拉取并允许覆盖基础镜像；`content/` 不在构建
+   上下文导致 contracts 找不到编译地图，补 `COPY content`。
+7. **宿主端口占用**：18080/25432 已被占用；演练改用 38180/38443/38444/38543。
+8. **Prometheus 抓 edge**：v3 拒绝非指标 Content-Type；edge 内部端口返回
+   `text/plain; version=0.0.4` 并配置 `fallback_scrape_protocol`。
+9. **pg_restore**：`-` 被当作文件名；省略文件名从 stdin 读取。
+10. **恢复不变量**：已领取掉落保留 `world_drops` 行；查询只检查未领取掉落。
+11. **恢复演练租约**：tsx 包装进程、Colyseus 自带 SIGTERM 退出、会话 checkpoint
+    节流；分别用生产构建 + 进程组 kill + `gracefullyShutdown: false` + 等待
+    40 秒解决。
+12. **E2E 覆盖旧证据**：完整 E2E 会重写阶段 3–7 截图；已用 `git checkout`
+    恢复，只提交阶段 8 新证据。
+
+### 尚未解决的问题
+
+- 单 Realm、单 Game Server、单 edge；多实例路由、独立 Outbox worker、审计/
+  Release 归档仍待扩容阶段。
+- 负载脚本不单独统计重连率；由集成/E2E 覆盖。入站字节未计数。
+- 生产浏览器截图未采集（浏览器无法访问 compose 在宿主机发布的端口）。
+- 共享开发库仍有历史测试数据。
+
+### 下一步计划
+
+1. 用户在 8584/8585 完成阶段 7 实测，并确认阶段 8 的部署/恢复证据。
+2. 进入下一阶段前评估独立测试库、Outbox worker、审计/Release 归档、多 Realm
+   路由与正式美术/音效。

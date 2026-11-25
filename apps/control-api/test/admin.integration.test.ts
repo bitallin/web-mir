@@ -94,6 +94,7 @@ function fakeGameServer(): {
   const status: AdminGameServerStatus = {
     service: 'game-server',
     serverId: 'game-server-test',
+    realm: 'classic-01',
     uptimeSeconds: 120,
     rooms: [
       {

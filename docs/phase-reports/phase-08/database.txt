@@ -1,0 +1,39 @@
+== migrations ==
+6
+== tables ==
+19
+== row counts ==
+accounts 2748
+characters 2586
+character_sessions 2
+game_tickets 2672
+item_instances 3731
+world_drops 741
+wallets 196
+currency_ledger 519
+asset_commands 741
+admin_users 43
+admin_audit_logs 191
+outbox_events 44
+content_releases 32
+content_activations 54
+realm_active_content 8
+realms 8
+== invariants ==
+wallet_mismatch|0
+open_drop_non_ground|0
+invalid_placement|0
+== active content ==
+classic-01|baseline|732f923b8c9a0637af7f78644aa5e2d6be616376d2d649af4b5004f268ed245c
+other-0f0485d8|test-other-0f0485d8|2ed48c1b5fda663e987fffe2df2a4b8b71e6532a51bcbc9046b930e76b658307
+other-4ea3550f|test-other-4ea3550f|0ac2f4b2b702e3878a43f891569c508b36a42bdb4fd628cd5cc50fbaf02f61cb
+other-a1bb3459|test-other-a1bb3459|acf8bee653886edd5aad4ee223710a69f72b91aec58387d59c09a5d715706d3c
+other-bdec7a0e|test-other-bdec7a0e|0617bede763b4aa6f75ff0d834637b462d6511d77bee3a89ff55b6b6b5b4f312
+other-cb1ffcc4|test-other-cb1ffcc4|296f8ee355564b61ad7c70b4378add5ae17734ce948b6392fd9bfa95b688d78e
+other-d6efe204|test-other-d6efe204|4aa909b2de5a91de39da90808b4e6e082275075f799d49fd97495c3a419e7d24
+other-f6d2b1b9|test-other-f6d2b1b9|8626b159031cb9a853fc51dab2f5ee734a259e48c1583ce886942d868008a721
+== outbox ==
+applied|44
+== audit ==
+success|159
+failed|32

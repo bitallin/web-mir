@@ -28,7 +28,15 @@
     "db:seed": "pnpm --filter @web-legend/persistence db:seed && pnpm --filter @web-legend/control-api seed:admin",
     "maps:compile": "tsx packages/map-runtime/src/compileMaps.ts",
     "repair:maps": "pnpm --filter @web-legend/control-api repair:maps",
-    "load:world": "pnpm --filter @web-legend/game-server load:world"
+    "load:world": "pnpm --filter @web-legend/game-server load:world",
+    "load:scenario": "pnpm --filter @web-legend/game-server load:scenario",
+    "drill:recovery": "pnpm --filter @web-legend/game-server drill:recovery",
+    "drill:outbox": "tsx infra/scripts/outbox-drill.ts",
+    "db:backup": "bash infra/scripts/db-backup.sh",
+    "db:restore-drill": "bash infra/scripts/db-restore-drill.sh",
+    "cert:dev": "bash infra/scripts/generate-cert.sh",
+    "prod:deploy": "bash infra/scripts/deploy.sh",
+    "prod:rollback": "bash infra/scripts/rollback.sh"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

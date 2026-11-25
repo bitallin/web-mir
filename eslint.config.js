@@ -55,6 +55,9 @@ export default tseslint.config(
       '**/playwright-report/**',
       '**/test-results/**',
       'packages/persistence/migrations/**',
+      'infra/docker/data/**',
+      // Runs inside a plain Node container attached to the compose network.
+      'infra/scripts/prod-check.mjs',
       'eslint.config.js',
     ],
   },
