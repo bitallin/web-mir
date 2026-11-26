@@ -1133,7 +1133,8 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`feat(alpha-02): charge a content-driven death cost and compile respawn points`
 - Alpha 0.2 S3 文档记录：`ea34d90`
   主题：`docs(alpha-02): record the death cost commit hash`
-- Alpha 0.2 S4-A 装备与背包：本轮 feat 提交（哈希在提交后补记）
+- Alpha 0.2 S4-A 装备与背包：`716e2cc`
+  主题：`feat(alpha-02): add equipment tiers, rare quality and bag comparison`
 
 ## 11. 当前环境事实
 
