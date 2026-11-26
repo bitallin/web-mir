@@ -50,6 +50,14 @@ declare global {
         expiresAt: number;
       }[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
+      lootIconFrame: (dropId: string) => number | null;
+      labels: () => {
+        id: string;
+        kind: 'player' | 'monster' | 'npc';
+        text: string;
+        visible: boolean;
+        rect: { x: number; y: number; width: number; height: number };
+      }[];
       inventoryState: () => {
         characterId: string;
         gold: number;

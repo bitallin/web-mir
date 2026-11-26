@@ -1,9 +1,12 @@
 import Phaser from 'phaser';
 
+import { itemIconFrame } from '../lib/itemIcons';
 import type { LootView } from '../net/worldClient';
+import { assetManifest, ITEM_ICON_TEXTURE_KEY } from './mapCatalog';
 import type { ScreenPoint } from './projection';
 
 const DISPLAY_FONT = '"Noto Serif SC", "Songti SC", "SimSun", Georgia, serif';
+const ICON_SIZE = 22;
 
 const LOOT_COLORS: Record<string, number> = {
   slime_gel: 0xb9a98a,
@@ -18,31 +21,36 @@ const LOOT_COLORS: Record<string, number> = {
 };
 
 /**
- * Ground drop marker. It is deliberately simple: a glowing pouch plus a label
- * carrying only data the server already published in the room state.
+ * Ground drop marker: the same atlas icon the bag and shop use, on a small
+ * colored plate. The client only resolves `templateId`; the server never sends
+ * prices or ownership beyond what the room state already publishes.
  */
 export class LootVisual {
   readonly container: Phaser.GameObjects.Container;
   readonly current: ScreenPoint;
+  readonly frame: number;
 
   constructor(scene: Phaser.Scene, view: LootView) {
     this.current = { x: 0, y: 0 };
     const color = LOOT_COLORS[view.templateId] ?? 0xc9b27a;
+    this.frame = itemIconFrame(assetManifest.itemIcons, view.templateId);
 
     const shadow = scene.add.graphics();
     shadow.fillStyle(0x000000, 0.35);
-    shadow.fillEllipse(0, 0, 22, 8);
+    shadow.fillEllipse(0, 0, 24, 9);
 
-    const body = scene.add.graphics();
-    body.fillStyle(0x14181d, 0.9);
-    body.fillCircle(0, -10, 9);
-    body.lineStyle(2, color, 0.95);
-    body.strokeCircle(0, -10, 9);
-    body.fillStyle(color, 0.9);
-    body.fillCircle(0, -10, 3);
+    const plate = scene.add.graphics();
+    plate.fillStyle(0x14181d, 0.92);
+    plate.fillCircle(0, -14, 14);
+    plate.lineStyle(2, color, 0.95);
+    plate.strokeCircle(0, -14, 14);
+
+    const icon = scene.add
+      .sprite(0, -14, ITEM_ICON_TEXTURE_KEY, this.frame)
+      .setDisplaySize(ICON_SIZE, ICON_SIZE);
 
     const label = scene.add
-      .text(0, -26, `${view.displayName}${view.quantity > 1 ? ` ×${String(view.quantity)}` : ''}`, {
+      .text(0, -30, `${view.displayName}${view.quantity > 1 ? ` ×${String(view.quantity)}` : ''}`, {
         fontFamily: DISPLAY_FONT,
         fontSize: '11px',
         color: '#e8e0cd',
@@ -51,9 +59,9 @@ export class LootVisual {
       })
       .setOrigin(0.5, 1);
 
-    this.container = scene.add.container(0, 0, [shadow, body, label]);
+    this.container = scene.add.container(0, 0, [shadow, plate, icon, label]);
     const pulse = scene.tweens.add({
-      targets: body,
+      targets: plate,
       alpha: { from: 0.7, to: 1 },
       duration: 900,
       yoyo: true,

@@ -24,6 +24,15 @@ export type TelegraphView = {
   remainingMs: number;
 };
 
+/** A world-space name plate after decluttering; used by E2E and diagnostics. */
+export type WorldLabelView = {
+  id: string;
+  kind: 'player' | 'monster' | 'npc';
+  text: string;
+  visible: boolean;
+  rect: { x: number; y: number; width: number; height: number };
+};
+
 /** The part of the Phaser scene the session layer is allowed to touch. */
 export type WorldSceneHandle = {
   applySnapshot: (data: SceneSnapshot) => void;
@@ -36,6 +45,8 @@ export type WorldSceneHandle = {
   activeTelegraphs: () => TelegraphView[];
   npcScreenPoint: (npcId: string) => ScreenPoint | null;
   lootScreenPoint: (dropId: string) => ScreenPoint | null;
+  lootIconFrame: (dropId: string) => number | null;
+  labels: () => WorldLabelView[];
   selectEntity: (entityId: string) => void;
   restart: () => void;
 };
@@ -134,6 +145,14 @@ export class WorldBridge {
 
   lootScreenPoint(dropId: string): ScreenPoint | null {
     return this.scene?.lootScreenPoint(dropId) ?? null;
+  }
+
+  lootIconFrame(dropId: string): number | null {
+    return this.scene?.lootIconFrame(dropId) ?? null;
+  }
+
+  labels(): WorldLabelView[] {
+    return this.scene?.labels() ?? [];
   }
 
   npcScreenPoint(npcId: string): ScreenPoint | null {

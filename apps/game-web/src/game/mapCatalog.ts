@@ -29,6 +29,7 @@ export const ITEM_ICON_ATLAS_URL = new URL(
   '../../../../content/assets/generated/item_icons.png',
   import.meta.url,
 ).href;
+export const ITEM_ICON_TEXTURE_KEY = 'item-icons';
 
 export type CharacterAsset = {
   /** Phaser texture key. */

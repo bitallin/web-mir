@@ -979,6 +979,8 @@ class WorldSession {
       sellToShop: (merchantId, itemId, quantity) => this.shopSell(merchantId, itemId, quantity),
       lootDrops: () => this.latestLoot,
       lootScreenPoint: (dropId) => this.bridge.lootScreenPoint(dropId),
+      lootIconFrame: (dropId) => this.bridge.lootIconFrame(dropId),
+      labels: () => this.bridge.labels(),
       inventoryState: () => this.inventory,
     };
     this.debugInstalled = true;

@@ -11,7 +11,14 @@ import {
 
 import type { PlayerView } from '../net/worldClient';
 import { createProjection, TILE_HEIGHT, TILE_WIDTH, type ScreenPoint } from './projection';
-import type { CharacterAsset, MapBundle } from './mapCatalog';
+import {
+  assetManifest,
+  ITEM_ICON_ATLAS_URL,
+  ITEM_ICON_TEXTURE_KEY,
+  type CharacterAsset,
+  type MapBundle,
+} from './mapCatalog';
+import { resolveVisibleLabels, type LabelCandidate, type LabelRect } from './labelLayout';
 import { LootVisual } from './LootVisual';
 import { MonsterVisual } from './MonsterVisual';
 import {
@@ -27,6 +34,7 @@ import type {
   SceneSnapshot,
   TelegraphView,
   WorldBridge,
+  WorldLabelView,
   WorldSceneHandle,
 } from './worldBridge';
 
@@ -40,6 +48,8 @@ const CAMERA_LIFT_PX = 200;
 
 const PLAYER_COLORS = [0x9fc4e0, 0xe0b087, 0xa8d6a1, 0xcf9fe0, 0xe0d18f, 0x8fd0d0];
 const MIN_ONE_SHOT_MS = 180;
+const LABEL_REFRESH_MS = 100;
+const LABEL_PRIORITY = { self: 1000, target: 900, npc: 700, player: 500, monster: 400 } as const;
 
 type UnitPoint = { x: number; y: number };
 
@@ -64,6 +74,16 @@ function tileCenterUnits(tile: TilePoint): UnitPoint {
   return {
     x: tile.x * TILE_UNITS + TILE_UNITS / 2,
     y: tile.y * TILE_UNITS + TILE_UNITS / 2,
+  };
+}
+
+/** NPC labels are static texts with origin (0.5, 1), not children of a container. */
+function npcLabelRect(label: Phaser.GameObjects.Text): LabelRect {
+  return {
+    x: label.x - label.width / 2,
+    y: label.y - label.height,
+    width: label.width,
+    height: label.height,
   };
 }
 
@@ -162,6 +182,16 @@ class PlayerVisual {
     this.maxHp = maxHp;
     this.alive = alive;
     this.drawHpBar();
+  }
+
+  labelRect(): LabelRect {
+    const width = this.nameText.width;
+    const height = this.nameText.height;
+    return { x: this.current.x - width / 2, y: this.current.y - 58 - height, width, height };
+  }
+
+  setLabelVisible(visible: boolean): void {
+    this.nameText.setVisible(visible);
   }
 
   setTarget(screen: ScreenPoint, immediate: boolean): void {
@@ -307,6 +337,8 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private readonly monsterVisuals = new Map<string, MonsterVisual>();
   private readonly lootVisuals = new Map<string, LootVisual>();
   private readonly telegraphs = new Map<string, TelegraphVisual>();
+  private readonly npcLabels = new Map<string, Phaser.GameObjects.Text>();
+  private labelClock = 0;
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private targetRing!: Phaser.GameObjects.Graphics;
   private selfId: string | null = null;
@@ -327,6 +359,11 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     for (const character of [this.bundle.fallbackCharacter, ...this.bundle.characters.values()]) {
       this.load.image(character.key, character.imageUrl);
     }
+    const icons = assetManifest.itemIcons;
+    this.load.spritesheet(ITEM_ICON_TEXTURE_KEY, ITEM_ICON_ATLAS_URL, {
+      frameWidth: icons.size,
+      frameHeight: icons.size,
+    });
   }
 
   create(): void {
@@ -345,6 +382,8 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     this.monsterVisuals.clear();
     this.lootVisuals.clear();
     this.telegraphs.clear();
+    this.npcLabels.clear();
+    this.labelClock = 0;
     this.selfId = null;
     this.selectedTargetId = null;
     this.predicted = null;
@@ -393,6 +432,12 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
     if (focus !== null) {
       this.cameras.main.centerOn(focus.x, focus.y + CAMERA_LIFT_PX);
+    }
+
+    this.labelClock += delta;
+    if (this.labelClock >= LABEL_REFRESH_MS) {
+      this.labelClock = 0;
+      this.updateLabelVisibility();
     }
   }
 
@@ -763,6 +808,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       return;
     }
     this.selectedTargetId = entityId;
+    this.labelClock = LABEL_REFRESH_MS;
     this.bridge.notifyTarget(entityId);
   }
 
@@ -772,7 +818,111 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     }
     this.selectedTargetId = null;
     this.targetRing.clear();
+    this.labelClock = LABEL_REFRESH_MS;
     this.bridge.notifyTarget(null);
+  }
+
+  /**
+   * Keeps one name plate per screen spot: self and the locked target win, then
+   * NPCs, then other players and monsters. Positions never move, so walking
+   * past another entity cannot make a label jump between two offsets.
+   */
+  private updateLabelVisibility(): void {
+    const selfId = this.selfId;
+    const focus = selfId === null ? null : (this.visuals.get(selfId)?.current ?? null);
+    const distanceTo = (x: number, y: number): number =>
+      focus === null ? 0 : Math.hypot(x - focus.x, y - focus.y);
+    const candidates: LabelCandidate[] = [];
+
+    for (const [playerId, visual] of this.visuals) {
+      if (!visual.isAlive) {
+        visual.setLabelVisible(false);
+        continue;
+      }
+      const priority = visual.isSelf
+        ? LABEL_PRIORITY.self
+        : playerId === this.selectedTargetId
+          ? LABEL_PRIORITY.target
+          : LABEL_PRIORITY.player;
+      candidates.push({
+        id: `player:${playerId}`,
+        priority,
+        distance: distanceTo(visual.current.x, visual.current.y),
+        rect: visual.labelRect(),
+      });
+    }
+
+    for (const [monsterId, visual] of this.monsterVisuals) {
+      if (!visual.isAlive) {
+        visual.setLabelVisible(false);
+        continue;
+      }
+      const priority =
+        monsterId === this.selectedTargetId ? LABEL_PRIORITY.target : LABEL_PRIORITY.monster;
+      candidates.push({
+        id: `monster:${monsterId}`,
+        priority,
+        distance: distanceTo(visual.current.x, visual.current.y),
+        rect: visual.labelRect(),
+      });
+    }
+
+    for (const [npcId, label] of this.npcLabels) {
+      candidates.push({
+        id: `npc:${npcId}`,
+        priority: LABEL_PRIORITY.npc,
+        distance: distanceTo(label.x, label.y - label.height / 2),
+        rect: npcLabelRect(label),
+      });
+    }
+
+    const visible = resolveVisibleLabels(candidates);
+    for (const [playerId, visual] of this.visuals) {
+      visual.setLabelVisible(visible.has(`player:${playerId}`));
+    }
+    for (const [monsterId, visual] of this.monsterVisuals) {
+      visual.setLabelVisible(visible.has(`monster:${monsterId}`));
+    }
+    for (const [npcId, label] of this.npcLabels) {
+      label.setVisible(visible.has(`npc:${npcId}`));
+    }
+  }
+
+  /** Test-only readback: every world name plate with its final visibility. */
+  labels(): WorldLabelView[] {
+    const out: WorldLabelView[] = [];
+    for (const [playerId, visual] of this.visuals) {
+      out.push({
+        id: `player:${playerId}`,
+        kind: 'player',
+        text: visual.nameText.text,
+        visible: visual.nameText.visible,
+        rect: visual.labelRect(),
+      });
+    }
+    for (const [monsterId, visual] of this.monsterVisuals) {
+      out.push({
+        id: `monster:${monsterId}`,
+        kind: 'monster',
+        text: visual.labelText(),
+        visible: visual.labelVisible(),
+        rect: visual.labelRect(),
+      });
+    }
+    for (const [npcId, label] of this.npcLabels) {
+      out.push({
+        id: `npc:${npcId}`,
+        kind: 'npc',
+        text: label.text,
+        visible: label.visible,
+        rect: npcLabelRect(label),
+      });
+    }
+    return out;
+  }
+
+  lootIconFrame(dropId: string): number | null {
+    return this.lootVisuals.get(dropId)?.frame ?? null;
   }
 
   private updateTargetRing(): void {
@@ -1108,7 +1258,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         center.x + 7,
         center.y - 10,
       );
-      this.add
+      const label = this.add
         .text(center.x, center.y - 30, npc.name, {
           fontFamily: DISPLAY_FONT,
           fontSize: '12px',
@@ -1118,6 +1268,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         })
         .setOrigin(0.5, 1)
         .setDepth(center.y + 2);
+      this.npcLabels.set(npc.id, label);
     }
   }
 

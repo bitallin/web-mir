@@ -2,6 +2,7 @@ import type Phaser from 'phaser';
 import type { MonsterStateKind } from '@web-legend/contracts';
 
 import type { MonsterView } from '../net/worldClient';
+import type { LabelRect } from './labelLayout';
 import type { ScreenPoint } from './projection';
 
 const DISPLAY_FONT = '"Noto Serif SC", "Songti SC", "SimSun", Georgia, serif';
@@ -72,6 +73,24 @@ export class MonsterVisual {
 
   get isAlive(): boolean {
     return this.state !== 'dead';
+  }
+
+  labelRect(): LabelRect {
+    const width = this.nameText.width;
+    const height = this.nameText.height;
+    return { x: this.current.x - width / 2, y: this.current.y - 62 - height, width, height };
+  }
+
+  labelText(): string {
+    return this.nameText.text;
+  }
+
+  labelVisible(): boolean {
+    return this.nameText.visible;
+  }
+
+  setLabelVisible(visible: boolean): void {
+    this.nameText.setVisible(visible);
   }
 
   applyView(view: MonsterView): void {

@@ -5,6 +5,13 @@ import { join } from 'node:path';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'alpha-02', 'hud-relayout');
+const SCENE_ARTIFACT_DIR = join(
+  process.cwd(),
+  'docs',
+  'phase-reports',
+  'alpha-02',
+  'scene-readable',
+);
 const PASSWORD = 'hud-relayout-password';
 
 test.describe.configure({ mode: 'serial', timeout: 150_000 });
@@ -55,6 +62,7 @@ async function moveTo(page: Page, x: number, y: number): Promise<void> {
 
 test.beforeAll(() => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
+  mkdirSync(SCENE_ARTIFACT_DIR, { recursive: true });
 });
 
 test.afterEach(async () => {
@@ -106,6 +114,64 @@ test('chat collapses to its heading and expands again', async ({ browser }) => {
   await page.getByTestId('chat-toggle').click();
   await expect(page.getByTestId('chat-log')).toBeVisible();
   await expect(page.getByTestId('chat-input')).toBeVisible();
+});
+
+test('world name plates declutter: the player keeps its plate, the NPC yields', async ({
+  browser,
+}) => {
+  const page = await registerWorld(browser);
+
+  // Tile (12, 9) stands one tile below the merchant at (12, 8); the
+  // pseudo-isometric projection puts the two plates on top of each other.
+  await moveTo(page, 12, 9);
+  await expect
+    .poll(
+      async () => {
+        const labels = await page.evaluate(() => window.__webLegendDebug?.labels() ?? []);
+        const self = labels.find((label) => label.kind === 'player');
+        const npc = labels.find((label) => label.id === 'npc:town_merchant');
+        if (self === undefined || npc === undefined) {
+          return { ready: false };
+        }
+        const visible = labels.filter((label) => label.visible);
+        let visibleCollisions = 0;
+        for (let i = 0; i < visible.length; i += 1) {
+          for (let j = i + 1; j < visible.length; j += 1) {
+            const a = visible[i];
+            const b = visible[j];
+            if (a !== undefined && b !== undefined && overlaps(a.rect, b.rect)) {
+              visibleCollisions += 1;
+            }
+          }
+        }
+        return {
+          ready: true,
+          selfVisible: self.visible,
+          npcVisible: npc.visible,
+          platesCollide: overlaps(self.rect, npc.rect),
+          visibleCollisions,
+        };
+      },
+      { timeout: 15_000 },
+    )
+    .toEqual({
+      ready: true,
+      selfVisible: true,
+      npcVisible: false,
+      platesCollide: true,
+      visibleCollisions: 0,
+    });
+
+  await page.evaluate(() => {
+    const style = document.createElement('style');
+    style.id = 'e2e-hide-hud';
+    style.textContent = '.shell > *:not(.canvas-layer) { visibility: hidden !important; }';
+    document.head.append(style);
+  });
+  await page.locator('.canvas-layer').screenshot({
+    path: join(SCENE_ARTIFACT_DIR, 'name-plates.png'),
+  });
+  await page.evaluate(() => document.getElementById('e2e-hide-hud')?.remove());
 });
 
 test('the merchant docks right and keeps the HUD toggles clickable', async ({ browser }) => {

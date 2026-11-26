@@ -1,6 +1,6 @@
 import type { EquipmentSlot, InventorySnapshot } from '@web-legend/contracts';
 
-import type { PlayerAppearance, TelegraphView } from './game/worldBridge';
+import type { PlayerAppearance, TelegraphView, WorldLabelView } from './game/worldBridge';
 import type { LootView } from './net/worldClient';
 
 export {};
@@ -44,6 +44,8 @@ declare global {
       sellToShop: (merchantId: string, itemId: string, quantity: number) => boolean;
       lootDrops: () => LootView[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
+      lootIconFrame: (dropId: string) => number | null;
+      labels: () => WorldLabelView[];
       inventoryState: () => InventorySnapshot | null;
       /** Diagnostics for the E2E visibility measurement. */
       lastMoveIntentAt?: number;
