@@ -275,14 +275,27 @@ Alpha 0.1 的工程目标成立，可以进入 Alpha 0.2。但仍有三件事必
 - 未包含：正式美术、场景地面掉落图标（TD-CLI-15）、名字标签避让
   （TD-CLI-16）、≤860px 的 E2E。
 
+### S4-E：世界场景信息可读性（已完成，2026-11-26）
+
+- 地面掉落使用 `item_icons.png` 图集：`WorldScene` 注册 spritesheet，
+  `LootVisual` 显示圆盘 + 描边 + 图标；帧号与背包/商店共用 `itemIconFrame`
+  回退规则（TD-CLI-15）。
+- 新增纯函数 `labelLayout.ts`：自己 > 目标 > NPC > 其他玩家 > 怪物，按屏幕
+  矩形贪心避让；每 100ms 刷新，选择/取消目标即时刷新；死亡实体名字隐藏
+  （TD-CLI-16）。
+- 测试钩子 `lootIconFrame(dropId)` 与 `labels()`；`hud.spec.ts` 与
+  `economy.spec.ts` 增加浏览器断言。
+- 证据：`docs/phase-reports/alpha-02/ALPHA_02_SCENE_READABILITY_REPORT.md`、
+  `docs/phase-reports/alpha-02/scene-readable/`；全量 E2E 38/38。
+- 未包含：正式美术（TD-CLI-13）、传送门/掉落文字参与避让。
+
 ### S4 剩余工作
 
 - **图标与美术**：正式 tileset、三套角色、怪物与物品图标美术（TD-CLI-13）；
-  场景内地面掉落物图标（TD-CLI-15）；区域音乐。
-- **场景信息**：角色/怪物/NPC 名字标签避让或按目标显示（TD-CLI-16）。
+  区域音乐。
 - **背包后续**：丢弃物品；评估扩展装备槽（TD-DATA-05）。
-- **HUD 已完成**：战斗信息右栏可收起（体验修复）、角色状态板/可收起聊天/商店
-  右停靠（S4-D）。
+- **已完成**：战斗信息右栏可收起（体验修复）、角色状态板/可收起聊天/商店
+  右停靠（S4-D）、地面掉落图标与名字标签避让（S4-E）。
 
 ## 5. S1 执行与提交（历史）
 

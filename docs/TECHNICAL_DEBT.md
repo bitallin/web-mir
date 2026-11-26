@@ -241,6 +241,27 @@ ADR-032。
 - HUD 仍在 `GameScreen.tsx` 内以条件渲染组织，未拆成独立组件；当前规模可读，
   下次新增面板（如任务/公会）前再评估抽取。
 
+## 0.10 Alpha 0.2 S4 场景可读性复核（2026-11-26）
+
+证据见 `docs/phase-reports/alpha-02/ALPHA_02_SCENE_READABILITY_REPORT.md`。
+
+### 已关闭
+
+| 编号      | 处置                                                                                | 证据                                                                           |
+| --------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| TD-CLI-15 | 地面掉落注册 `item_icons.png` spritesheet，按 `itemIconFrame` 显示同一图标          | `LootVisual.ts`、`WorldScene.preload`、`economy.spec.ts`                       |
+| TD-CLI-16 | 新增纯函数 `labelLayout.ts`，自己 > 目标 > NPC > 其他玩家 > 怪物，每 100ms 贪心避让 | `labelLayout.ts`/`.test.ts`、`WorldScene.updateLabelVisibility`、`hud.spec.ts` |
+
+### 说明
+
+- 未新增 P0/P1/P2。本切片只改客户端 Phaser 展示与测试钩子，没有服务端、协议、
+  内容、数据库或资源文件变化；因此未复跑 50 人容量回归。
+- 标签规则选择“只隐藏相交标签、不移动位置”，避免实体走动时标签跳动；传送门
+  与地面掉落文字暂不参与布局。
+- 全量 E2E 首轮暴露 `multiplayer.spec.ts` 的 250ms 时序断言偶发超时（337ms，
+  单跑 262ms，重复 3/3 与全量重跑均通过），属于 §6 已记录的软件渲染抖动，
+  未新增债务。
+
 ## 1. 服务端与实时网络
 
 ### TD-SRV-01（P1）Room 成为 2178 行的万能类
@@ -573,26 +594,28 @@ ADR-032。
 - 证据：`apps/game-web/src/styles.css`、`tests/e2e/hud.spec.ts`、
   `tests/e2e/equipment.spec.ts`。
 
-### TD-CLI-15（P3）场景内地面掉落物没有物品图标
+### TD-CLI-15（已关闭，2026-11-26）场景内地面掉落物没有物品图标
 
-- 证据：`apps/game-web/src/game/LootVisual.ts` 仍是发光袋状几何标记 + 名称
+- 原证据：`apps/game-web/src/game/LootVisual.ts` 仍是发光袋状几何标记 + 名称
   文字；HUD 的“附近掉落”列表已使用 `item_icons.png`（ADR-033）。
-- 影响：玩家在场景里看到掉落时只能读小字，图标只出现在右侧列表；与背包/商店
-  的视觉语言不一致。
-- 建议：把图集注册为 Phaser 纹理，按 manifest 帧号给掉落标记叠加图标；保持
-  世界状态只下发 `templateId`，客户端按同一回退规则解析。
-- 工作量：S。
+- 处置：`WorldScene.preload` 把图集注册为 32px spritesheet；`LootVisual` 显示
+  圆盘 + 描边 + 图标，帧号由 `itemIconFrame` 解析；世界状态仍只下发
+  `templateId`。新增 `lootIconFrame(dropId)` 钩子与 E2E 帧号断言。
+- 证据：`LootVisual.ts`、`WorldScene.ts`、`tests/e2e/economy.spec.ts`、
+  `docs/phase-reports/alpha-02/scene-readable/`。
 
-### TD-CLI-16（P3）世界内角色/怪物名字标签相互重叠
+### TD-CLI-16（已关闭，2026-11-26）世界内角色/怪物名字标签相互重叠
 
-- 证据：S4-D 截图 `docs/phase-reports/alpha-02/hud-relayout/dev-world-1280.png`
+- 原证据：S4-D 截图 `docs/phase-reports/alpha-02/hud-relayout/dev-world-1280.png`
   与 `dev-world-1600.png`：玩家站在杂货商旁时「Lv.1 <角色>」与「杂货商」两个
   Phaser 文本标签在同一屏幕位置叠加；多只怪物相邻时同样互相遮挡。
-- 影响：场景内辨认目标要看堆叠的小字；HUD 状态板已改为不透明底色，但标签
-  本身仍在世界层。
-- 建议：只给当前目标/鼠标悬停对象显示名字，或按屏幕网格做简单避让；远处怪物
-  只显示血条与等级点。需要先确定“名字何时出现”的规则，避免战斗中信息不足。
-- 工作量：S/M。
+- 处置：新增纯函数 `labelLayout.ts`，按自己 > 目标 > NPC > 其他玩家 > 怪物
+  贪心避让；同优先级按距离、再按 id 稳定排序；只隐藏相交标签（3px 间距），
+  不移动位置。场景每 100ms 刷新，选择/取消目标即时刷新；死亡实体名字隐藏。
+  新增 `labels()` 钩子与 E2E“可见标签两两不重叠”断言。
+- 证据：`apps/game-web/src/game/labelLayout.ts`/`.test.ts`、
+  `WorldScene.updateLabelVisibility`、`tests/e2e/hud.spec.ts`、
+  `docs/phase-reports/alpha-02/scene-readable/`。
 
 ## 4. 内容与运营
 

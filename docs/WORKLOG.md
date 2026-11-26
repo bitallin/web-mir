@@ -2776,3 +2776,89 @@ pnpm test:e2e
 2. S4 收尾：正式美术（TD-CLI-13）、地面掉落图标（TD-CLI-15）、世界标签
    规则（TD-CLI-16）。
 3. 为 tick p95 14.75ms 做剖析；确认远端 CI。
+
+## 2026-11-26 Alpha 0.2 S4-E：世界场景信息可读性
+
+### 目标
+
+关闭 S4 最后两个非美术项：场景内地面掉落物没有物品图标（TD-CLI-15），以及
+玩家/怪物/NPC 名字标签互相重叠（TD-CLI-16）。只改客户端 Phaser 展示与测试
+钩子，不改服务端、协议、内容或数据库。
+
+### 实际改动
+
+1. **地面掉落图标**
+   - `WorldScene.preload` 把 `content/assets/generated/item_icons.png` 注册为
+     32px spritesheet；`mapCatalog` 导出共享纹理键 `ITEM_ICON_TEXTURE_KEY`。
+   - `LootVisual` 从发光袋状几何体改为暗色圆盘 + 模板描边 + 图集图标，名称与
+     数量保留在圆盘上方；帧号由 `itemIconFrame` 按“模板 → 类型 → 通用”解析。
+   - 新增 `lootIconFrame(dropId)` 只读钩子，类型写入应用与 E2E 的
+     `global.d.ts`。
+2. **名字标签避让**
+   - 新增纯函数 `apps/game-web/src/game/labelLayout.ts`：
+     自己 1000 > 当前目标 900 > NPC 700 > 其他玩家 500 > 怪物 400；
+     同优先级按距自己更近者优先，再按 id 稳定排序；只隐藏与更高优先级矩形
+     相交（含 3px 间距）的标签，不移动位置。
+   - `WorldScene` 每 100ms 刷新一次，选择/取消目标立即刷新；玩家与怪物死亡
+     时隐藏名字，复活后恢复；NPC 标签存入 `npcLabels` 供布局使用。
+   - 新增 `labels()` 只读钩子，返回 id/类型/文本/可见性/矩形。
+3. **测试**
+   - `labelLayout.test.ts` 6 条：不重叠、优先级、距离、稳定并列、间距边界、
+     空输入。
+   - `hud.spec.ts` 新增“玩家站到杂货商脚下”的用例：自己可见、NPC 隐藏、
+     两个矩形确实相交、所有可见标签两两不重叠；截图
+     `scene-readable/name-plates.png`。
+   - `economy.spec.ts` 在既有击杀链路中读取 manifest 的 `slime_gel` 帧号，
+     断言场景标记使用同一帧；截图 `scene-readable/loot-ground-icon.png`。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm verify:invariants
+```
+
+- 格式/lint/类型：通过（lint 全仓 0 error / 0 warning）。
+- 单元/集成：69 文件、**454 测试**通过（新增 6 条）。
+- 构建：4 个应用成功。
+- 全量 E2E：首轮 37/38（`multiplayer.spec.ts` 250ms 可见性得到 337ms），
+  该用例 `--repeat-each=3` 3/3、单跑 262ms 仍失败一次，随后全量重跑
+  **38/38 通过**（4.1 分钟，2 worker，独立库/端口）。
+- 资产不变量：`pnpm verify:invariants` 7 项全部 0（重启后）。
+- 真实浏览器：8584 真实 Chromium 验证标签避让与掉落帧 18；截图
+  `scene-readable/dev-name-plates.png`、`dev-loot-icon.png`。
+
+### 遇到的问题及解决方法
+
+1. **Playwright 不能直接 import JSON**：最初在 `economy.spec.ts` 顶层
+   `import rawAssetManifest from '../../content/assets/manifest.json'`，tsc 与
+   vitest 通过，但 `pnpm test:e2e` 加载测试文件即失败（ESM 要求 import
+   attribute）。按 EL-025 改为 `readFileSync` + `JSON.parse` 并显式收窄类型。
+2. **250ms 可见性断言偶发超时**：首轮全量 337ms、单跑 262ms；重复 3/3 与全量
+   重跑均通过，符合已知的软件渲染时序抖动（§6 风险）。未降低断言阈值。
+3. **手工验证留下过期掉落**：8584 击杀后未拾取，`verify:invariants` 报
+   `stale_expired_open_ground=1`。开发栈无在线 Room，按授权于 19:17 重启
+   （进程组 64926），启动清理后 7/7 归零，4 个服务健康检查 200。
+
+### 尚未解决
+
+- 传送门与地面掉落文字未纳入同一标签避让布局；当前地图边缘未观察到冲突。
+- 正式美术（TD-CLI-13）仍开放；未做真实玩家手感访谈。
+- 本切片只改客户端展示，未复跑 50 人容量回归。
+
+### 提交
+
+- `7937f3c` `feat(alpha-02): make world drops and name plates readable`
+  （18 个文件：场景显示、标签纯函数与测试、2 个 E2E 文件、阶段报告与 5 个证据
+  文件）。
+
+### 下一步计划
+
+1. 8584 试玩掉落图标与标签避让。
+2. S4 收尾：正式美术（TD-CLI-13）；丢弃物品；评估扩展装备槽（TD-DATA-05）。
+3. 为 tick p95 14.75ms 做剖析；确认远端 CI。
