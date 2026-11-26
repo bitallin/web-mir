@@ -216,6 +216,45 @@ test('wilds pvp kills, announces and revives without a reward', async ({ browser
   await expect(bob.page.getByTestId('player-dead')).toHaveCount(0);
   await expect(alice.page.getByTestId('exp-bar')).toHaveAttribute('data-exp', aliceExpBefore ?? '');
   expect((await alice.page.getByTestId('gold').textContent())?.trim()).toBe(aliceGoldBefore);
+
+  // The revived victim stays inside the attacker's interest area, and the
+  // attacker never receives the private respawn event. Both views must still
+  // read the victim as alive from the authoritative snapshot rather than keep
+  // the death pose.
+  const aliceId = await selfRow(alice.page).getAttribute('data-player-id');
+  if (aliceId === null) {
+    throw new Error('alice row has no player id');
+  }
+  await expect(
+    alice.page.locator(`[data-testid="player-row"][data-player-id="${bobId}"]`),
+  ).toHaveAttribute('data-alive', 'true', { timeout: 10_000 });
+  await expect
+    .poll(
+      async () =>
+        alice.page.evaluate(
+          (playerId) => window.__webLegendDebug?.playerAppearance(playerId)?.clip ?? null,
+          bobId,
+        ),
+      { timeout: 10_000 },
+    )
+    .not.toBe('death');
+  await expect
+    .poll(
+      async () =>
+        bob.page.evaluate(
+          (playerId) => window.__webLegendDebug?.playerAppearance(playerId)?.clip ?? null,
+          aliceId,
+        ),
+      { timeout: 10_000 },
+    )
+    .not.toBe('death');
+  await expect
+    .poll(
+      async () => bob.page.evaluate(() => window.__webLegendDebug?.selfAppearance().clip ?? null),
+      { timeout: 10_000 },
+    )
+    .not.toBe('death');
+
   await bob.page.screenshot({ path: join(ARTIFACT_DIR, 'wilds-pvp-revived.png') });
 });
 

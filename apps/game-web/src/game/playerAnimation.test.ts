@@ -28,6 +28,12 @@ describe('player animation clips', () => {
     expect(resolveClip({ alive: true, moving: false, oneShot: null }, 0)).toBe('idle');
   });
 
+  it('recovers from death when the snapshot reports the player alive again', () => {
+    // Respawn events are private to the revived player, so onlookers only see
+    // the authoritative snapshot flip back to alive.
+    expect(resolveClip({ alive: true, moving: false, oneShot: null }, 60_000)).toBe('idle');
+  });
+
   it('loops a walking clip across its frames', () => {
     const walk = animations.walk;
     if (walk === undefined) {

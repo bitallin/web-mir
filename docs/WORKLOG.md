@@ -2067,3 +2067,44 @@ pnpm exec playwright test tests/e2e/classes.spec.ts --workers=1
 2. 进入 S3：怪物威胁与死亡代价。
 
 提交：`99b8fd0`（`feat(alpha-02): give each class its own sprite sheet and animations`）。
+
+---
+
+## 2026-11-26 修复：PvP 复活后旁观者仍显示倒地
+
+### 问题
+
+A、B 野外 PK。B 阵亡后，A 的视角一直显示 B 倒地与“3 秒后复活”；B 复活后
+A 仍看到 B 的倒地姿态。
+
+### 根因
+
+三职业外观切片把“已死亡”做成客户端视觉对象的粘性标记（`dead`），靠
+`respawn` 事件清除。但 `WorldMapRoom.broadcastCombatEvent` 按设计只把
+`respawn` 发给复活者本人（复活后的 HP/MP 是私有信息），旁观者永远收不到清除
+信号；同时快照里的 `alive` 早已恢复为 true。
+
+### 修复
+
+- `PlayerVisual` 删除 `dead` 标记；死亡片段改为完全由快照 `alive` 决定。
+- `playDeath` 只做即时表现（停用一次性片段、透明度、隐藏血条）。
+- 仅开发环境的诊断钩子增加 `playerAppearance(playerId)`，供 E2E 检查旁观者
+  视角。
+- `tests/e2e/pvp.spec.ts` 复活后新增三方断言：A 的玩家列表 `data-alive=true`；
+  A 视角的 B、B 视角的 A、B 自己的片段均不为 `death`。临时恢复旧粘性标记验证
+  过该断言会失败。
+
+### 命令与结果
+
+```bash
+pnpm typecheck
+pnpm exec playwright test tests/e2e/pvp.spec.ts --workers=1
+```
+
+- 类型：通过。
+- PvP E2E：3/3 通过（含新增的旁观者视角断言；旧实现下同一断言失败）。
+
+### 说明
+
+A 日志里“B 被 A 击败，3 秒后复活”是系统公告历史，正常保留；B 站起来后不再
+出现新的错误状态。文档同步 ADR-029、EL-020 与切片报告 §4.1。

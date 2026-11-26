@@ -955,6 +955,7 @@ class WorldSession {
           frame: '',
         },
       selfId: () => this.options.character.id,
+      playerAppearance: (playerId) => this.bridge.playerAppearance(playerId),
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),
       interactNpc: (npcId) => this.interactNpc(npcId),
       sendChat: (text) => this.sendChat(text),

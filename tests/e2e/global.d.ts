@@ -21,6 +21,9 @@ declare global {
       playerScreenPoint: (playerId: string) => { x: number; y: number } | null;
       selfAppearance: () => { textureKey: string; clip: string; frame: string };
       selfId: () => string;
+      playerAppearance: (
+        playerId: string,
+      ) => { textureKey: string; clip: string; frame: string } | null;
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
       sendChat: (text: string) => boolean;

@@ -73,7 +73,6 @@ class PlayerVisual {
   private oneShot: OneShot | null = null;
   private facing = 2;
   private moving = false;
-  private dead = false;
   private displayName = '';
   private level = 1;
   private hp = 1;
@@ -175,8 +174,10 @@ class PlayerVisual {
     this.container.setDepth(this.current.y);
 
     this.elapsed += deltaMs;
+    // `alive` is the authoritative snapshot state. A sticky local death flag
+    // would never clear for onlookers, because respawn events are private.
     const clip = resolveClip(
-      { alive: this.alive && !this.dead, moving: this.moving, oneShot: this.oneShot },
+      { alive: this.alive, moving: this.moving, oneShot: this.oneShot },
       this.elapsed,
     );
     if (clip === this.clip) {
@@ -212,14 +213,12 @@ class PlayerVisual {
   }
 
   playDeath(): void {
-    this.dead = true;
     this.oneShot = null;
     this.container.setAlpha(0.28);
     this.hpBar.setVisible(false);
   }
 
   playRespawn(): void {
-    this.dead = false;
     this.oneShot = null;
     this.container.setAlpha(1);
     this.hpBar.setVisible(true);
@@ -239,7 +238,7 @@ class PlayerVisual {
   }
 
   private startOneShot(clip: CharacterClip): void {
-    if (this.dead) {
+    if (!this.alive) {
       return;
     }
     const duration = Math.max(oneShotMs(this.animations, clip), MIN_ONE_SHOT_MS);

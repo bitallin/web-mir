@@ -31,6 +31,7 @@ declare global {
       /** Which class sheet and clip the local player is rendering. */
       selfAppearance: () => PlayerAppearance;
       selfId: () => string;
+      playerAppearance: (playerId: string) => PlayerAppearance | null;
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
       sendChat: (text: string) => boolean;
