@@ -4,6 +4,7 @@ import rawAssetManifest from '../../../content/assets/manifest.json';
 import { assetManifestSchema } from './assets';
 import {
   MAP_MANIFESTS,
+  RUINED_FIELDS_MAP,
   STARTER_TOWN_MAP,
   STARTER_TOWN_MAP_ID,
   STARTER_WILDS_MAP,
@@ -18,12 +19,37 @@ import {
 import { chatSendSchema, sessionTransferSchema } from './realtime';
 
 describe('compiled maps', () => {
-  it('loads both starter maps and resolves them by id', () => {
-    expect(MAP_MANIFESTS.map((map) => map.mapId).sort()).toEqual(['starter_town', 'starter_wilds']);
+  it('loads every compiled map and resolves them by id', () => {
+    expect(MAP_MANIFESTS.map((map) => map.mapId).sort()).toEqual([
+      'ruined_fields',
+      'starter_town',
+      'starter_wilds',
+    ]);
     expect(findMapManifest(STARTER_TOWN_MAP_ID)).toBe(STARTER_TOWN_MAP);
     expect(findMapManifest('missing_map')).toBeUndefined();
     expect(STARTER_TOWN_MAP.portals[0]?.targetMapId).toBe(STARTER_WILDS_MAP.mapId);
     expect(STARTER_WILDS_MAP.portals[0]?.targetMapId).toBe(STARTER_TOWN_MAP.mapId);
+  });
+
+  it('links the town to the ruins in both directions', () => {
+    const townToRuins = STARTER_TOWN_MAP.portals.find(
+      (portal) => portal.targetMapId === RUINED_FIELDS_MAP.mapId,
+    );
+    const ruinsToTown = RUINED_FIELDS_MAP.portals.find(
+      (portal) => portal.targetMapId === STARTER_TOWN_MAP.mapId,
+    );
+    expect(townToRuins).toBeDefined();
+    expect(ruinsToTown).toBeDefined();
+    // Arrival sits next to the return portal so the player never lands on it.
+    expect(ruinsToTown?.targetTile).not.toEqual(townToRuins?.tile);
+    expect(
+      Math.abs((ruinsToTown?.targetTile.x ?? 0) - (townToRuins?.tile.x ?? 0)) +
+        Math.abs((ruinsToTown?.targetTile.y ?? 0) - (townToRuins?.tile.y ?? 0)),
+    ).toBe(1);
+    expect(RUINED_FIELDS_MAP.pvpMode).toBe('open');
+    for (const portal of [...STARTER_TOWN_MAP.portals, ...RUINED_FIELDS_MAP.portals]) {
+      expect(MAP_MANIFESTS.some((map) => map.mapId === portal.targetMapId)).toBe(true);
+    }
   });
 
   it('compiles the town as a safe zone and the wilds as open pvp', () => {
@@ -104,7 +130,11 @@ describe('asset manifest', () => {
     const manifest = assetManifestSchema.parse(rawAssetManifest);
     expect(manifest.tilesets.terrain?.tileCount).toBe(8);
     expect(manifest.characters.player_placeholder?.frames).toBe(2);
-    expect(Object.keys(manifest.maps).sort()).toEqual(['starter_town', 'starter_wilds']);
+    expect(Object.keys(manifest.maps).sort()).toEqual([
+      'ruined_fields',
+      'starter_town',
+      'starter_wilds',
+    ]);
   });
 
   it('gives every class its own sheet and clip table', () => {

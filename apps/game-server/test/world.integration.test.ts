@@ -17,7 +17,11 @@ import {
   type CommandRejected,
   type SessionTransfer,
 } from '@web-legend/contracts';
-import { STARTER_TOWN_MAP, STARTER_WILDS_MAP } from '@web-legend/contracts/maps';
+import {
+  RUINED_FIELDS_MAP_ID,
+  STARTER_TOWN_MAP,
+  STARTER_WILDS_MAP,
+} from '@web-legend/contracts/maps';
 import {
   WorldState,
   type PlayerStateInstance,
@@ -741,6 +745,21 @@ describe.runIf(databaseUrl !== undefined)('world_map room', () => {
       5_000,
       'server position',
     );
+  });
+
+  it('fills a joining player view with monsters that have not moved yet', async () => {
+    const alice = await createActor(db, 'Alice', {
+      mapId: RUINED_FIELDS_MAP_ID,
+      position: tileUnits({ x: 4, y: 18 }),
+    });
+    const room = await createWorld(alice.ticket, RUINED_FIELDS_MAP_ID);
+
+    // Monsters cannot leave idle before their first think at 1.8s, so
+    // everything visible inside this window was seeded by the join itself.
+    // If join only relied on later movement patches, stationary camps would
+    // stay invisible to a newcomer.
+    await waitUntil(() => room.state.monsters.size >= 3, 1_200, 'join AOI monsters');
+    expect(room.state.monsters.size).toBeGreaterThanOrEqual(3);
   });
 
   it('only sends entities inside the AOI cells to each client', async () => {

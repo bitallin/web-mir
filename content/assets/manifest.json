@@ -130,6 +130,10 @@
     "starter_wilds": {
       "source": "content/maps/starter_wilds.tmj",
       "compiled": "content/maps/compiled/starter_wilds.json"
+    },
+    "ruined_fields": {
+      "source": "content/maps/ruined_fields.tmj",
+      "compiled": "content/maps/compiled/ruined_fields.json"
     }
   }
 }

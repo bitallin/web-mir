@@ -6,7 +6,10 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 
 const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'phase-05');
 const PASSWORD = 'phase-five-password';
-const SLIME_ID = 'wilds_slime_1';
+// Owns this spawn: autoAttack.spec kills wilds_slime_1 in parallel, and a
+// shared target lets one spec's reward steal the other's drop (EL-019).
+const SLIME_ID = 'wilds_slime_11';
+const SLIME_TILE = { x: 1, y: 9 };
 
 test.describe.configure({ mode: 'serial', timeout: 180_000 });
 
@@ -128,7 +131,10 @@ test('kill, loot, equip and relogin keep the committed economy state', async ({ 
   const alice = await registerWorld(browser, 'LootA');
   const bob = await registerWorld(browser, 'LootB');
   await transferBothToWilds(alice.page, bob.page);
-  await Promise.all([moveTo(alice.page, 20, 10), moveTo(bob.page, 20, 10)]);
+  await Promise.all([
+    moveTo(alice.page, SLIME_TILE.x, SLIME_TILE.y),
+    moveTo(bob.page, SLIME_TILE.x, SLIME_TILE.y),
+  ]);
 
   await expect(monsterRow(alice.page)).toHaveCount(1, { timeout: 10_000 });
   const aliceId = await characterIdOf(alice.page);

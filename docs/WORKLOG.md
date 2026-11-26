@@ -2471,3 +2471,95 @@ pnpm test:e2e
   商店皮甲“防御 +5 · 生命 +15”与背包/装备槽属性断言。
 - 结果：67 文件、**436 测试**通过；全量 E2E **32/32** 通过；构建与静态门禁通过。
 - 开发栈：Vite 热更新已生效，`dev-shop.png` / `dev-bag.png` 更新为统一属性行。
+
+## 2026-11-26 Alpha 0.2 S4 切片 B：废墟区域与 8–10 级成长线
+
+### 本次任务目标
+
+补齐路线图中的第三片野外区域，把有效成长线从 7 级延伸到 10 级：新地图、
+8–10 级三种怪物、9–10 级装备与高等级药水，让 10 级技能与商店金币有对应内容。
+
+### 实际改动
+
+1. **地图**
+   - 新增 `content/maps/ruined_fields.tmj`（48×36，残垣庭院/石地/水池），
+     `kind: wilds`，出生/复活点 `(4,18)`，29 个刷点。
+   - 主城西北角 `(3,2)` 新增“前往废墟”传送门；废墟 `(3,18)` 返回主城 `(4,2)`。
+   - `content/assets/manifest.json` 注册地图；`pnpm maps:compile` 生成
+     `content/maps/compiled/ruined_fields.json`。
+   - 起初把入口放在荒野 `(13,10)`，全量 E2E 暴露它与 PvP 决斗点
+     `(12,10)/(13,10)` 及多条寻路重合，玩家被意外传送；改为主城入口。
+2. **契约与地图注册**
+   - `RUINED_FIELDS_MAP_ID`、`RUINED_FIELDS_MAP` 与 `MAP_MANIFESTS` 增加第三图。
+   - 契约测试覆盖三图解析、双向传送门与目标存在；编译测试锁定刷点、怪物集合、
+     复活点与 PvP 模式；`starter_wilds.tmj` 恢复原样。
+3. **内容**（`packages/content-schema/src/baseContent.ts`）
+   - 新怪物：骷髅武士 Lv8 / 腐化术士 Lv9（远程）/ 废墟石像鬼 Lv10（精英，
+     1s 前摇）。
+   - 新装备：三职业 9 级武器、8 级石壳胸甲（商店 600 金币）、三职业 10 级稀有
+     武器与石像鬼护心甲（稀有）。
+   - 新消耗品：疗伤药（+120 HP）、凝神药（+90 MP），5 级可用，商店出售。
+   - 新材料：碎骨、腐化水晶、石像鬼之核；三张掉落表经验 140/180/360。
+4. **客户端**
+   - `MonsterVisual` 增加三种怪物的配色与占位造型（骨架、兜帽术士、展翼石像鬼）。
+   - 地图名、小地图、PvP 标记沿用契约 manifest，无需额外分支。
+5. **测试**
+   - `tests/e2e/ruins.spec.ts`：主城→废墟传送、残垣废墟名称、野外标记、
+     入口可见骷髅、返回主城；证据截图 `alpha-02/ruins/ruins-entry.png`。
+   - `world.integration.test.ts`：加入废墟 1.2s 内看到 3 只未移动的怪物
+     （验证 join 时填充视野；怪物首次思考在 1.8s，窗口内不会移动）。
+   - 修复 economy 与 autoAttack 共用 `wilds_slime_1` 的并行冲突：economy 改用
+     `wilds_slime_11`。
+   - 修复 classes 攻击动画用例依赖怪物 `attack` 状态：改为等待角色自身到达
+     目标格后触发攻击。
+6. **内容发布**
+   - 用 Control API 重写 classes/skills/monsters/items/lootTables/rules 草稿为
+     基线内容（清除旧草稿对新增内容的覆盖），校验 0 error，发布并激活
+     `2026.11.26.6`（checksum `c337c92c…`，新增 19 个实体）。
+   - 发布时的 3 条“无刷点使用该怪物”warning 来自运行中的旧 Control API 进程
+     （未加载新编译地图），重启后不再出现，不影响 Release payload。
+
+### 命令与结果
+
+```bash
+pnpm maps:compile
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm verify:invariants docs/phase-reports/alpha-02/ruins/invariants.txt
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：67 文件、**439 测试**通过（新增 3 条）。
+- 构建：4 个应用成功。
+- 全量 E2E：**33/33 通过**（3.8 分钟，2 worker，独立数据库与端口）。
+- 内容：`2026.11.26.6` 已激活（checksum `c337c92c…`）。
+- 资产不变量：6/7 为 0；`stale_expired_open_ground=1` 为 14:17 荒野遗留
+  `slime_gel`（早于本切片），重启或重新进入荒野后清理。
+
+### 遇到的问题及解决方法
+
+1. **传送门放在荒野与既有用例冲突**：`(13,10)` 是 PvP 决斗点相邻格，也是
+   autoAttack/economy 等用例寻路经过的格子；全量 E2E 出现 5 个失败。把入口
+   改到主城西北角，荒野地图恢复原样，失败全部消失。沉淀 EL-024。
+2. **误判了一个“AOI 入图缺陷”**：废墟入口最初只看到移动过的怪，怀疑 join
+   未刷新新玩家视野。加日志验证 `affected` 已包含新玩家本人，客户端在
+   ~100ms 内收到 3 只怪；回退无实质作用的改动，保留一条“join 视野”回归测试。
+3. **共享刷点与 AI 状态导致门禁偶发**：economy/autoAttack 共用史莱姆；
+   classes 等待怪物 `attack`。分别改为独占刷点与“等待自身到达”后稳定。
+4. **开发栈无法重启**：自动模式拦截了 kill，终端标签已满；开发栈仍运行
+   14:00 代码，8584 暂不能进入废墟，需按 §下一步 手工重启。
+
+### 尚未解决
+
+- 8584 人工试玩（需重启开发栈）；50 人容量回归未复跑；远端 CI 未确认。
+- 稀有品质浏览器表现、正式美术与物品图标仍未做。
+
+### 下一步计划
+
+1. 重启开发栈后试玩废墟与 8–10 级掉落。
+2. 复跑 50×10min 容量回归（三张地图）。
+3. S4 剩余：图标、HUD 重排、正式美术；确认远端 CI。

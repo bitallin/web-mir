@@ -21,6 +21,9 @@ const PALETTES: Record<string, MonsterPalette> = {
   alpha_wolf: { body: 0xc9c4b6, highlight: 0xe8e3d5, shadow: 0x6d6a61 },
   venom_spider: { body: 0x4a3560, highlight: 0x7f5da3, shadow: 0x201528 },
   stone_guard: { body: 0x6b6f74, highlight: 0x9aa0a6, shadow: 0x33373b },
+  skeleton_warrior: { body: 0xd8d2c2, highlight: 0xf0ead8, shadow: 0x6d6a5e },
+  corrupt_warlock: { body: 0x3b2b55, highlight: 0x7a5aa6, shadow: 0x1a1226 },
+  ruin_gargoyle: { body: 0x5f6469, highlight: 0x8d949b, shadow: 0x2c3034 },
 };
 
 const FALLBACK_PALETTE: MonsterPalette = { body: 0x6a5f86, highlight: 0x9a8fbf, shadow: 0x2a2536 };
@@ -246,6 +249,64 @@ export class MonsterVisual {
       graphics.fillStyle(0x1b1e22, 1);
       graphics.fillRect(-8, -24, 5, 3);
       graphics.fillRect(3, -24, 5, 3);
+      return;
+    }
+
+    if (this.templateId === 'skeleton_warrior') {
+      // Bone-white silhouette with dark eye sockets and a rusted blade.
+      graphics.fillStyle(palette.body, 1);
+      graphics.fillCircle(0, -33, 8);
+      graphics.fillRect(-6, -28, 12, 14);
+      graphics.fillStyle(palette.shadow, 1);
+      graphics.fillRect(-4, -27, 8, 2);
+      graphics.fillRect(-4, -23, 8, 2);
+      graphics.fillRect(-7, -14, 3, 12);
+      graphics.fillRect(4, -14, 3, 12);
+      graphics.fillStyle(0x1b1e22, 1);
+      graphics.fillCircle(-3, -34, 1.7);
+      graphics.fillCircle(3, -34, 1.7);
+      graphics.fillStyle(0x8a7a5a, 1);
+      graphics.fillRect(9, -34, 3, 22);
+      graphics.fillStyle(palette.highlight, 1);
+      graphics.fillRect(8, -36, 5, 3);
+      return;
+    }
+
+    if (this.templateId === 'corrupt_warlock') {
+      // Hooded caster with a floating corrupted crystal.
+      graphics.fillStyle(palette.body, 1);
+      graphics.fillTriangle(-14, -2, 0, -38, 14, -2);
+      graphics.fillStyle(palette.highlight, 1);
+      graphics.fillTriangle(-5, -26, 0, -36, 5, -26);
+      graphics.fillCircle(0, -17, 6);
+      graphics.fillStyle(0x1b1e22, 1);
+      graphics.fillCircle(-3, -18, 1.5);
+      graphics.fillCircle(3, -18, 1.5);
+      graphics.fillStyle(0x9b6bd6, 1);
+      graphics.fillCircle(13, -30, 4);
+      graphics.fillStyle(0xd9b8ff, 1);
+      graphics.fillCircle(12, -31, 1.5);
+      graphics.fillStyle(palette.shadow, 1);
+      graphics.fillRect(10, -26, 2, 14);
+      return;
+    }
+
+    if (this.templateId === 'ruin_gargoyle') {
+      // Squat stone body, spread wings and glowing eyes mark the elite.
+      graphics.fillStyle(palette.shadow, 1);
+      graphics.fillTriangle(-6, -22, -28, -38, -16, -10);
+      graphics.fillTriangle(6, -22, 28, -38, 16, -10);
+      graphics.fillStyle(palette.body, 1);
+      graphics.fillRect(-15, -32, 30, 28);
+      graphics.fillCircle(0, -34, 9);
+      graphics.fillStyle(palette.highlight, 1);
+      graphics.fillTriangle(-8, -42, -3, -48, 2, -42);
+      graphics.fillTriangle(2, -42, 7, -48, 12, -42);
+      graphics.fillStyle(0xd8a24a, 1);
+      graphics.fillCircle(-4, -35, 2);
+      graphics.fillCircle(4, -35, 2);
+      graphics.fillStyle(palette.shadow, 1);
+      graphics.fillRect(-15, -12, 30, 4);
       return;
     }
 

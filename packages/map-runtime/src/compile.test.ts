@@ -38,6 +38,10 @@ function options(): MapCompileOptions {
   return { tileset, assetManifestVersion: manifest.version };
 }
 
+function allSources(): MapSource[] {
+  return [source('starter_town'), source('starter_wilds'), source('ruined_fields')];
+}
+
 function mutableSource(name: string): { name: string; data: Record<string, unknown> } {
   return {
     name: `content/maps/${name}.tmj`,
@@ -65,33 +69,47 @@ function layers(data: Record<string, unknown>): MutableLayer[] {
 }
 
 describe('Tiled map compilation', () => {
-  it('compiles the real town and wilds sources with cross-map portals', () => {
-    const compiled = compileMapSet([source('starter_town'), source('starter_wilds')], options());
+  it('compiles the real town, wilds and ruins sources with cross-map portals', () => {
+    const compiled = compileMapSet(allSources(), options());
 
-    expect(compiled.map((map) => map.mapId).sort()).toEqual(['starter_town', 'starter_wilds']);
+    expect(compiled.map((map) => map.mapId).sort()).toEqual([
+      'ruined_fields',
+      'starter_town',
+      'starter_wilds',
+    ]);
     const town = compiled.find((map) => map.mapId === 'starter_town');
     const wilds = compiled.find((map) => map.mapId === 'starter_wilds');
+    const ruins = compiled.find((map) => map.mapId === 'ruined_fields');
     expect(town?.portals[0]?.targetMapId).toBe('starter_wilds');
     expect(wilds?.portals[0]?.targetMapId).toBe('starter_town');
     expect(town?.pvpMode).toBe('none');
     expect(wilds?.pvpMode).toBe('open');
+    expect(ruins?.pvpMode).toBe('open');
     expect(town?.npcPoints).toHaveLength(2);
     expect(town?.monsterSpawns).toHaveLength(0);
     // The Tiled sources mark the portal-adjacent spawn point as the respawn.
     expect(wilds?.respawnPoint).toEqual({ x: 2, y: 16 });
+    expect(ruins?.respawnPoint).toEqual({ x: 4, y: 18 });
     // 36 spawns stay inside the phase-8 load target of 20–40 per map.
     expect(wilds?.monsterSpawns).toHaveLength(36);
     expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.id)).size).toBe(36);
     expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.monsterId))).toEqual(
       new Set(['wild_slime', 'forest_wolf', 'venom_spider', 'stone_guard', 'alpha_wolf']),
     );
+    expect(ruins?.monsterSpawns).toHaveLength(29);
+    expect(new Set(ruins?.monsterSpawns.map((spawn) => spawn.id)).size).toBe(29);
+    expect(new Set(ruins?.monsterSpawns.map((spawn) => spawn.monsterId))).toEqual(
+      new Set(['skeleton_warrior', 'corrupt_warlock', 'ruin_gargoyle']),
+    );
+    expect(town?.portals.find((portal) => portal.targetMapId === 'ruined_fields')).toBeDefined();
+    expect(ruins?.portals[0]?.targetMapId).toBe('starter_town');
     for (const map of compiled) {
       expect(verifyManifestChecksum(map)).toBe(true);
     }
   });
 
   it('keeps the checked-in compiled maps in sync with the Tiled sources', () => {
-    const compiled = compileMapSet([source('starter_town'), source('starter_wilds')], options());
+    const compiled = compileMapSet(allSources(), options());
     for (const map of compiled) {
       const checkedIn = readJson(`content/maps/compiled/${map.mapId}.json`);
       expect(checkedIn).toEqual(map);
@@ -138,27 +156,29 @@ describe('Tiled map compilation', () => {
       );
     }
 
-    const fallback = compileMapSet([source('starter_town'), wilds], options()).find(
-      (map) => map.mapId === 'starter_wilds',
-    );
+    const fallback = compileMapSet(
+      [source('starter_town'), source('ruined_fields'), wilds],
+      options(),
+    ).find((map) => map.mapId === 'starter_wilds');
     expect(fallback?.respawnPoint).toEqual(fallback?.spawnPoints[0]);
 
     second.properties = [
       ...(second.properties ?? []),
       { name: 'respawn', type: 'bool', value: true },
     ];
-    const marked = compileMapSet([source('starter_town'), wilds], options()).find(
-      (map) => map.mapId === 'starter_wilds',
-    );
+    const marked = compileMapSet(
+      [source('starter_town'), source('ruined_fields'), wilds],
+      options(),
+    ).find((map) => map.mapId === 'starter_wilds');
     expect(marked?.respawnPoint).toEqual({ x: 3, y: 16 });
 
     third.properties = [
       ...(third.properties ?? []),
       { name: 'respawn', type: 'bool', value: true },
     ];
-    expect(() => compileMapSet([source('starter_town'), wilds], options())).toThrow(
-      /at most one respawn point/,
-    );
+    expect(() =>
+      compileMapSet([source('starter_town'), source('ruined_fields'), wilds], options()),
+    ).toThrow(/at most one respawn point/);
   });
 
   it('rejects a portal to an unknown map', () => {
@@ -215,7 +235,7 @@ describe('Tiled map compilation', () => {
 });
 
 describe('compiled map runtime', () => {
-  const compiled = compileMapSet([source('starter_town'), source('starter_wilds')], options());
+  const compiled = compileMapSet(allSources(), options());
   const town = compiled.find((map) => map.mapId === 'starter_town');
   if (town === undefined) {
     throw new Error('town did not compile');

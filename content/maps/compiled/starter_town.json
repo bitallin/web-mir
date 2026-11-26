@@ -233,6 +233,19 @@
         "x": 2,
         "y": 16
       }
+    },
+    {
+      "id": "town_to_ruins",
+      "label": "前往废墟",
+      "tile": {
+        "x": 3,
+        "y": 2
+      },
+      "targetMapId": "ruined_fields",
+      "targetTile": {
+        "x": 4,
+        "y": 18
+      }
     }
   ],
   "npcPoints": [
@@ -257,5 +270,5 @@
   ],
   "monsterSpawns": [],
   "assetManifestVersion": "alpha0.2.1",
-  "checksum": "dacb92af6cfa2a7e572d940313c5f576315e0a965321dd16c7b0e37c41f490fc"
+  "checksum": "64a561d33df1cdadfa225a726d69c350b00a637a862fdfd4eb11278e3340d21e"
 }

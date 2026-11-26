@@ -44,7 +44,10 @@ describe('phase-4 content catalog', () => {
     const monsters = Object.values(MONSTER_CATALOG);
     expect(monsters.map((monster) => monster.id).sort()).toEqual([
       'alpha_wolf',
+      'corrupt_warlock',
       'forest_wolf',
+      'ruin_gargoyle',
+      'skeleton_warrior',
       'stone_guard',
       'venom_spider',
       'wild_slime',
@@ -56,11 +59,25 @@ describe('phase-4 content catalog', () => {
     }
   });
 
-  it('gives the elite a wind-up and the spider a ranged attack', () => {
-    const alpha = requireMonster('alpha_wolf');
-    expect(alpha.windupMs ?? 0).toBeGreaterThan(0);
-    expect(alpha.windupRadiusTiles ?? 0).toBeGreaterThan(0);
+  it('gives each elite a wind-up and the ranged monsters reach beyond melee', () => {
+    for (const eliteId of ['alpha_wolf', 'ruin_gargoyle']) {
+      const elite = requireMonster(eliteId);
+      expect(elite.windupMs ?? 0).toBeGreaterThan(0);
+      expect(elite.windupRadiusTiles ?? 0).toBeGreaterThan(0);
+    }
     expect(requireMonster('venom_spider').attackRangeTiles).toBeGreaterThan(2);
+    expect(requireMonster('corrupt_warlock').attackRangeTiles).toBeGreaterThan(2);
+  });
+
+  it('keeps the ruins monsters stronger than the wilds ones', () => {
+    const skeleton = requireMonster('skeleton_warrior');
+    const warlock = requireMonster('corrupt_warlock');
+    const gargoyle = requireMonster('ruin_gargoyle');
+    expect(skeleton.level).toBe(8);
+    expect(warlock.level).toBe(9);
+    expect(gargoyle.level).toBe(10);
+    expect(gargoyle.maxHp).toBeGreaterThan(requireMonster('alpha_wolf').maxHp);
+    expect(gargoyle.defense).toBeGreaterThan(skeleton.defense);
   });
 
   it('throws for unknown ids instead of returning a default', () => {

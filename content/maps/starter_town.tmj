@@ -5121,6 +5121,55 @@
           "width": 0,
           "x": 1232,
           "y": 496
+        },
+        {
+          "height": 0,
+          "id": 12,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 3
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 2
+            },
+            {
+              "name": "portalId",
+              "type": "string",
+              "value": "town_to_ruins"
+            },
+            {
+              "name": "label",
+              "type": "string",
+              "value": "前往废墟"
+            },
+            {
+              "name": "targetMapId",
+              "type": "string",
+              "value": "ruined_fields"
+            },
+            {
+              "name": "targetTileX",
+              "type": "int",
+              "value": 4
+            },
+            {
+              "name": "targetTileY",
+              "type": "int",
+              "value": 18
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 112,
+          "y": 80
         }
       ],
       "opacity": 1,
@@ -5232,7 +5281,7 @@
     }
   ],
   "nextlayerid": 9,
-  "nextobjectid": 12,
+  "nextobjectid": 13,
   "orientation": "orthogonal",
   "properties": [
     {

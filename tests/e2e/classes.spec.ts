@@ -141,7 +141,11 @@ test('a warrior swings the basic attack clip at a slime', async ({ browser }) =>
 
   const slime = page.locator(`[data-testid="monster-row"][data-monster-id="${SLIME_ID}"]`);
   await expect(slime).toBeVisible({ timeout: 30_000 });
-  await expect(slime).toHaveAttribute('data-state', 'attack', { timeout: 30_000 });
+  // Wait for our own arrival instead of the slime's attack state: another
+  // spec can pull this spawn into "return", which says nothing about range.
+  const self = page.locator('[data-testid="player-row"][data-self="true"]');
+  await expect(self).toHaveAttribute('data-tile-x', String(SLIME_TILE.x), { timeout: 30_000 });
+  await expect(self).toHaveAttribute('data-tile-y', String(SLIME_TILE.y - 1));
   await hideHud(page);
 
   await page.evaluate((monsterId) => window.__webLegendDebug?.attackMonster(monsterId), SLIME_ID);

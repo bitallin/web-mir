@@ -12,6 +12,7 @@ export const MAP_RUNTIME_SCHEMA_VERSION = 2 as const;
 
 export const STARTER_TOWN_MAP_ID = 'starter_town';
 export const STARTER_WILDS_MAP_ID = 'starter_wilds';
+export const RUINED_FIELDS_MAP_ID = 'ruined_fields';
 
 export const mapIdSchema = z
   .string()
