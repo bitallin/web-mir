@@ -915,7 +915,7 @@ Alpha 0.1/0.2 已交付内容见 §0；以下仍需用户确认或试玩：
 | 开发默认 `INTERNAL_ADMIN_TOKEN`     | 生产误用会暴露内部端点                                      | 生产 schema 拒绝默认值；部署时显式设置                                                                      |
 | Outbox 与 Control API 同进程        | 进程终止时投递暂停                                          | PostgreSQL 保留 pending；stale dispatched 60 秒后重投                                                       |
 | Outbox dispatcher 单实例            | 吞吐有限                                                    | SKIP LOCKED 支持多实例；当前命令量小                                                                        |
-| 资产事务队列串行                    | 50 人压测 p95 约 52ms（含排队）；S4-G 2 分钟 sanity 59ms    | tick 不等待事务；队列指标可观测；任务推进复用击杀事务，未新增队列或 tick 路径                                |
+| 资产事务队列串行                    | 50 人压测 p95 约 52ms（含排队）；S4-G 2 分钟 sanity 59ms    | tick 不等待事务；队列指标可观测；任务推进复用击杀事务，未新增队列或 tick 路径                               |
 | 50 人 tick p95（S4-F 已达标）       | S4-B 14.75ms；长尾来自 AOI 重复刷新与临时分配               | S4-F 每 tick 去重刷新 + 复用 Set；50×10min p95 5.34ms、p99 6.67ms；事件序列化仍占 tick 内约 28%，团战前观察 |
 | 地图刷点与内容 Release 耦合         | 新增刷点若未随 Release 发布，旧版本校验失败、服务器退回基线 | 内容校验阻止非法快照；按 EL-021 顺序发布；TD-OPS-18 增加发布预检                                            |
 | 扑击前摇增加同屏计算                | 精英多时 tick 与事件量上升                                  | 前摇只对配置怪物生效；本轮 50 人回归复测 tick 与资产 p95                                                    |
@@ -1273,18 +1273,18 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
 
 ### Alpha 0.2 S4 切片 G：主城守卫任务链（2026-11-26）
 
-| 检查       | 命令/方式                         | 结果                                                          |
-| ---------- | --------------------------------- | ------------------------------------------------------------- |
-| 格式/lint  | `pnpm format:check`、`lint`       | 通过（0 error / 0 warning）                                   |
-| 类型       | `pnpm typecheck`                  | 通过（根 + 15 个 workspace）                                  |
-| 单元/集成  | `pnpm test`                       | 70 文件、**472 测试**通过（新增 17 条）                       |
-| 构建       | `pnpm build`                      | 4 个应用成功                                                  |
-| 浏览器 E2E | `pnpm test:e2e`                   | **39/39 通过**（4.3 分钟，2 worker，独立库/端口）             |
-| 任务 E2E   | `tests/e2e/quests.spec.ts`        | 接取 → 3 次击杀 → 交付 → 金币 +20、药水 +1、追踪清空          |
-| 容量 sanity| 50 人 × 2 分钟                    | 50/50、98.8%、145 击杀、0 失败、tick p95 4.37ms               |
-| 资产不变量 | `pnpm verify:invariants`          | 7 项全部 0 违例                                               |
-| 内容发布   | Control API                       | 草稿 200、校验 200（0 issue）、发布 201、激活 200             |
-| 开发栈     | 84–87、21:08 重启                 | 4 个服务健康检查 200；内容刷新日志；8584 真实 Chromium 接取    |
+| 检查        | 命令/方式                   | 结果                                                        |
+| ----------- | --------------------------- | ----------------------------------------------------------- |
+| 格式/lint   | `pnpm format:check`、`lint` | 通过（0 error / 0 warning）                                 |
+| 类型        | `pnpm typecheck`            | 通过（根 + 15 个 workspace）                                |
+| 单元/集成   | `pnpm test`                 | 70 文件、**472 测试**通过（新增 17 条）                     |
+| 构建        | `pnpm build`                | 4 个应用成功                                                |
+| 浏览器 E2E  | `pnpm test:e2e`             | **39/39 通过**（4.3 分钟，2 worker，独立库/端口）           |
+| 任务 E2E    | `tests/e2e/quests.spec.ts`  | 接取 → 3 次击杀 → 交付 → 金币 +20、药水 +1、追踪清空        |
+| 容量 sanity | 50 人 × 2 分钟              | 50/50、98.8%、145 击杀、0 失败、tick p95 4.37ms             |
+| 资产不变量  | `pnpm verify:invariants`    | 7 项全部 0 违例                                             |
+| 内容发布    | Control API                 | 草稿 200、校验 200（0 issue）、发布 201、激活 200           |
+| 开发栈      | 84–87、21:08 重启           | 4 个服务健康检查 200；内容刷新日志；8584 真实 Chromium 接取 |
 
 证据：`docs/phase-reports/alpha-02/quests/`、
 `docs/phase-reports/alpha-02/ALPHA_02_QUEST_REPORT.md`。
