@@ -1081,6 +1081,8 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`feat(alpha-02): add monster variety and a telegraphed elite pounce`
 - 修复战斗 HUD 遮挡画面：`6f2924b`
   主题：`fix(alpha-02): move the combat HUD out of the play area`
+- Alpha 0.2 S3 死亡代价与复活点内容化：`1ee35ef`
+  主题：`feat(alpha-02): charge a content-driven death cost and compile respawn points`
 
 ## 11. 当前环境事实
 
