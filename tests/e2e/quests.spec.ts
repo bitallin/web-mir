@@ -89,7 +89,9 @@ function questSlimeRow(page: Page) {
 async function killSlime(page: Page): Promise<void> {
   const row = questSlimeRow(page);
   await expect(row).toHaveCount(1, { timeout: 15_000 });
-  await expect.poll(async () => row.getAttribute('data-state'), { timeout: 20_000 }).not.toBe('dead');
+  await expect
+    .poll(async () => row.getAttribute('data-state'), { timeout: 20_000 })
+    .not.toBe('dead');
   await page.evaluate(
     (monsterId) => window.__webLegendDebug?.attackMonster(monsterId) ?? false,
     QUEST_SLIME.id,
@@ -189,5 +191,10 @@ test('the guard quest chain tracks kills and pays out on turn-in', async ({ brow
   );
   await expect(page.getByTestId('quest-tracker')).toHaveCount(0);
   await expect(trackerRow(page)).toHaveCount(0);
+  // Claiming the first quest and reaching level 3 must unlock the second one
+  // without a rejoin; the server re-sends the whole resolved chain.
+  await expect(
+    page.locator('[data-testid="quest-row"][data-quest-id="quest_wolf_patrol"]'),
+  ).toHaveAttribute('data-status', 'available', { timeout: 10_000 });
   await page.screenshot({ path: join(ARTIFACT_DIR, 'quest-claimed.png') });
 });

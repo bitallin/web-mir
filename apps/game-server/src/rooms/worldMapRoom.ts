@@ -2286,6 +2286,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
     session.assetSnapshot = outcome.snapshot;
     this.applyQuestUpdates(session, outcome.questUpdates);
+    // A level gained from the kill can satisfy a quest's level requirement;
+    // re-send the resolved chain so locked entries unlock without a rejoin.
+    if (outcome.leveledUp) {
+      this.sendQuestSnapshot(session.client, session);
+    }
     this.sendProgress(session, outcome.leveledUp);
     this.sendProfile(session.client, session.playerId);
     if (outcome.leveledUp) {
@@ -2691,6 +2696,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.sendProgress(session, outcome.leveledUp);
         this.sendProfile(session.client, session.playerId);
         const view = this.sendQuestUpdate(session, outcome.record);
+        // Claiming (and any level gained with it) can unlock the next quest or
+        // make it available, so the whole chain is re-resolved, not just the
+        // claimed quest. The same snapshot covers a client that missed a
+        // duplicate command's result.
+        this.sendQuestSnapshot(session.client, session);
         if (outcome.deduplicated || view === null) {
           return;
         }

@@ -82,7 +82,10 @@ Alpha 0.2 交付了商店、三职业、怪物威胁、死亡代价、装备与�
      重复 `commandId` 返回 deduplicated，不重复发奖。
 5. **客户端只渲染服务端视图。**
    - 加入世界后发送私有 `quest.snapshot`（任务定义解析后的标题/目标/奖励 +
-     本角色状态），变化时发送 `quest.update`；不进入公开 Room State。
+     本角色状态），单条变化时发送 `quest.update`；不进入公开 Room State。
+   - 交付或击杀升级会改变其它任务的可接状态（前置已 claimed、等级达标），因此
+     这两条路径在提交后重新下发整条 `quest.snapshot`，避免客户端停留在旧的
+     locked 状态直到重登。
    - 任务面板/追踪器不自行计算进度或奖励；接取/交付按钮只是意图，距离不足时
      服务端拒绝。
 6. **运营契约同步扩展。** `adminContentDraftUpdateSchema` 是手写的 section
