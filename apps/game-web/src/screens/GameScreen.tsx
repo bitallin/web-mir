@@ -18,6 +18,7 @@ import { mapBundleFor, mapNameFor } from '../game/mapCatalog';
 import {
   describeDelta,
   equipmentDelta,
+  itemStatLine,
   qualityOf,
   sortBagItems,
   QUALITY_LABELS,
@@ -69,30 +70,7 @@ function describeDeathPenalty(
 }
 
 function describeShopOffer(offer: ShopOffer): string {
-  if (offer.kind === 'weapon') {
-    return `+${String(offer.attackBonus)} 攻击`;
-  }
-  if (offer.kind === 'armor') {
-    const parts = [`+${String(offer.defenseBonus)} 防御`];
-    if (offer.maxHpBonus > 0) {
-      parts.push(`+${String(offer.maxHpBonus)} 生命`);
-    }
-    if (offer.maxMpBonus > 0) {
-      parts.push(`+${String(offer.maxMpBonus)} 法力`);
-    }
-    return parts.join(' · ');
-  }
-  if (offer.kind === 'consumable') {
-    const parts: string[] = [];
-    if (offer.healHp > 0) {
-      parts.push(`回复 ${String(offer.healHp)} HP`);
-    }
-    if (offer.healMp > 0) {
-      parts.push(`回复 ${String(offer.healMp)} MP`);
-    }
-    return parts.join(' · ');
-  }
-  return '材料';
+  return itemStatLine(offer);
 }
 
 function AutoAttackBar({
@@ -1039,7 +1017,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               {equipment?.weapon !== null && equipment?.weapon !== undefined ? (
                 <div className="slot-body">
                   <strong>{equipment.weapon.name}</strong>
-                  <span>+{equipment.weapon.attackBonus} 攻击</span>
+                  <span>{itemStatLine(equipment.weapon)}</span>
                   <button
                     type="button"
                     data-testid="unequip-weapon"
@@ -1064,7 +1042,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               {equipment?.armor !== null && equipment?.armor !== undefined ? (
                 <div className="slot-body">
                   <strong>{equipment.armor.name}</strong>
-                  <span>+{equipment.armor.defenseBonus} 防御</span>
+                  <span>{itemStatLine(equipment.armor)}</span>
                   <button
                     type="button"
                     data-testid="unequip-armor"
@@ -1104,17 +1082,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   ) : null}
                 </span>
                 <span className="bag-item-qty">×{item.quantity}</span>
-                <span className="bag-item-meta">
-                  {item.kind === 'weapon'
-                    ? `+${String(item.attackBonus)} 攻击`
-                    : item.kind === 'armor'
-                      ? `+${String(item.defenseBonus)} 防御`
-                      : item.kind === 'consumable'
-                        ? `回复 ${item.healHp > 0 ? `${String(item.healHp)} HP` : ''}${
-                            item.healMp > 0 ? ` ${String(item.healMp)} MP` : ''
-                          }`.trim()
-                        : '材料'}
-                </span>
+                <span className="bag-item-meta">{itemStatLine(item)}</span>
                 {comparisonFor(item) !== '' ? (
                   <span
                     className="bag-item-compare"

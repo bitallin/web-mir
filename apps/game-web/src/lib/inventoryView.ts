@@ -55,6 +55,46 @@ export function describeDelta(delta: StatDelta): string {
     .join(' · ');
 }
 
+export type ItemStatSource = Pick<
+  ItemView,
+  'kind' | 'attackBonus' | 'defenseBonus' | 'maxHpBonus' | 'maxMpBonus' | 'healHp' | 'healMp'
+>;
+
+/**
+ * Every stat an item actually carries. The bag, the equipment slots and the
+ * merchant all use this so a bonus can never be shown in one place and hidden
+ * in another.
+ */
+export function itemStatLine(item: ItemStatSource): string {
+  if (item.kind === 'weapon' || item.kind === 'armor') {
+    const parts: string[] = [];
+    if (item.attackBonus > 0) {
+      parts.push(`攻击 +${String(item.attackBonus)}`);
+    }
+    if (item.defenseBonus > 0) {
+      parts.push(`防御 +${String(item.defenseBonus)}`);
+    }
+    if (item.maxHpBonus > 0) {
+      parts.push(`生命 +${String(item.maxHpBonus)}`);
+    }
+    if (item.maxMpBonus > 0) {
+      parts.push(`法力 +${String(item.maxMpBonus)}`);
+    }
+    return parts.length > 0 ? parts.join(' · ') : '无属性加成';
+  }
+  if (item.kind === 'consumable') {
+    const parts: string[] = [];
+    if (item.healHp > 0) {
+      parts.push(`${String(item.healHp)} HP`);
+    }
+    if (item.healMp > 0) {
+      parts.push(`${String(item.healMp)} MP`);
+    }
+    return parts.length > 0 ? `回复 ${parts.join(' · ')}` : '无回复效果';
+  }
+  return '材料';
+}
+
 const QUALITY_RANK: Record<ItemQuality, number> = { rare: 1, common: 0 };
 const KIND_RANK: Record<ItemKind, number> = { weapon: 0, armor: 0, consumable: 1, material: 2 };
 

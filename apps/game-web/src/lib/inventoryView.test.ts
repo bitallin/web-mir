@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { ItemView } from '@web-legend/contracts';
 
-import { describeDelta, equipmentDelta, qualityOf, sortBagItems } from './inventoryView';
+import {
+  describeDelta,
+  equipmentDelta,
+  itemStatLine,
+  qualityOf,
+  sortBagItems,
+} from './inventoryView';
 
 function item(overrides: Partial<ItemView> & Pick<ItemView, 'itemId' | 'templateId'>): ItemView {
   return {
@@ -92,5 +98,61 @@ describe('bag sorting', () => {
     ];
     sortBagItems(items);
     expect(items.map((entry) => entry.itemId)).toEqual(['m', 'w']);
+  });
+});
+
+describe('item stat line', () => {
+  it('lists every bonus an equipment piece carries', () => {
+    expect(
+      itemStatLine(
+        item({
+          itemId: 'a',
+          templateId: 'flame',
+          attackBonus: 36,
+          maxHpBonus: 20,
+        }),
+      ),
+    ).toBe('攻击 +36 · 生命 +20');
+    expect(
+      itemStatLine(
+        item({
+          itemId: 'b',
+          templateId: 'soul',
+          attackBonus: 20,
+          maxHpBonus: 20,
+          maxMpBonus: 10,
+        }),
+      ),
+    ).toBe('攻击 +20 · 生命 +20 · 法力 +10');
+    expect(
+      itemStatLine(
+        item({
+          itemId: 'c',
+          templateId: 'chain',
+          kind: 'armor',
+          defenseBonus: 7,
+          maxHpBonus: 25,
+        }),
+      ),
+    ).toBe('防御 +7 · 生命 +25');
+  });
+
+  it('shows a single stat without padding', () => {
+    expect(
+      itemStatLine(item({ itemId: 'd', templateId: 'cloth', kind: 'armor', defenseBonus: 2 })),
+    ).toBe('防御 +2');
+  });
+
+  it('describes consumables, empty gear and materials', () => {
+    expect(
+      itemStatLine(
+        item({ itemId: 'e', templateId: 'potion', kind: 'consumable', healHp: 40, healMp: 30 }),
+      ),
+    ).toBe('回复 40 HP · 30 MP');
+    expect(
+      itemStatLine(item({ itemId: 'f', templateId: 'potion', kind: 'consumable', healMp: 30 })),
+    ).toBe('回复 30 MP');
+    expect(itemStatLine(item({ itemId: 'g', templateId: 'odd' }))).toBe('无属性加成');
+    expect(itemStatLine(item({ itemId: 'h', templateId: 'gel', kind: 'material' }))).toBe('材料');
   });
 });

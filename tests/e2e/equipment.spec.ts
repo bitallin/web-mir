@@ -96,6 +96,10 @@ test('bag shows quality and stat comparison, sorts gear first, and equips it', a
 
   const armorOffer = page.locator('[data-testid="shop-offer"][data-template-id="cloth_armor"]');
   await expect(armorOffer).toBeVisible();
+  // Every bonus the content defines is shown, including secondary stats.
+  await expect(
+    page.locator('[data-testid="shop-offer"][data-template-id="leather_armor"]'),
+  ).toContainText('防御 +5 · 生命 +15');
   await armorOffer.getByTestId('shop-buy').click();
   await expect(page.getByTestId('shop-gold')).toHaveText('金币 10', { timeout: 10_000 });
 
@@ -110,6 +114,7 @@ test('bag shows quality and stat comparison, sorts gear first, and equips it', a
   const armor = page.locator('[data-testid="inventory-item"][data-template-id="cloth_armor"]');
   await expect(armor).toHaveCount(1);
   await expect(armor).toHaveAttribute('data-quality', 'common');
+  await expect(armor.locator('.bag-item-meta')).toHaveText('防御 +2');
   await expect(armor.getByTestId('equipment-comparison')).toHaveAttribute(
     'data-comparison',
     '装备后 防御 +2',
@@ -135,6 +140,7 @@ test('bag shows quality and stat comparison, sorts gear first, and equips it', a
     'cloth_armor',
     { timeout: 10_000 },
   );
+  await expect(page.getByTestId('equipment-armor')).toContainText('防御 +2');
   await expect(
     page.locator('[data-testid="inventory-item"][data-template-id="cloth_armor"]'),
   ).toHaveCount(0);
