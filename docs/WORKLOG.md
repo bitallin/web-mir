@@ -3006,6 +3006,7 @@ pnpm build
 pnpm test:e2e
 pnpm verify:invariants
 LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 pnpm load:scenario
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 pnpm load:scenario
 ```
 
 - 格式/lint/类型：通过。
@@ -3014,8 +3015,9 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 pnpm load:scenario
 - 全量 E2E：**39/39 通过**（4.3 分钟，2 worker，独立库/端口）。
 - 任务 E2E：接取 → 3 次击杀 → 回城交付 → 金币 +20、药水 +1、追踪清空。
 - 资产不变量：7 项全部 0 违例。
-- 50 人 × 2 分钟：50/50、接受率 98.8%、145 击杀、0 资产失败；
-  tick p95 4.37ms、p99 6.17ms、资产 p95 59.22ms。
+- 50 人 × 10 分钟正式门禁：50/50、接受率 99.0%、772 击杀、0 资产失败；
+  tick p50 1.85ms / p95 **6.53ms** / p99 9.82ms / max 10.9ms；资产事务
+  p95 59.34ms；RSS 峰值约 306MB。2 分钟 sanity p95 4.37ms。
 - 真实 Chromium（8584）：可接提示 → 守卫面板 → 接取成功；服务端返回
   `quest_slime_cleanup=active`、后续任务 locked。
 
@@ -3034,8 +3036,7 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 pnpm load:scenario
 
 ### 尚未解决
 
-- 50 人 × 10 分钟正式回归未在本切片复跑（2 分钟 sanity 已过）。
-- 8584 人工试玩仍待用户完成；远端 CI 待确认。
+- 8584 完整人工试玩仍待用户完成；远端 CI 待确认。
 - 任务仅 kill 目标、单 NPC 接取/交付、无放弃/日志/每日/组队共享；经验交付
   仍无连续流水（TD-DATA-11）。
 
