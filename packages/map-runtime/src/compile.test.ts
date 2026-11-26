@@ -77,6 +77,8 @@ describe('Tiled map compilation', () => {
     expect(wilds?.pvpMode).toBe('open');
     expect(town?.npcPoints).toHaveLength(2);
     expect(town?.monsterSpawns).toHaveLength(0);
+    // The Tiled sources mark the portal-adjacent spawn point as the respawn.
+    expect(wilds?.respawnPoint).toEqual({ x: 2, y: 16 });
     // 36 spawns stay inside the phase-8 load target of 20–40 per map.
     expect(wilds?.monsterSpawns).toHaveLength(36);
     expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.id)).size).toBe(36);
@@ -118,6 +120,44 @@ describe('Tiled map compilation', () => {
 
     expect(() => compileMapSet([town], options())).toThrow(
       /spawn point 0 tile \(0, 0\) is blocked/,
+    );
+  });
+
+  it('honours a respawn marker, falls back to the first spawn and rejects two markers', () => {
+    const wilds = mutableSource('starter_wilds');
+    const objects = layers(wilds.data).find((layer) => layer.name === 'spawn_points')?.objects;
+    const second = objects?.[1];
+    const third = objects?.[2];
+    if (objects === undefined || second === undefined || third === undefined) {
+      throw new Error('wilds has too few spawn points');
+    }
+
+    for (const object of objects) {
+      object.properties = (object.properties ?? []).filter(
+        (property) => property.name !== 'respawn',
+      );
+    }
+
+    const fallback = compileMapSet([source('starter_town'), wilds], options()).find(
+      (map) => map.mapId === 'starter_wilds',
+    );
+    expect(fallback?.respawnPoint).toEqual(fallback?.spawnPoints[0]);
+
+    second.properties = [
+      ...(second.properties ?? []),
+      { name: 'respawn', type: 'bool', value: true },
+    ];
+    const marked = compileMapSet([source('starter_town'), wilds], options()).find(
+      (map) => map.mapId === 'starter_wilds',
+    );
+    expect(marked?.respawnPoint).toEqual({ x: 3, y: 16 });
+
+    third.properties = [
+      ...(third.properties ?? []),
+      { name: 'respawn', type: 'bool', value: true },
+    ];
+    expect(() => compileMapSet([source('starter_town'), wilds], options())).toThrow(
+      /at most one respawn point/,
     );
   });
 

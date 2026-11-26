@@ -37,6 +37,7 @@ import {
   lootClaimedSchema,
   lootPickupSchema,
   moveToCommandSchema,
+  playerRespawnPointOf,
   sessionTransferSchema,
   shopBuySchema,
   shopCatalogSchema,
@@ -85,6 +86,8 @@ import {
 import {
   AssetError,
   AssetService,
+  type DeathPenaltyInput,
+  type DeathPenaltyOutcome,
   type KillRewardInput,
   type KillRewardOutcome,
   type LoadedAssets,
@@ -324,8 +327,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     });
     this.views = new StateViewPublisher(this.interest, this.state, this.registry);
 
-    const respawnTile = this.map.runtime.manifest.spawnPoints[0];
-    if (respawnTile === undefined) {
+    let respawnTile: TilePoint;
+    try {
+      respawnTile = playerRespawnPointOf(this.map.runtime.manifest);
+    } catch {
       throw new Error(`map "${this.map.mapId}" has no spawn point for combat respawn`);
     }
     this.combat = new CombatWorld({
@@ -1053,8 +1058,6 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       }
     }
 
-    this.recordCombatOutcomes(events);
-
     if (events.length === 0) {
       return;
     }
@@ -1062,6 +1065,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     for (const event of wireEvents) {
       this.broadcastCombatEvent(event);
     }
+    this.recordCombatOutcomes(wireEvents);
     this.metrics.recordCombatEvents(wireEvents.length);
   }
 
@@ -1630,7 +1634,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       for (const event of wireEvents) {
         this.broadcastCombatEvent(event);
       }
-      this.recordCombatOutcomes(result.events);
+      this.recordCombatOutcomes(wireEvents);
       this.metrics.recordCombatCommand();
       this.metrics.recordCombatEvents(wireEvents.length);
       this.notifyTargetChanged(session, 'attacking');
@@ -1739,13 +1743,17 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     for (const event of wireEvents) {
       this.broadcastCombatEvent(event);
     }
-    this.recordCombatOutcomes(result.events);
+    this.recordCombatOutcomes(wireEvents);
     this.metrics.recordCombatCommand();
     this.metrics.recordCombatEvents(wireEvents.length);
     this.metrics.recordAcceptedCommand();
   }
 
-  private recordCombatOutcomes(events: readonly CombatEventPayload[]): void {
+  /**
+   * Wire events carry the `eventId` that makes death costs idempotent, so the
+   * shared post-processing step takes the converted events, not the payloads.
+   */
+  private recordCombatOutcomes(events: readonly CombatEvent[]): void {
     for (const event of events) {
       if (event.kind !== 'death') {
         continue;
@@ -1764,7 +1772,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           ? undefined
           : (this.state.players.get(killerId)?.displayName ??
             this.combat.getMonster(killerId)?.displayName);
-      if (killerId !== undefined && this.state.players.has(killerId)) {
+      const killedByPlayer = killerId !== undefined && this.state.players.has(killerId);
+      if (killedByPlayer) {
         this.metrics.recordPvpKill();
       }
       const reviveSeconds = Math.max(1, Math.ceil((event.reviveInMs ?? 3_000) / 1_000));
@@ -1774,6 +1783,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           ? `${victimName} 倒下了，${String(reviveSeconds)} 秒后复活`
           : `${victimName} 被 ${killerName} 击败，${String(reviveSeconds)} 秒后复活`,
       );
+
+      // PvP deaths stay penalty-free (ADR-021); only a monster kill costs
+      // experience, and only when the room's release carries the rule.
+      const killedByMonster =
+        killerId !== undefined && !killedByPlayer && this.combat.getMonster(killerId) !== undefined;
+      if (killedByMonster) {
+        this.scheduleDeathPenalty(event);
+      }
     }
   }
 
@@ -1792,7 +1809,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (profile === undefined) {
       return;
     }
-    const message: CombatProfile = { characterId: playerId, ...profile };
+    const deathPenalty = this.content.bundle.rules?.deathPenalty;
+    const message: CombatProfile = {
+      characterId: playerId,
+      ...profile,
+      ...(deathPenalty === undefined ? {} : { deathPenalty }),
+    };
     client.send(SERVER_MESSAGES.combatProfile, combatProfileSchema.parse(message));
   }
 
@@ -2134,6 +2156,61 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         await new Promise<void>((resolve) => setTimeout(resolve, 200 * attempt));
       }
     }
+  }
+
+  private scheduleDeathPenalty(event: Extract<CombatEvent, { kind: 'death' }>): void {
+    const input: DeathPenaltyInput = { characterId: event.entityId, deathId: event.eventId };
+    void this.enqueueAsset(() => this.applyDeathPenaltyWithRetry(input)).catch((error: unknown) => {
+      this.metrics.recordAssetFailure();
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, characterId: input.characterId, deathId: input.deathId },
+        'failed to apply death penalty',
+      );
+    });
+  }
+
+  private async applyDeathPenaltyWithRetry(input: DeathPenaltyInput): Promise<void> {
+    for (let attempt = 1; attempt <= REWARD_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        const outcome = await this.assets.applyDeathPenalty(input);
+        if (outcome !== null) {
+          this.applyDeathPenaltyOutcome(input.characterId, outcome);
+        }
+        return;
+      } catch (error) {
+        if (attempt >= REWARD_RETRY_ATTEMPTS) {
+          throw error;
+        }
+        this.options.logger.warn(
+          { err: error, roomId: this.roomId, deathId: input.deathId, attempt },
+          'death penalty transaction failed; retrying',
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 200 * attempt));
+      }
+    }
+  }
+
+  private applyDeathPenaltyOutcome(characterId: string, outcome: DeathPenaltyOutcome): void {
+    if (outcome.xpLost === 0 && !outcome.protectedByLevel) {
+      return;
+    }
+    const sessionId = this.registry.sessionIdForPlayer(characterId);
+    const session = sessionId === undefined ? undefined : this.registry.get(sessionId);
+    if (session === undefined) {
+      // The database is already authoritative; the next join loads it.
+      return;
+    }
+    session.assetSnapshot = outcome.snapshot;
+    if (outcome.xpLost > 0) {
+      this.sendProgress(session, false);
+      this.sendSystemNotice(
+        session.client,
+        'warning',
+        `你损失了 ${String(outcome.xpLost)} 点经验（当前等级进度的一部分）`,
+      );
+      return;
+    }
+    this.sendSystemNotice(session.client, 'info', '新手保护：本次死亡没有损失经验');
   }
 
   private applyKillReward(characterId: string, outcome: KillRewardOutcome): void {

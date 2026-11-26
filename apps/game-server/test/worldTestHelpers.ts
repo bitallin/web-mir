@@ -91,6 +91,8 @@ export type CreateActorOptions = {
   mapId?: string;
   classId?: 'warrior' | 'mage' | 'taoist';
   level?: number;
+  /** Progress inside the current level, used by the death-cost tests. */
+  exp?: number;
   hp?: number;
   mp?: number;
   gold?: number;
@@ -125,7 +127,7 @@ export async function createActor(
     nameNormalized: `${namePrefix.slice(0, 4)}${suffix}`.slice(0, 12).toLowerCase(),
     classId,
     level: options.level ?? 1,
-    exp: 0,
+    exp: options.exp ?? 0,
     hp: options.hp ?? base.baseMaxHp,
     maxHp: base.baseMaxHp,
     mp: options.mp ?? base.baseMaxMp,

@@ -216,6 +216,10 @@
       "y": 10
     }
   ],
+  "respawnPoint": {
+    "x": 17,
+    "y": 10
+  },
   "portals": [
     {
       "id": "town_to_wilds",
@@ -253,5 +257,5 @@
   ],
   "monsterSpawns": [],
   "assetManifestVersion": "alpha0.2.1",
-  "checksum": "fa36a7be9ec2b54e6d4717de2d38ce182e892a743273d446ee8d0dff26aca6f5"
+  "checksum": "dacb92af6cfa2a7e572d940313c5f576315e0a965321dd16c7b0e37c41f490fc"
 }

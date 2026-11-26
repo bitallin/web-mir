@@ -222,3 +222,19 @@
 - 下次：改动地图刷点或怪物模板时，按“编译地图 → 发布含新模板的 Release →
   激活 → 重启/新 Room”的顺序验收；把内容校验错误当作部署门禁，而不是忽略
   启动日志。发布脚本可增加“当前地图刷点引用是否被候选 bundle 覆盖”的预检。
+
+## EL-022：新增内容 section 是 schema 变更，不是一次 JSON 编辑
+
+- 案例：死亡代价需要一条全局规则，最初按“内容加一个可选字段”估算。实际落地
+  涉及：`contentBundleSchema` 根部可选 section、`CONTENT_SECTIONS`/标签、
+  `contentSectionDataSchemas` 与 `ContentSectionData` 类型、运营草稿更新的
+  判别联合（`adminContentDraftUpdateSchema`）、PostgreSQL `content_section`
+  枚举的新值与 expand 迁移，以及 `diff` 把 section 当作 `Record<id, entity>`
+  的假设（`rules` 是单一设置对象，需要显式转成键值视图）。其中枚举与运营契约
+  在编码前并不显眼。
+- 经验：内容 section 在系统里是**schema 级**概念，不是一段自由 JSON。实体映射
+  类 section 与设置类 section 的 diff/编辑语义不同；历史 Release 还要求新
+  section 在 bundle 根部可缺省，否则 checksum 失效（EL-004）。
+- 下次：新增 section 前先列出全部触点（contracts、基线内容、校验、枚举迁移、
+  运营契约、diff/预览、消费方），并判断它是“实体集合”还是“设置对象”；设置类
+  规则优先做成一个可扩展的 `rules` 对象字段，避免每加一条规则就新建 section。

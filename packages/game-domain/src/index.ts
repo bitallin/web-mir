@@ -66,7 +66,13 @@ export type {
 export { MONSTER_LOOT_TABLES, requireLootTable, rollLoot } from './loot';
 export type { LootEntry, LootRoll, LootTable, RolledLootItem } from './loot';
 
-export { MAX_CHARACTER_LEVEL, applyExperience, experienceForNextLevel } from './progression';
+export {
+  MAX_CHARACTER_LEVEL,
+  applyDeathPenalty,
+  applyExperience,
+  experienceForNextLevel,
+} from './progression';
+export type { DeathPenaltyResult } from './progression';
 export type { ExperienceResult } from './progression';
 
 export { createChatFilter, defaultChatFilter } from './social';

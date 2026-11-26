@@ -107,6 +107,11 @@ export const mapRuntimeManifestSchema = z
       })
       .strict(),
     spawnPoints: z.array(tilePointSchema).min(1).max(64),
+    /**
+     * Where defeated players revive. Optional for manifests compiled before
+     * the field existed; the runtime falls back to the first spawn point.
+     */
+    respawnPoint: tilePointSchema.optional(),
     portals: z.array(mapPortalSchema).max(64),
     npcPoints: z.array(mapNpcPointSchema).max(64),
     monsterSpawns: z.array(mapMonsterSpawnSchema).max(128),
@@ -149,6 +154,14 @@ export const mapRuntimeManifestSchema = z
       }
     });
 
+    if (map.respawnPoint !== undefined && !isWalkable(map.respawnPoint)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['respawnPoint'],
+        message: 'respawn point must be inside the map and walkable',
+      });
+    }
+
     map.portals.forEach((portal, index) => {
       if (!isWalkable(portal.tile)) {
         ctx.addIssue({
@@ -186,6 +199,20 @@ export type MapPvpMode = MapRuntimeManifest['pvpMode'];
 
 export function isPvpEnabled(map: Pick<MapRuntimeManifest, 'pvpMode'>): boolean {
   return map.pvpMode === 'open';
+}
+
+/**
+ * The tile where defeated players revive. Manifests compiled before the field
+ * existed keep their old behaviour: the first spawn point.
+ */
+export function playerRespawnPointOf(
+  map: Pick<MapRuntimeManifest, 'respawnPoint' | 'spawnPoints'>,
+): { x: number; y: number } {
+  const point = map.respawnPoint ?? map.spawnPoints[0];
+  if (point === undefined) {
+    throw new Error('map manifest has no spawn point to revive at');
+  }
+  return point;
 }
 
 export function isMapPointInside(

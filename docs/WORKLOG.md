@@ -2266,3 +2266,113 @@ pnpm test:e2e
 
 - ≤860px 移动端布局未做（不在 MVP 范围）。
 - 完整 HUD 重排（对比度、字号、分组）仍属 S4。
+
+---
+
+## 2026-11-26 S3 任务 2：死亡代价与复活点内容化
+
+### 本次任务目标
+
+S3 第一切片让野外“可反应”，但死亡仍然免费。本切片让被怪物击败付出可感知、
+不摧毁进度的代价（当前等级经验的 10%，不降级，10 级前保护），规则进入内容
+Release 可由运营调整，复活点由 Tiled 地图显式标记。PvP 死亡维持无惩罚
+（ADR-021）。
+
+### 实际改动
+
+1. **契约（加法）**
+   - 内容 bundle 新增可选 `rules` section 与 `deathPenaltyRuleSchema`
+     （`xpLossPermille` 0–1000、`protectBelowLevel` 1–100）。
+   - `combat.profile` 增加可选 `deathPenalty`，客户端据此展示规则。
+   - 编译地图 manifest 增加可选 `respawnPoint` 与 `playerRespawnPointOf()`。
+2. **内容与校验**
+   - 基线规则 10% / 10 级保护；校验 warning 覆盖无保护、关闭代价与过严配置。
+   - 迁移 `0006` 为 `content_section` 枚举增加 `rules`（expand-only）。
+   - 运营草稿更新联合类型增加 `rules` 分支；内容 diff 把 section 统一视作
+     键值映射，兼容设置类 section。
+3. **领域**
+   - `applyDeathPenalty(level, exp, rule)` 纯函数：按当前等级内进度扣千分比，
+     最低 0、等级不变；保护等级/关闭规则/0 经验不扣。
+4. **应用事务**
+   - `AssetService.applyDeathPenalty`：先锁角色行、再写
+     `asset_commands(kind='death_penalty', death:<eventId>)`；只更新 `exp` 与
+     `version`；重复死亡 ID 返回 `null`；无规则直接返回且不写行。
+5. **服务端**
+   - 战斗结果记录改用带 `eventId` 的线缆事件，命令死亡与 tick 死亡统一。
+   - PvE 死亡入队扣减（与击杀奖励同一串行队列，3 次重试）；PvP 不扣。
+   - 提交后更新会话快照、发送 `character.progress`，并向本人发送实际损失
+     （warning Toast）或新手保护提示（info）；断线时以数据库为准。
+   - 复活点改用 `playerRespawnPointOf(manifest)`。
+6. **客户端**
+   - 角色面板“经验”下方新增“死亡代价”：`-10% 经验 · 10 级前保护`；
+     无规则/关闭时显示“无”。行位置保证 1280×720 无需滚动可见。
+7. **地图与复活点**
+   - `starter_town`（17,10）与 `starter_wilds`（2,16）出生点标记
+     `respawn: true`；编译器至多接受一个标记，未标记回退第一个出生点；
+     两图重新编译。
+8. **文档与证据**
+   - ADR-031、切片报告、EL-022、TD-DATA-11、执行计划/路线图/状态更新。
+   - 证据目录 `docs/phase-reports/alpha-02/death/`。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm db:migrate
+pnpm verify:invariants
+pnpm exec vitest run apps/game-server/test/combat.integration.test.ts -t "experience" --reporter=verbose
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：66 文件、**424 测试**通过（新增 14 条）。
+- 构建：4 个应用成功。
+- 全量 E2E：**31/31 通过**（3.6 分钟，2 worker，独立数据库与端口）。
+- 死亡扣减集成：2/2 通过（扣 200 → 180 且等级不变；5 级保护不扣），日志见
+  `docs/phase-reports/alpha-02/death/death-penalty-test.log`。
+- 资产不变量：全部 0 违例（`death/invariants.txt`）。
+- 迁移：`0006_busy_ravenous.sql` 已应用到开发库。
+- 内容：发布并激活 `2026.11.26.4`（checksum `7f6c6914…`）；Game Server
+  12:53 刷新。
+- 开发栈：12:52 重启到最终代码；真实 Chromium 在 1280×720 打开角色面板，
+  显示 `-10% 经验 · 10 级前保护`（`death/dev-death-rule.png`）。
+- 容量回归：50/50 加入、接受率 99.0%、787 击杀、0 玩家死亡、0 资产失败；
+  tick p50 1.34ms / p95 11.58ms / p99 14.89ms（仍高于 10ms 目标，比上轮
+  12.17ms 略低）；资产事务 p95 46.37ms、RSS 峰值 317MB；房间内容版本
+  `2026.11.26.4`。证据
+  `docs/phase-reports/alpha-02/load-50p10a-10min-s3-death.json`。
+
+### 遇到的问题及解决方法
+
+1. **新增内容 section 的横切成本**：`content_section` 是 PostgreSQL 枚举，
+   运营草稿契约是判别联合，diff 默认 section 是 `Record<id, entity>`。
+   逐项补齐并写迁移 `0006`；`rules` 在 bundle 根部可缺省以保持历史 checksum。
+   沉淀 EL-022。
+2. **规则行首次被角色面板裁剪**：第一版把“死亡代价”放在“复活”前，1280×720
+   截图只能看到到“武器/护甲”。移到“经验”下方并缩短文案，重新截图确认可见。
+3. **可选 section 的泛型访问器类型失败**：`contentSectionOf`/`sectionData`
+   以泛型 K 索引 bundle 时无法与 `ContentSectionData[K]` 对齐；改为按
+   `ContentSection` 联合返回，调用方本就只有内部工具。
+4. **PvP 免扣测试需要可观察差异**：被击杀者改为 10 级、200 经验、1 生命，
+   一击致死；在复活完成后断言经验仍为 200 且没有 `death_penalty` 行
+   （该房间资产队列空闲，若误扣会在 1.5 秒复活窗口内完成）。
+5. **全量 E2E 一次偶发失败**：最终全量首次运行时 `classes.spec.ts` 的战士普攻
+   用例等待怪物进入 `attack` 超时（怪物 chase → return → patrol）；单跑 5/5、
+   全量复跑 31/31 通过。属共享世界实体的测试前置条件问题（EL-019 同类），
+   记为 TD-QA-11；本切片没有改动怪物 AI 或攻击路径。
+
+### 尚未解决
+
+- 8584 未实际制造一次死亡（面板规则已实测；扣减由真实 PostgreSQL 集成测试
+  覆盖）。
+- 远端 CI 仍待确认。
+- 经验无连续流水（TD-DATA-11）。
+
+### 下一步计划
+
+1. 8584 试玩死亡代价与新手保护。
+2. 进入 S4：装备/掉落/背包与正式美术。

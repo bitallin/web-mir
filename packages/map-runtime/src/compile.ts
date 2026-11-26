@@ -11,6 +11,7 @@ import {
 
 import { mapChecksum, type ManifestFingerprint } from './checksum';
 import {
+  tiledBooleanProperty,
   tiledIntegerProperty,
   tiledMapSchema,
   tiledStringProperty,
@@ -224,6 +225,24 @@ function compileSingle(source: MapSource, options: MapCompileOptions): MapRuntim
   }
   const spawnPoints = spawnLayer.objects.map((object) => objectTile(map, source.name, object));
 
+  // A Tiled designer marks the tile defeated players revive at with the
+  // boolean property `respawn`. Older maps without a marker keep the previous
+  // behaviour: the first spawn point.
+  let markedRespawn: TilePoint | undefined;
+  spawnLayer.objects.forEach((object, index) => {
+    if (tiledBooleanProperty(object, 'respawn') !== true) {
+      return;
+    }
+    if (markedRespawn !== undefined) {
+      throw new MapCompileError(source.name, 'spawn_points may mark at most one respawn point');
+    }
+    markedRespawn = spawnPoints[index];
+  });
+  const respawnPoint = markedRespawn ?? spawnPoints[0];
+  if (respawnPoint === undefined) {
+    throw new MapCompileError(source.name, 'spawn_points must contain at least one point');
+  }
+
   const portalLayer = optionalObjectLayer(map, 'portals');
   const portals: MapPortal[] = (portalLayer?.objects ?? []).map((object) => {
     const id = tiledStringProperty(object, 'portalId');
@@ -339,6 +358,7 @@ function compileSingle(source: MapSource, options: MapCompileOptions): MapRuntim
       collision,
     },
     spawnPoints,
+    respawnPoint,
     portals,
     npcPoints,
     monsterSpawns,

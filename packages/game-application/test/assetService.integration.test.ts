@@ -8,6 +8,7 @@ import {
   requireItem,
 } from '@web-legend/game-domain';
 import {
+  assetCommands,
   characters,
   createDatabase,
   currencyLedger,
@@ -207,6 +208,58 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     const [stored] = await db.select().from(characters).where(eq(characters.id, character.id));
     expect(stored?.level).toBe(2);
     expect(stored?.hp).toBe(levelTwo.maxHp);
+  });
+
+  it('deducts the content death share once per death id (ADR-031)', async () => {
+    const character = await createCharacter(db, 'warrior', { level: 12, exp: 300 });
+    const deathId = randomUUID();
+
+    const outcome = await service.applyDeathPenalty({ characterId: character.id, deathId });
+    expect(outcome?.xpLost).toBe(30);
+    expect(outcome?.protectedByLevel).toBe(false);
+    expect(outcome?.snapshot.level).toBe(12);
+    expect(outcome?.snapshot.exp).toBe(270);
+
+    expect(await service.applyDeathPenalty({ characterId: character.id, deathId })).toBeNull();
+
+    const [stored] = await db.select().from(characters).where(eq(characters.id, character.id));
+    expect(stored?.level).toBe(12);
+    expect(stored?.exp).toBe(270);
+    const commands = await db
+      .select()
+      .from(assetCommands)
+      .where(
+        and(eq(assetCommands.characterId, character.id), eq(assetCommands.kind, 'death_penalty')),
+      );
+    expect(commands).toHaveLength(1);
+  });
+
+  it('protects characters below the content threshold from a death cost', async () => {
+    const character = await createCharacter(db, 'warrior', { level: 9, exp: 120 });
+
+    const outcome = await service.applyDeathPenalty({
+      characterId: character.id,
+      deathId: randomUUID(),
+    });
+    expect(outcome?.xpLost).toBe(0);
+    expect(outcome?.protectedByLevel).toBe(true);
+    expect(outcome?.snapshot.exp).toBe(120);
+
+    const [stored] = await db.select().from(characters).where(eq(characters.id, character.id));
+    expect(stored?.exp).toBe(120);
+  });
+
+  it('keeps releases without a rules section death-free', async () => {
+    const legacyContent = { ...DEFAULT_CONTENT_BUNDLE };
+    delete legacyContent.rules;
+    const legacy = new AssetService(db, { now: () => clock, rng: () => 0, content: legacyContent });
+    const character = await createCharacter(db, 'warrior', { level: 12, exp: 300 });
+
+    expect(
+      await legacy.applyDeathPenalty({ characterId: character.id, deathId: randomUUID() }),
+    ).toBeNull();
+    const [stored] = await db.select().from(characters).where(eq(characters.id, character.id));
+    expect(stored?.exp).toBe(300);
   });
 
   it('persists equipment-adjusted maxima after a kill (TD-DATA-01)', async () => {

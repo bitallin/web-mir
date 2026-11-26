@@ -4,6 +4,8 @@ export type {
   AssetCommandOutcome,
   AssetServiceOptions,
   BuyInput,
+  DeathPenaltyInput,
+  DeathPenaltyOutcome,
   EquipInput,
   KillRewardInput,
   KillRewardOutcome,

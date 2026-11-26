@@ -16,11 +16,13 @@ import {
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
 import { createLogger } from '@web-legend/observability';
 import {
+  assetCommands,
   createDatabase,
   findCharacterById,
   type Database,
   type DatabaseHandle,
 } from '@web-legend/persistence';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { GameServerEnv } from '../src/env';
@@ -253,7 +255,9 @@ describe.runIf(databaseUrl !== undefined)('world_map player combat and chat', ()
 
   it('allows wilds pvp, broadcasts the kill, revives and grants no reward', async () => {
     const alice = await actor(STARTER_WILDS_MAP_ID, { x: 12, y: 12 });
-    const bob = await actor(STARTER_WILDS_MAP_ID, { x: 13, y: 12 }, { hp: 10 });
+    // Level 10 with 200 experience makes any wrongly-applied PvE death cost
+    // visible; PvP deaths must stay penalty-free (ADR-021).
+    const bob = await actor(STARTER_WILDS_MAP_ID, { x: 13, y: 12 }, { hp: 1, level: 10, exp: 200 });
     const aliceRoom = await createWorld(STARTER_WILDS_MAP_ID, alice.ticket);
     const bobRoom = await joinWorld(aliceRoom.roomId, bob.ticket);
 
@@ -324,6 +328,22 @@ describe.runIf(databaseUrl !== undefined)('world_map player combat and chat', ()
 
     const aliceAfter = await findCharacterById(db, alice.character.id);
     expect(aliceAfter?.exp).toBe(aliceBefore?.exp);
+
+    // The asset queue is otherwise idle here, so a PvE-style death penalty
+    // would have committed long before the 1.5s respawn completed.
+    const bobAfter = await findCharacterById(db, bob.character.id);
+    expect(bobAfter?.level).toBe(10);
+    expect(bobAfter?.exp).toBe(200);
+    const penaltyCommands = await db
+      .select()
+      .from(assetCommands)
+      .where(
+        and(
+          eq(assetCommands.characterId, bob.character.id),
+          eq(assetCommands.kind, 'death_penalty'),
+        ),
+      );
+    expect(penaltyCommands).toHaveLength(0);
     expect(
       aliceEvents.some((event) => event.kind === 'death' && event.entityType === 'monster'),
     ).toBe(false);

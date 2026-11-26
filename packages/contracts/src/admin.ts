@@ -593,6 +593,13 @@ export const adminContentDraftUpdateSchema = z.discriminatedUnion('section', [
       reason: adminReasonSchema,
     })
     .strict(),
+  z
+    .object({
+      section: z.literal('rules'),
+      payload: z.record(z.string(), z.unknown()),
+      reason: adminReasonSchema,
+    })
+    .strict(),
 ]);
 
 export type AdminContentDraftUpdate = z.infer<typeof adminContentDraftUpdateSchema>;

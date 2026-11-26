@@ -86,3 +86,8 @@ export function tiledIntegerProperty(object: TiledObject, name: string): number 
   const value = tiledPropertyValue(object, name);
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
 }
+
+export function tiledBooleanProperty(object: TiledObject, name: string): boolean | undefined {
+  const value = tiledPropertyValue(object, name);
+  return typeof value === 'boolean' ? value : undefined;
+}

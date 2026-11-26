@@ -5711,6 +5711,11 @@
               "name": "tileY",
               "type": "int",
               "value": 16
+            },
+            {
+              "name": "respawn",
+              "type": "bool",
+              "value": true
             }
           ],
           "rotation": 0,

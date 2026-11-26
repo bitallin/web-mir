@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { MAX_CHARACTER_LEVEL, applyExperience, experienceForNextLevel } from './progression';
+import {
+  MAX_CHARACTER_LEVEL,
+  applyDeathPenalty,
+  applyExperience,
+  experienceForNextLevel,
+} from './progression';
 
 describe('experience progression', () => {
   it('uses a rising threshold and stops at the level cap', () => {
@@ -31,5 +36,38 @@ describe('experience progression', () => {
   it('rejects invalid input', () => {
     expect(() => applyExperience(1, -1, 5)).toThrow(RangeError);
     expect(() => applyExperience(1, 0, -5)).toThrow(RangeError);
+  });
+});
+
+describe('death penalty', () => {
+  const rule = { xpLossPermille: 100, protectBelowLevel: 10 };
+
+  it('takes a share of the progress inside the current level', () => {
+    expect(applyDeathPenalty(10, 200, rule)).toEqual({ level: 10, exp: 180, lost: 20 });
+    expect(applyDeathPenalty(12, 75, rule)).toEqual({ level: 12, exp: 68, lost: 7 });
+  });
+
+  it('never delevels or goes negative', () => {
+    expect(applyDeathPenalty(20, 5, { xpLossPermille: 1_000, protectBelowLevel: 1 })).toEqual({
+      level: 20,
+      exp: 0,
+      lost: 5,
+    });
+    expect(applyDeathPenalty(20, 0, rule)).toEqual({ level: 20, exp: 0, lost: 0 });
+  });
+
+  it('protects characters below the content threshold', () => {
+    expect(applyDeathPenalty(9, 200, rule)).toEqual({ level: 9, exp: 200, lost: 0 });
+    expect(applyDeathPenalty(10, 200, rule).lost).toBe(20);
+  });
+
+  it('honours a disabled penalty and rejects invalid progress', () => {
+    expect(applyDeathPenalty(15, 200, { xpLossPermille: 0, protectBelowLevel: 1 })).toEqual({
+      level: 15,
+      exp: 200,
+      lost: 0,
+    });
+    expect(() => applyDeathPenalty(15, -1, rule)).toThrow(RangeError);
+    expect(() => applyDeathPenalty(0, 10, rule)).toThrow(RangeError);
   });
 });

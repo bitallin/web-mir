@@ -11,15 +11,24 @@ import {
   combatTargetChangedSchema,
   commandRejectedSchema,
   chatMessageSchema,
+  systemNoticeSchema,
   worldRoomNameFor,
   type CombatEvent,
   type CombatProfile,
   type CombatTargetChanged,
   type CommandRejected,
+  type SystemNotice,
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
 import { createLogger } from '@web-legend/observability';
-import { createDatabase, type Database, type DatabaseHandle } from '@web-legend/persistence';
+import {
+  assetCommands,
+  characters,
+  createDatabase,
+  type Database,
+  type DatabaseHandle,
+} from '@web-legend/persistence';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { GameServerEnv } from '../src/env';
@@ -556,6 +565,82 @@ describe.runIf(databaseUrl !== undefined)('world_map combat', () => {
     expect(revived?.hp).toBe(120);
     expect(Math.floor((revived?.x ?? 0) / 1_000)).toBe(2);
     expect(Math.floor((revived?.y ?? 0) / 1_000)).toBe(16);
+  });
+
+  it('charges a monster-kill death against experience without deleveling (ADR-031)', async () => {
+    const actor = await wildsActor({
+      position: tileUnits({ x: 8, y: 15 }),
+      hp: 1,
+      level: 10,
+      exp: 200,
+    });
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+    const notices: SystemNotice[] = [];
+    room.onMessage('system.notice', (payload: unknown) => {
+      notices.push(systemNoticeSchema.parse(payload));
+    });
+
+    await waitUntil(
+      () => events.some((event) => event.kind === 'death' && event.entityId === actor.character.id),
+      10_000,
+      'player death',
+    );
+    await waitUntil(
+      () => notices.some((notice) => notice.message.includes('损失了 20 点经验')),
+      5_000,
+      'death penalty notice',
+    );
+
+    const [stored] = await db
+      .select()
+      .from(characters)
+      .where(eq(characters.id, actor.character.id));
+    // 10% of the 200 progress inside level 10, and the level itself survives.
+    expect(stored?.level).toBe(10);
+    expect(stored?.exp).toBe(180);
+    const commands = await db
+      .select()
+      .from(assetCommands)
+      .where(
+        and(
+          eq(assetCommands.characterId, actor.character.id),
+          eq(assetCommands.kind, 'death_penalty'),
+        ),
+      );
+    expect(commands).toHaveLength(1);
+  });
+
+  it('does not charge experience below the protection level', async () => {
+    const actor = await wildsActor({
+      position: tileUnits({ x: 8, y: 15 }),
+      hp: 1,
+      level: 5,
+      exp: 120,
+    });
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+    const notices: SystemNotice[] = [];
+    room.onMessage('system.notice', (payload: unknown) => {
+      notices.push(systemNoticeSchema.parse(payload));
+    });
+
+    await waitUntil(
+      () => events.some((event) => event.kind === 'death' && event.entityId === actor.character.id),
+      10_000,
+      'player death',
+    );
+    await waitUntil(
+      () => notices.some((notice) => notice.message.includes('新手保护')),
+      5_000,
+      'protection notice',
+    );
+
+    const [stored] = await db
+      .select()
+      .from(characters)
+      .where(eq(characters.id, actor.character.id));
+    expect(stored?.exp).toBe(120);
   });
 
   it('approaches and kills a locked target with one engage command (TD-CLI-01)', async () => {

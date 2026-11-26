@@ -11,7 +11,14 @@ import { equipmentSlotSchema, itemKindSchema } from './economy';
 
 export const CONTENT_SCHEMA_VERSION = 1 as const;
 
-export const CONTENT_SECTIONS = ['classes', 'skills', 'monsters', 'items', 'lootTables'] as const;
+export const CONTENT_SECTIONS = [
+  'classes',
+  'skills',
+  'monsters',
+  'items',
+  'lootTables',
+  'rules',
+] as const;
 export const contentSectionSchema = z.enum(CONTENT_SECTIONS);
 export type ContentSection = z.infer<typeof contentSectionSchema>;
 
@@ -21,6 +28,7 @@ export const CONTENT_SECTION_LABELS: Record<ContentSection, string> = {
   monsters: '怪物',
   items: '物品',
   lootTables: '掉落表',
+  rules: '全局规则',
 };
 
 export const CONTENT_ID_PATTERN = /^[a-z][a-z0-9_]{0,47}$/u;
@@ -218,6 +226,33 @@ export const lootTableSchema = z
 
 export type LootTableContent = z.infer<typeof lootTableSchema>;
 
+/**
+ * Player death is the only experience sink. The rule lives in content so the
+ * combined protection threshold and loss share can be tuned without a code
+ * deploy; historical releases without the section keep death penalty-free.
+ */
+export const deathPenaltyRuleSchema = z
+  .object({
+    /**
+     * Share of the experience progress inside the current level that is lost,
+     * in per-mille. 0 disables the penalty; 1000 would erase all progress.
+     */
+    xpLossPermille: z.number().int().min(0).max(1_000),
+    /** Characters below this level lose nothing when a monster kills them. */
+    protectBelowLevel: z.number().int().min(1).max(100),
+  })
+  .strict();
+
+export type DeathPenaltyRule = z.infer<typeof deathPenaltyRuleSchema>;
+
+export const rulesContentSchema = z
+  .object({
+    deathPenalty: deathPenaltyRuleSchema.optional(),
+  })
+  .strict();
+
+export type RulesContent = z.infer<typeof rulesContentSchema>;
+
 const classesSectionSchema = z.record(characterClassSchema, classContentSchema);
 const skillsSectionSchema = z.record(contentIdSchema, skillContentSchema);
 const monstersSectionSchema = z.record(contentIdSchema, monsterContentSchema);
@@ -230,6 +265,7 @@ export const contentSectionDataSchemas = {
   monsters: monstersSectionSchema,
   items: itemsSectionSchema,
   lootTables: lootTablesSectionSchema,
+  rules: rulesContentSchema,
 } as const;
 
 export type ContentSectionData = {
@@ -238,6 +274,7 @@ export type ContentSectionData = {
   monsters: Record<string, MonsterContent>;
   items: Record<string, ItemContent>;
   lootTables: Record<string, LootTableContent>;
+  rules: RulesContent;
 };
 
 export const contentBundleSchema = z
@@ -248,15 +285,21 @@ export const contentBundleSchema = z
     monsters: monstersSectionSchema,
     items: itemsSectionSchema,
     lootTables: lootTablesSectionSchema,
+    /** Optional for releases published before the section existed (EL-004). */
+    rules: rulesContentSchema.optional(),
   })
   .strict();
 
 export type ContentBundle = z.infer<typeof contentBundleSchema>;
 
-export function contentSectionOf<K extends ContentSection>(
+/**
+ * Returns one section's data. `rules` is optional on releases published before
+ * the section existed, so the result may be undefined (EL-004).
+ */
+export function contentSectionOf(
   bundle: ContentBundle,
-  section: K,
-): ContentSectionData[K] {
+  section: ContentSection,
+): ContentSectionData[ContentSection] | undefined {
   return bundle[section];
 }
 

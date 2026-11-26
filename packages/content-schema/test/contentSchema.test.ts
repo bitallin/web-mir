@@ -36,6 +36,7 @@ describe('base content bundle', () => {
       items: BASE_CONTENT_BUNDLE.items,
       monsters: BASE_CONTENT_BUNDLE.monsters,
       skills: BASE_CONTENT_BUNDLE.skills,
+      rules: BASE_CONTENT_BUNDLE.rules,
       classes: {
         taoist: BASE_CONTENT_BUNDLE.classes.taoist,
         mage: BASE_CONTENT_BUNDLE.classes.mage,
@@ -205,6 +206,60 @@ describe('content validation', () => {
     expect(monsters['venom_spider']?.attackRangeTiles).toBeGreaterThan(2);
     expect(monsters['stone_guard']?.moveSpeedUnitsPerSecond).toBeLessThan(
       monsters['wild_slime']?.moveSpeedUnitsPerSecond ?? 0,
+    );
+  });
+
+  it('ships a content-driven death penalty with new-player protection', () => {
+    expect(BASE_CONTENT_BUNDLE.rules?.deathPenalty).toEqual({
+      xpLossPermille: 100,
+      protectBelowLevel: 10,
+    });
+  });
+
+  it('keeps releases without a rules section death-free (EL-004)', () => {
+    const legacy = clone(BASE_CONTENT_BUNDLE);
+    delete legacy.rules;
+    const result = validateContentBundle(legacy);
+    expect(result.valid).toBe(true);
+    expect(result.bundle?.rules).toBeUndefined();
+    if (result.bundle === null) {
+      return;
+    }
+    expect(contentChecksum(result.bundle)).toBe(contentChecksum(legacy));
+  });
+
+  it('rejects out-of-range death penalty values', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        bundle.rules = { deathPenalty: { xpLossPermille: 1_001, protectBelowLevel: 0 } };
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.path.startsWith('rules.deathPenalty'))).toBe(true);
+  });
+
+  it('warns when a death penalty would be harsh or disabled', () => {
+    const harsh = validateContentBundle(
+      withMutation((bundle) => {
+        bundle.rules = { deathPenalty: { xpLossPermille: 400, protectBelowLevel: 1 } };
+      }),
+    );
+    expect(harsh.valid).toBe(true);
+    expect(
+      harsh.issues
+        .filter((issue) => issue.path.startsWith('rules.deathPenalty'))
+        .map((issue) => issue.path)
+        .sort(),
+    ).toEqual(['rules.deathPenalty.protectBelowLevel', 'rules.deathPenalty.xpLossPermille']);
+
+    const disabled = validateContentBundle(
+      withMutation((bundle) => {
+        bundle.rules = { deathPenalty: { xpLossPermille: 0, protectBelowLevel: 10 } };
+      }),
+    );
+    expect(disabled.valid).toBe(true);
+    expect(disabled.issues.some((issue) => issue.message.includes('死亡不产生成长代价'))).toBe(
+      true,
     );
   });
 

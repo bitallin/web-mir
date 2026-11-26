@@ -546,6 +546,12 @@ const RAW_BASE_CONTENT = {
       ],
     },
   },
+  rules: {
+    deathPenalty: {
+      xpLossPermille: 100,
+      protectBelowLevel: 10,
+    },
+  },
 };
 
 export const BASE_CONTENT_BUNDLE: ContentBundle = contentBundleSchema.parse(RAW_BASE_CONTENT);

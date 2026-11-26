@@ -274,6 +274,10 @@ test('minimap, character panel and filtered chat work in the world', async ({ br
   await expect(panel).toBeVisible();
   await expect(panel).toContainText('安全区');
   await expect(alice.page.getByTestId('character-level')).not.toHaveText('');
+  // The death-cost rule travels with the room's content release, so the UI
+  // must describe the release's numbers rather than hardcoded copy.
+  await expect(alice.page.getByTestId('death-penalty')).toContainText('10%');
+  await expect(alice.page.getByTestId('death-penalty')).toContainText('10 级前保护');
 
   await alice.page.getByTestId('chat-input').fill('访问 www.example.com 领取奖励');
   await alice.page.getByTestId('chat-send').click();

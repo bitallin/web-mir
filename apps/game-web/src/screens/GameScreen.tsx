@@ -49,6 +49,17 @@ function expPercent(exp: number, expToNextLevel: number): number {
   return Math.max(0, Math.min(100, Math.round((exp / expToNextLevel) * 100)));
 }
 
+function describeDeathPenalty(
+  rule: { xpLossPermille: number; protectBelowLevel: number } | null,
+): string {
+  if (rule === null || rule.xpLossPermille === 0) {
+    return '无';
+  }
+  const percent = rule.xpLossPermille / 10;
+  const label = Number.isInteger(percent) ? String(percent) : percent.toFixed(1);
+  return `-${label}% 经验 · ${String(rule.protectBelowLevel)} 级前保护`;
+}
+
 function describeShopOffer(offer: ShopOffer): string {
   if (offer.kind === 'weapon') {
     return `+${String(offer.attackBonus)} 攻击`;
@@ -192,6 +203,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   );
   const reviveSeconds =
     state.reviveAt === null ? null : Math.max(0, Math.ceil((state.reviveAt - now) / 1_000));
+  const deathPenaltyLabel = describeDeathPenalty(state.combatProfile?.deathPenalty ?? null);
   const autoAttack = state.autoAttack?.autoAttack === true ? state.autoAttack : null;
   const autoTargetId = autoAttack?.targetId ?? null;
   const autoRemainingMs = autoAttack === null ? 0 : Math.max(0, autoAttack.nextAttackAt - now);
@@ -1102,6 +1114,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               <dd>
                 {exp}/{expToNextLevel}
               </dd>
+            </div>
+            <div>
+              <dt>死亡代价</dt>
+              <dd data-testid="death-penalty">{deathPenaltyLabel}</dd>
             </div>
             <div>
               <dt>金币</dt>

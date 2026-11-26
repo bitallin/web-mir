@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { deathPenaltyRuleSchema } from './content';
+
 /**
  * Combat wire contract shared by the game server and the browser. The browser
  * submits intent only (which target, which skill); every number in a
@@ -189,6 +191,11 @@ export const combatProfileSchema = z
     pvpEnabled: z.boolean(),
     /** Time from death to automatic revival at the map's respawn point. */
     reviveMs: z.number().int().nonnegative(),
+    /**
+     * The room's release death-cost rule, so the browser can explain it before
+     * it happens. Absent when the release predates the rule.
+     */
+    deathPenalty: deathPenaltyRuleSchema.optional(),
     hp: z.number().int().nonnegative(),
     maxHp: z.number().int().positive(),
     mp: z.number().int().nonnegative(),

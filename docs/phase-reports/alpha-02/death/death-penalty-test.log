@@ -1,0 +1,40 @@
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - import "./packages/persistence/test/testDatabaseNaming" without a file extension (vitest.config.ts:9:8). Add the file extension
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.1.1 /data/nlp/ligen/web-mir
+
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > exposes nearby monsters with a class combat profile
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > spends mana for skills and rejects forged or wrong-protocol commands
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > replays a duplicate command id without rolling a second hit
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > keeps one authoritative monster hp for two attackers
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > lets a monster chase and damage a player
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > kills a monster and respawns it at the same spawn point
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > respawns a defeated player at the map spawn point
+stderr | apps/game-server/test/combat.integration.test.ts > world_map combat > charges a monster-kill death against experience without deleveling (ADR-031)
+@colyseus/sdk: onMessage() not registered for type 'combat.profile'.
+@colyseus/sdk: onMessage() not registered for type 'inventory.snapshot'.
+@colyseus/sdk: onMessage() not registered for type 'shop.catalog'.
+
+stderr | apps/game-server/test/combat.integration.test.ts > world_map combat > charges a monster-kill death against experience without deleveling (ADR-031)
+@colyseus/sdk: onMessage() not registered for type 'character.progress'.
+
+stderr | apps/game-server/test/combat.integration.test.ts > world_map combat > does not charge experience below the protection level
+@colyseus/sdk: onMessage() not registered for type 'combat.profile'.
+@colyseus/sdk: onMessage() not registered for type 'inventory.snapshot'.
+@colyseus/sdk: onMessage() not registered for type 'shop.catalog'.
+
+ ✓ apps/game-server/test/combat.integration.test.ts > world_map combat > charges a monster-kill death against experience without deleveling (ADR-031) 146ms
+ ✓ apps/game-server/test/combat.integration.test.ts > world_map combat > does not charge experience below the protection level 81ms
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > approaches and kills a locked target with one engage command (TD-CLI-01)
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > runs independent auto-attack loops for two players at once
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > does not leak combat events to players outside the AOI (TD-SRV-02)
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > delivers heal events only to the caster and healed player (TD-SRV-02)
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > unlocks level-5 skills and broadcasts damage-over-time ticks
+ ↓ apps/game-server/test/combat.integration.test.ts > world_map combat > grants a shield that absorbs monster damage before HP
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 13 skipped (15)
+   Start at  12:55:04
+   Duration  2.37s (import 65%, tests 20%, transform 14%)
+

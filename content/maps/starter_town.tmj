@@ -4879,6 +4879,11 @@
               "name": "tileY",
               "type": "int",
               "value": 10
+            },
+            {
+              "name": "respawn",
+              "type": "bool",
+              "value": true
             }
           ],
           "rotation": 0,

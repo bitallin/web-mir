@@ -22,10 +22,10 @@ export function composeContentBundle(base: ContentBundle, drafts: DraftSections)
   return candidate;
 }
 
-export function sectionData<K extends ContentSection>(
+export function sectionData(
   bundle: ContentBundle,
-  section: K,
-): ContentSectionData[K] {
+  section: ContentSection,
+): ContentSectionData[ContentSection] | undefined {
   return bundle[section];
 }
 

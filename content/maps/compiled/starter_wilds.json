@@ -228,6 +228,10 @@
       "y": 17
     }
   ],
+  "respawnPoint": {
+    "x": 2,
+    "y": 16
+  },
   "portals": [
     {
       "id": "wilds_to_town",
@@ -535,5 +539,5 @@
     }
   ],
   "assetManifestVersion": "alpha0.2.1",
-  "checksum": "7226c330c5cbb6c1b2f59c98de210289a48d479edd717e5c1e90501380c74d13"
+  "checksum": "bf881ab5fa4480b32c841059af0e8b2b4bc2c69690cb48ffee127f1bfd656b84"
 }

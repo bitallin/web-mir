@@ -272,6 +272,36 @@ function validateMaps(bundle: ContentBundle, issues: ContentIssue[]): void {
   }
 }
 
+function validateRules(bundle: ContentBundle, issues: ContentIssue[]): void {
+  const rule = bundle.rules?.deathPenalty;
+  if (rule === undefined) {
+    return;
+  }
+  if (rule.protectBelowLevel < 2) {
+    issue(
+      issues,
+      'warning',
+      'rules.deathPenalty.protectBelowLevel',
+      '保护阈值低于 2 级时 1 级玩家也会损失经验',
+    );
+  }
+  if (rule.xpLossPermille === 0) {
+    issue(
+      issues,
+      'warning',
+      'rules.deathPenalty.xpLossPermille',
+      '死亡经验损失为 0，死亡不产生成长代价',
+    );
+  } else if (rule.xpLossPermille > 300) {
+    issue(
+      issues,
+      'warning',
+      'rules.deathPenalty.xpLossPermille',
+      '单次死亡损失超过当前等级经验的 30%，可能让低等级玩家挫败',
+    );
+  }
+}
+
 /**
  * Schema and semantic validation. The returned bundle is present whenever the
  * JSON shape is valid, even if semantic errors remain, so the admin UI can
@@ -294,6 +324,7 @@ export function validateContentBundle(input: unknown): ContentValidationResult {
   validateMonsters(parsed.data, issues);
   validateItems(parsed.data, issues);
   validateLootTables(parsed.data, issues);
+  validateRules(parsed.data, issues);
   validateMaps(parsed.data, issues);
 
   return {

@@ -28,6 +28,11 @@ function jsonForDiff(value: unknown): string {
   return value === undefined ? 'undefined' : canonicalJson(value);
 }
 
+/** Sections are entity maps except `rules`, which is a map of rule names. */
+function sectionRecord(section: unknown): RecordLike {
+  return isRecord(section) ? section : {};
+}
+
 function changedFields(before: RecordLike, after: RecordLike): string[] {
   const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...keys].filter((key) => jsonForDiff(before[key]) !== jsonForDiff(after[key])).sort();
@@ -45,12 +50,12 @@ export function diffContentBundles(
   const changes: ContentChange[] = [];
 
   for (const section of CONTENT_SECTIONS) {
-    const beforeSection = before?.[section] ?? {};
-    const afterSection = after[section];
+    const beforeSection = sectionRecord(before?.[section]);
+    const afterSection = sectionRecord(after[section]);
     const ids = new Set([...Object.keys(beforeSection), ...Object.keys(afterSection)]);
     for (const id of [...ids].sort()) {
-      const beforeEntry = (beforeSection as RecordLike)[id];
-      const afterEntry = (afterSection as RecordLike)[id];
+      const beforeEntry = beforeSection[id];
+      const afterEntry = afterSection[id];
       if (beforeEntry === undefined && afterEntry !== undefined) {
         changes.push({ section, id, kind: 'added', fields: [] });
         continue;

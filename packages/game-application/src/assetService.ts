@@ -11,6 +11,7 @@ import {
 } from '@web-legend/contracts';
 import {
   DEFAULT_CONTENT_BUNDLE,
+  applyDeathPenalty,
   applyExperience,
   canEquip,
   combatStatsFor,
@@ -121,6 +122,18 @@ export type KillRewardInput = {
   monsterTemplateId: string;
   x: number;
   y: number;
+};
+
+export type DeathPenaltyInput = {
+  characterId: string;
+  /** Death event id; one penalty per death, however often the event is seen. */
+  deathId: string;
+};
+
+export type DeathPenaltyOutcome = {
+  snapshot: InventorySnapshot;
+  xpLost: number;
+  protectedByLevel: boolean;
 };
 
 export type PickupInput = {
@@ -428,6 +441,66 @@ export class AssetService {
         goldGained: roll.gold,
         leveledUp,
         drops,
+      };
+    });
+  }
+
+  /**
+   * PvE death cost: removes a content-configured share of the experience
+   * progress inside the current level. Runs in the same asset queue as kill
+   * rewards, locks the character row first and records one idempotency row per
+   * death, so a retried or duplicated death event can never double-charge.
+   * Releases without a `rules.deathPenalty` section keep death penalty-free.
+   */
+  async applyDeathPenalty(input: DeathPenaltyInput): Promise<DeathPenaltyOutcome | null> {
+    const rule = this.content.rules?.deathPenalty;
+    if (rule === undefined) {
+      return null;
+    }
+    const now = this.now();
+
+    return this.db.transaction(async (tx) => {
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
+      const claimed = await tx
+        .insert(assetCommands)
+        .values({
+          characterId: input.characterId,
+          kind: 'death_penalty',
+          idempotencyKey: `death:${input.deathId}`,
+          createdAt: now,
+        })
+        .onConflictDoNothing({ target: assetCommands.idempotencyKey })
+        .returning({ id: assetCommands.id });
+      if (claimed.length === 0) {
+        return null;
+      }
+
+      const protectedByLevel = character.level < rule.protectBelowLevel;
+      const penalty = applyDeathPenalty(character.level, character.exp, rule);
+      if (penalty.lost > 0) {
+        await tx
+          .update(characters)
+          .set({
+            exp: penalty.exp,
+            version: sql`${characters.version} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(characters.id, character.id));
+      }
+
+      const loaded = await this.loadAssetsWithin(tx, character.id);
+      return {
+        snapshot: loaded.snapshot,
+        xpLost: penalty.lost,
+        protectedByLevel,
       };
     });
   }
