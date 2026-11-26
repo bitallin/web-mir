@@ -2108,3 +2108,15 @@ pnpm exec playwright test tests/e2e/pvp.spec.ts --workers=1
 
 A 日志里“B 被 A 击败，3 秒后复活”是系统公告历史，正常保留；B 站起来后不再
 出现新的错误状态。文档同步 ADR-029、EL-020 与切片报告 §4.1。
+
+---
+
+## 2026-11-26 首次推送至 GitHub
+
+- 仓库：`git@github.com:bitallin/web-mir.git`（origin）。
+- 传输：HTTPS 凭据不可用（`git push` 无法读取用户名）；SSH 密钥已配置并认证为
+  `bitallin`，改用 SSH 地址推送。
+- 结果：`main` 首次推送成功并建立跟踪（`git status` 显示 `main...origin/main`）。
+- 范围：包含本项目全部历史提交；本次会话新增 S2 技能、三职业外观与 PvP 复活
+  修复。
+- 待确认：远端 CI 的 verify 与 e2e job 结果（本环境无 `gh`，未查询）。
