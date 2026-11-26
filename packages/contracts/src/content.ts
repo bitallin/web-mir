@@ -83,10 +83,37 @@ export const healEffectSchema = z
   })
   .strict();
 
+/**
+ * Periodic damage on one enemy. Ticks are fixed by the server clock and always
+ * land (no hit roll), so a DoT cannot consume RNG draws from the
+ * deterministic combat replay (ADR-028).
+ */
+export const dotEffectSchema = z
+  .object({
+    kind: z.literal('dot'),
+    multiplier: z.number().positive().max(10),
+    flatDamage: z.number().int().min(0).max(10_000),
+    tickIntervalMs: z.number().int().min(250).max(10_000),
+    durationMs: z.number().int().min(1_000).max(60_000),
+  })
+  .strict();
+
+/** Temporary damage absorption for the caster; a recast refreshes it. */
+export const shieldEffectSchema = z
+  .object({
+    kind: z.literal('shield'),
+    baseAmount: z.number().int().min(1).max(100_000),
+    amountPerLevel: z.number().int().min(0).max(10_000),
+    durationMs: z.number().int().min(1_000).max(60_000),
+  })
+  .strict();
+
 /** Closed handler whitelist; a new kind needs a code release (ADR-011). */
 export const skillEffectSchema = z.discriminatedUnion('kind', [
   directDamageEffectSchema,
   healEffectSchema,
+  dotEffectSchema,
+  shieldEffectSchema,
 ]);
 export type SkillEffectContent = z.infer<typeof skillEffectSchema>;
 

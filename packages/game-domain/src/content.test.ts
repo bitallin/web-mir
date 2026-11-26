@@ -10,19 +10,34 @@ import {
 } from './content';
 
 describe('phase-4 content catalog', () => {
-  it('gives every class exactly one usable skill', () => {
+  it('gives every class three skills unlocked at levels 1, 5 and 10', () => {
     for (const classId of CHARACTER_CLASSES) {
       const skills = skillsForClass(classId);
-      expect(skills).toHaveLength(1);
-      expect(skills[0]?.classId).toBe(classId);
-      expect(skills[0]?.levelRequirement).toBe(1);
-      expect(skills[0]?.hotkey).toBe('1');
+      expect(skills).toHaveLength(3);
+      expect(skills.map((skill) => skill.levelRequirement)).toEqual([1, 5, 10]);
+      expect(skills.map((skill) => skill.hotkey)).toEqual(['1', '2', '3']);
+      for (const skill of skills) {
+        expect(skill.classId).toBe(classId);
+      }
     }
   });
 
-  it('covers both direct damage and heal effect handlers', () => {
+  it('returns unlock order even when content keys are shuffled by jsonb', () => {
+    const shuffled = {
+      warrior_iron_skin: requireSkill('warrior_iron_skin'),
+      warrior_heavy_strike: requireSkill('warrior_heavy_strike'),
+      warrior_cleave: requireSkill('warrior_cleave'),
+    };
+    expect(skillsForClass('warrior', shuffled).map((skill) => skill.id)).toEqual([
+      'warrior_heavy_strike',
+      'warrior_iron_skin',
+      'warrior_cleave',
+    ]);
+  });
+
+  it('covers direct damage, heal, damage-over-time and shield handlers', () => {
     const effects = new Set(Object.values(SKILL_CATALOG).map((skill) => skill.effect.kind));
-    expect(effects).toEqual(new Set(['directDamage', 'heal']));
+    expect(effects).toEqual(new Set(['directDamage', 'heal', 'dot', 'shield']));
   });
 
   it('defines two monsters with aggro, leash and respawn rules', () => {

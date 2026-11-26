@@ -1879,3 +1879,111 @@ pnpm exec playwright test tests/e2e/shop.spec.ts --workers=1
 
 - 用户当前页面若仍停留在旧 Room，需要刷新/返回角色再进入才能拿到新内容。
 - 50 人容量回归与远端 CI 仍未执行。
+
+---
+
+## 2026-11-26 S2 任务 2：三职业等级技能、DoT 与护盾
+
+### 本次任务目标
+
+在法力回复之后补齐 S2 的核心体验：让三个职业在 1/5/10 级获得不同操作方式，
+并建立可复用的状态效果（持续伤害、护盾）能力，同时保持服务端权威与确定性回放。
+
+### 实际改动
+
+1. **契约（加法）**
+   - `skillEffectSchema` 新增 `dot`、`shield`。
+   - `hit` 事件新增可选 `skillId`、`absorbed`、`periodic`；新增 `shield` 事件。
+   - `combat.profile` 新增可选 `shield`，重连/升级后恢复护盾数值。
+2. **内容与校验**
+   - 三职业各 3 个技能（1/5/10 级、快捷键 1/2/3）：战士重击/铁布衫/破军斩，
+     法师火球/魔法盾/陨石术，道士治愈/施毒/灵魂火符。
+   - 校验：`dot` 只能敌方、`shield` 只能自身；持续时长不短于一个跳伤间隔；
+     冷却短于持续时间给 warning。
+3. **领域**
+   - `CombatWorld` 增加 DoT 与护盾运行时；DoT 每跳伤害在施法时确定、不消耗
+     RNG，技能 ID 刷新、死亡/重生清除，击杀归属施法者；护盾先吸收伤害，
+     死亡/到期/耗尽清除。
+   - `skillsForClass` 按等级 + 快捷键排序，修复 `jsonb` 键序导致的技能栏错序。
+4. **服务端/客户端**
+   - Room 投递 `shield` 事件；DoT 击杀沿用击杀奖励事务。
+   - 客户端显示护盾数值、区分持续伤害/护盾吸收日志与浮字；事件去重提前到
+     冷却/护盾记账之前。
+   - 负载脚本补 `shop.catalog` 空处理器，消除 50 人回归时的 SDK 警告刷屏。
+5. **文档与证据**
+   - ADR-028、`ALPHA_02_SKILLS_REPORT.md`、EL-018。
+   - `docs/phase-reports/alpha-02/skills/` 两张 E2E 截图；
+     `invariants-s2-skills.txt`。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm verify:invariants
+pnpm exec playwright test tests/e2e/skills.spec.ts --workers=1
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：64 文件、389 测试通过。
+- 构建：4 个应用成功。
+- 全量 E2E：25/25 通过（2.9 分钟，独立数据库与端口）。
+- 技能 E2E：道士毒伤跳伤并击杀；战士护盾吸收怪物伤害。
+- 资产不变量：7 项全部 0 违例。
+- 开发栈已重启到最新代码；发布并激活内容 `2026.11.26.2`（新增 6 个技能，
+  09:07 激活，checksum `9fde5006…`）。
+
+### 遇到的问题及解决方法
+
+1. **技能栏顺序错乱**：E2E 断言 `skill-2` 时战士显示重击而非铁布衫。根因是
+   Release payload 存为 PostgreSQL `jsonb`，键按长度/字节重排。修复为
+   `skillsForClass` 显式排序，补“乱序输入仍按等级/快捷键输出”的单测，并记录
+   EL-018。
+2. **DoT 与 RNG**：若每跳都掷命中/暴击，会改变后续攻击的随机序列并破坏回放。
+   改为施法时固定跳伤、不消耗 RNG，并用“有/无 DoT 的后续攻击结果一致”测试锁定。
+3. **E2E 无法自然升到 5 级**：新增 `tests/e2e/characterFixture.ts`，在角色进入
+   Room 前把等级写入一次性 E2E 数据库；不触碰开发库。
+4. **负载脚本告警刷屏**：`shop.catalog` 未注册处理器导致每个客户端刷警告；
+   已在 `worldLoad`/`worldScenario` 补空处理器。
+5. **压测后过期掉落残留**：50 人回归结束时，大量掉落尚未到 2 分钟过期；Room
+   销毁时它们还未过期，于是留在 `world_drops`/ground 中，`verify:invariants`
+   报 171 条 stale。重启 Game Server 会触发启动清理（0 条）。这是运行时的
+   生命周期现象，不是重复/丢失资产；压测后需重启或等下一次 Room 生命周期。
+
+### 尚未解决
+
+- 三套职业外观与动作（TD-CLI-06）未做。
+- 远端 CI 未执行。
+- 容量 tick p95 12.36ms 高于 10ms 目标（基线 10.25ms），作为已知风险。
+
+### 容量回归（50 人 × 10 分钟）
+
+```bash
+pnpm load:regression
+```
+
+- 50/50 加入，接受率 99.1%（69,454 接受 / 654 拒绝；COOLDOWN 241、
+  TARGET_DEAD 412、OUT_OF_RANGE 1），0 资产失败、689 击杀。
+- tick p50 1.74ms / p95 12.36ms / p99 16ms / max 19.38ms；资产事务 p95
+  44.84ms（Alpha 0.1 基线 10.25ms / 52.16ms）。
+- 入站 8.79MB、出站 438.96MB、重连率 0；运行期 event-loop p99 30.2ms，
+  RSS 峰值 289MB。
+- 证据：`docs/phase-reports/alpha-02/load-50p10a-10min-s2-skills.json`
+  （运行命令会写回 alpha-01 历史路径，已复制到 alpha-02 并恢复历史文件）。
+
+### 人工试玩准备
+
+- 为 8584 试玩创建了开发账号 `demo_taoist5` / `web-legend-demo`，角色
+  `DemoTaoist`（道士 Lv.5）与 `DemoWarrior`（战士 Lv.5），均满 HP/MP；从主城
+  走到静语荒野即可测试治愈/施毒与铁布衫。账号只存在于开发库。
+
+### 下一步计划
+
+1. 在 8584 用 5 级角色试玩毒/护盾/等级解锁。
+2. 完成三套职业外观；随后进入 S3 怪物威胁与死亡代价。
+3. 评估 tick p95 12.36ms：先复测确认是否为环境噪声，再决定是否按 TD-SRV-03/
+   TD-CLI-05 优化。

@@ -271,6 +271,7 @@ async function main(): Promise<void> {
       room.onMessage('combat.profile', () => undefined);
       room.onMessage('inventory.snapshot', () => undefined);
       room.onMessage('system.notice', () => undefined);
+      room.onMessage('shop.catalog', () => undefined);
     }
 
     const startedAt = Date.now();

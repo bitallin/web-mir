@@ -480,16 +480,41 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         target?.playHit();
         const position = this.entityPosition(event.targetId);
         if (position !== null) {
-          this.floatText(
-            position.x,
-            position.y - 34,
-            `${event.critical ? '暴击 ' : ''}-${String(event.damage)}`,
-            event.critical ? '#ffb347' : '#ff7a6b',
-            event.critical ? 20 : 16,
-          );
+          const hpDamage = Math.max(0, event.damage - (event.absorbed ?? 0));
+          if (hpDamage > 0) {
+            this.floatText(
+              position.x,
+              position.y - 34,
+              `${event.critical ? '暴击 ' : ''}-${String(hpDamage)}`,
+              event.periodic === true ? '#b48cf2' : event.critical ? '#ffb347' : '#ff7a6b',
+              event.critical ? 20 : 16,
+            );
+          }
+          if (event.absorbed !== undefined && event.absorbed > 0) {
+            this.floatText(
+              position.x + 16,
+              position.y - 50,
+              `护盾 -${String(event.absorbed)}`,
+              '#7fb7ff',
+              14,
+            );
+          }
         }
         if (event.targetType === 'player' && event.targetId === this.selfId) {
           this.cameras.main.shake(90, 0.0025);
+        }
+        break;
+      }
+      case 'shield': {
+        const position = this.entityPosition(event.targetId);
+        if (position !== null) {
+          this.floatText(
+            position.x,
+            position.y - 44,
+            event.amount > 0 ? `护盾 +${String(event.amount)}` : '护盾消散',
+            '#7fb7ff',
+            15,
+          );
         }
         break;
       }

@@ -316,6 +316,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             <span>
               法力 {self?.mp ?? character.mp}/{self?.maxMp ?? character.maxMp}
             </span>
+            {state.shield !== null ? (
+              <span className="shield-chip" data-testid="self-shield">
+                护盾 {state.shield.amount}
+              </span>
+            ) : null}
           </p>
           <p
             className="pvp-badge"
@@ -1088,6 +1093,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               <dd>
                 {self?.mp ?? inventory?.mp ?? 0}/{self?.maxMp ?? inventory?.maxMp ?? 0}
               </dd>
+            </div>
+            <div>
+              <dt>护盾</dt>
+              <dd data-testid="character-shield">{state.shield?.amount ?? 0}</dd>
             </div>
             <div>
               <dt>攻击 / 防御</dt>

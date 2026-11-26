@@ -420,6 +420,7 @@ async function main(): Promise<void> {
       'combat.profile',
       'inventory.snapshot',
       'system.notice',
+      'shop.catalog',
       'combat.event',
       'loot.claimed',
       'character.progress',

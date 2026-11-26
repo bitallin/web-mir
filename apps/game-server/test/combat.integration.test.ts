@@ -784,4 +784,91 @@ describe.runIf(databaseUrl !== undefined)('world_map combat', () => {
       ),
     ).toEqual([]);
   });
+
+  it('unlocks level-5 skills and broadcasts damage-over-time ticks', async () => {
+    const actor = await wildsActor({ classId: 'taoist', level: 5 });
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+
+    const profile = await waitForMessage<CombatProfile>(room, 'combat.profile', (payload) =>
+      combatProfileSchema.parse(payload),
+    );
+    expect(profile.skills.map((skill) => skill.id)).toEqual(['taoist_heal', 'taoist_poison']);
+
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+    room.send('skill.cast', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      skillId: 'taoist_poison',
+      targetId: SLIME,
+    });
+
+    await waitUntil(
+      () => events.some((event) => event.kind === 'hit' && event.periodic === true),
+      4_000,
+      'first poison tick',
+    );
+    const tick = events.find((event) => event.kind === 'hit' && event.periodic === true);
+    expect(tick?.kind).toBe('hit');
+    if (tick?.kind !== 'hit') {
+      return;
+    }
+    expect(tick.skillId).toBe('taoist_poison');
+    expect(tick.sourceId).toBe(actor.character.id);
+
+    await waitUntil(
+      () =>
+        events.some(
+          (event) =>
+            event.kind === 'death' &&
+            event.entityId === SLIME &&
+            event.killerId === actor.character.id,
+        ),
+      8_000,
+      'poison kill',
+    );
+  });
+
+  it('grants a shield that absorbs monster damage before HP', async () => {
+    const actor = await wildsActor({ classId: 'warrior', level: 5 });
+    const room = await createWorld(actor.ticket);
+    const events = collectCombatEvents(room);
+
+    await waitForMessage(room, 'combat.profile', (payload) => combatProfileSchema.parse(payload));
+    await waitUntil(() => monsterState(room, SLIME) !== undefined, 5_000, 'slime visible');
+
+    room.send('skill.cast', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      skillId: 'warrior_iron_skin',
+      targetId: actor.character.id,
+    });
+
+    await waitUntil(
+      () => events.some((event) => event.kind === 'shield' && event.amount > 0),
+      3_000,
+      'shield granted',
+    );
+
+    await waitUntil(
+      () =>
+        events.some(
+          (event) =>
+            event.kind === 'hit' &&
+            event.targetId === actor.character.id &&
+            (event.absorbed ?? 0) > 0,
+        ),
+      6_000,
+      'absorbed hit',
+    );
+    const absorbed = events.find(
+      (event): event is Extract<CombatEvent, { kind: 'hit' }> =>
+        event.kind === 'hit' && event.targetId === actor.character.id && (event.absorbed ?? 0) > 0,
+    );
+    const hpAtShield = room.state.players.get(actor.character.id)?.hp ?? 0;
+    expect(absorbed?.absorbed).toBeGreaterThan(0);
+    expect(absorbed?.targetHp).toBe(hpAtShield);
+  });
 });

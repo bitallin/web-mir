@@ -17,6 +17,8 @@ function describeEvent(event: CombatEventPayload): string {
       return `miss ${event.sourceId} -> ${event.targetId}`;
     case 'heal':
       return `heal ${event.targetId} +${String(event.amount)} hp=${String(event.targetHp)}`;
+    case 'shield':
+      return `shield ${event.targetId} ${String(event.amount)} for ${String(event.expiresInMs)}ms`;
     case 'death':
       return `death ${event.entityType}:${event.entityId}`;
     case 'spawn':

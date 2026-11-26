@@ -1113,6 +1113,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       case 'attack':
       case 'hit':
       case 'miss':
+      case 'shield':
         addViewersOf([event.sourceId, event.targetId]);
         break;
     }

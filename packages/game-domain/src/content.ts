@@ -20,6 +20,8 @@ export type MonsterDefinition = MonsterContent;
 export type SkillEffect = SkillEffectContent;
 export type DamageEffect = Extract<SkillEffectContent, { kind: 'directDamage' }>;
 export type HealEffect = Extract<SkillEffectContent, { kind: 'heal' }>;
+export type DotEffect = Extract<SkillEffectContent, { kind: 'dot' }>;
+export type ShieldEffect = Extract<SkillEffectContent, { kind: 'shield' }>;
 export type { SkillTarget };
 
 export type SkillCatalog = Readonly<Record<string, SkillContent>>;
@@ -30,11 +32,21 @@ export const MONSTER_CATALOG: MonsterCatalog = BASE_CONTENT_BUNDLE.monsters;
 
 export const DEFAULT_CONTENT_BUNDLE: ContentBundle = BASE_CONTENT_BUNDLE;
 
+/**
+ * Skills are returned in unlock order. The order cannot come from the content
+ * object: PostgreSQL stores the release payload as jsonb, which reorders keys,
+ * so the bar would otherwise shuffle between releases (hotkey 2 before 1).
+ */
 export function skillsForClass(
   classId: CharacterClass,
   skills: SkillCatalog = SKILL_CATALOG,
 ): SkillDefinition[] {
-  return Object.values(skills).filter((skill) => skill.classId === classId);
+  return Object.values(skills)
+    .filter((skill) => skill.classId === classId)
+    .sort(
+      (left, right) =>
+        left.levelRequirement - right.levelRequirement || left.hotkey.localeCompare(right.hotkey),
+    );
 }
 
 export function requireSkill(

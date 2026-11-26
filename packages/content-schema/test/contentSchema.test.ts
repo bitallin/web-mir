@@ -157,6 +157,46 @@ describe('content validation', () => {
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.message.includes('自身'))).toBe(true);
   });
+
+  it('rejects a shield skill aimed at an enemy', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        bundle.skills['warrior_iron_skin'] = {
+          ...bundle.skills['warrior_iron_skin']!,
+          target: 'enemy',
+        };
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes('护盾'))).toBe(true);
+  });
+
+  it('rejects a damage-over-time effect shorter than one tick', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        bundle.skills['taoist_poison'] = {
+          ...bundle.skills['taoist_poison']!,
+          effect: {
+            kind: 'dot',
+            multiplier: 0.6,
+            flatDamage: 2,
+            tickIntervalMs: 2_000,
+            durationMs: 1_000,
+          },
+        };
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes('跳伤间隔'))).toBe(true);
+  });
+
+  it('ships damage-over-time and shield skills in the baseline bundle', () => {
+    const effects = new Set(
+      Object.values(BASE_CONTENT_BUNDLE.skills).map((skill) => skill.effect.kind),
+    );
+    expect(effects).toEqual(new Set(['directDamage', 'heal', 'dot', 'shield']));
+    expect(Object.keys(BASE_CONTENT_BUNDLE.skills)).toHaveLength(9);
+  });
 });
 
 describe('content diff', () => {

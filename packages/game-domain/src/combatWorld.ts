@@ -22,6 +22,8 @@ import {
 import {
   DEFAULT_CONTENT_BUNDLE,
   skillsForClass,
+  type DamageEffect,
+  type DotEffect,
   type MonsterDefinition,
   type SkillDefinition,
 } from './content';
@@ -71,6 +73,8 @@ export type CombatPlayerSnapshot = {
   attack: number;
   defense: number;
   alive: boolean;
+  /** Remaining absorb points of the player's shield; 0 when unshielded. */
+  shield: number;
 };
 
 export type CombatMonsterSnapshot = {
@@ -113,6 +117,7 @@ export type CombatProfileData = {
   maxHp: number;
   mp: number;
   maxMp: number;
+  shield: number;
   skills: {
     id: string;
     name: string;
@@ -143,7 +148,21 @@ export type CombatWorldOptions = {
   monsters?: Readonly<Record<string, MonsterDefinition>>;
 };
 
-type PlayerRuntime = CombatPlayerSnapshot & {
+type ActiveDot = {
+  skillId: string;
+  sourceId: string;
+  damagePerTick: number;
+  tickIntervalMs: number;
+  nextTickAt: number;
+  expiresAt: number;
+};
+
+type ShieldRuntime = {
+  amount: number;
+  expiresAt: number;
+};
+
+type PlayerRuntime = Omit<CombatPlayerSnapshot, 'shield'> & {
   stats: CombatStats;
   nextBasicAttackAt: number;
   cooldowns: Map<string, number>;
@@ -152,6 +171,9 @@ type PlayerRuntime = CombatPlayerSnapshot & {
   regenCarryMs: number;
   /** Disconnected players keep their state but are not new monster targets. */
   targetable: boolean;
+  shield: ShieldRuntime | null;
+  /** Damage-over-time effects, keyed by skill so a recast refreshes them. */
+  dots: Map<string, ActiveDot>;
 };
 
 type MonsterRuntime = {
@@ -172,6 +194,7 @@ type MonsterRuntime = {
   nextThinkAt: number;
   nextRepathAt: number;
   respawnAt: number;
+  dots: Map<string, ActiveDot>;
 };
 
 const DEFAULT_PLAYER_RESPAWN_MS = 3_000;
@@ -292,6 +315,7 @@ export class CombatWorld {
         nextThinkAt: 0,
         nextRepathAt: 0,
         respawnAt: 0,
+        dots: new Map(),
       });
     }
   }
@@ -335,6 +359,8 @@ export class CombatWorld {
       reviveAt: hp > 0 ? 0 : this.now + this.playerRespawnMs,
       regenCarryMs: 0,
       targetable: true,
+      shield: null,
+      dots: new Map(),
     });
   }
 
@@ -396,6 +422,8 @@ export class CombatWorld {
     player.alive = player.hp > 0;
     if (!player.alive) {
       player.reviveAt = this.now + this.playerRespawnMs;
+      player.dots.clear();
+      player.shield = null;
     }
     return true;
   }
@@ -419,6 +447,7 @@ export class CombatWorld {
       attack: player.attack,
       defense: player.defense,
       alive: player.alive,
+      shield: player.shield?.amount ?? 0,
     };
   }
 
@@ -459,6 +488,7 @@ export class CombatWorld {
       maxHp: player.maxHp,
       mp: player.mp,
       maxMp: player.maxMp,
+      shield: player.shield?.amount ?? 0,
       skills: skillsForClass(player.classId, this.skills)
         .filter((skill) => skill.levelRequirement <= player.level)
         .map((skill) => ({
@@ -577,8 +607,7 @@ export class CombatWorld {
 
     const events: CombatEventPayload[] = [];
     if (skill.effect.kind === 'heal') {
-      player.mp -= skill.mpCost;
-      player.cooldowns.set(skill.id, this.now + skill.cooldownMs);
+      this.spendSkill(player, skill);
       events.push({
         kind: 'attack',
         sourceId: player.id,
@@ -603,11 +632,27 @@ export class CombatWorld {
       return { accepted: true, events };
     }
 
-    const modifier = {
-      multiplier: skill.effect.multiplier,
-      flatDamage: skill.effect.flatDamage,
-      canCrit: skill.effect.canCrit,
-    };
+    if (skill.effect.kind === 'shield') {
+      this.spendSkill(player, skill);
+      const amount = skill.effect.baseAmount + skill.effect.amountPerLevel * (player.level - 1);
+      player.shield = { amount, expiresAt: this.now + skill.effect.durationMs };
+      events.push({
+        kind: 'attack',
+        sourceId: player.id,
+        sourceType: 'player',
+        targetId: player.id,
+        targetType: 'player',
+        skillId: skill.id,
+      });
+      events.push({
+        kind: 'shield',
+        sourceId: player.id,
+        targetId: player.id,
+        amount,
+        expiresInMs: skill.effect.durationMs,
+      });
+      return { accepted: true, events };
+    }
 
     const monster = this.monsters.get(targetId);
     if (monster !== undefined) {
@@ -618,8 +663,7 @@ export class CombatWorld {
         return reject('OUT_OF_RANGE');
       }
 
-      player.mp -= skill.mpCost;
-      player.cooldowns.set(skill.id, this.now + skill.cooldownMs);
+      this.spendSkill(player, skill);
       events.push({
         kind: 'attack',
         sourceId: player.id,
@@ -628,7 +672,11 @@ export class CombatWorld {
         targetType: 'monster',
         skillId: skill.id,
       });
-      this.resolveAttack(player, monster, modifier, events);
+      if (skill.effect.kind === 'dot') {
+        this.applyDot(monster.dots, player, skill.id, skill.effect, monster.definition.defense);
+      } else {
+        this.resolveAttack(player, monster, attackModifier(skill.effect), events, skill.id);
+      }
       return { accepted: true, events };
     }
 
@@ -652,8 +700,7 @@ export class CombatWorld {
       return reject('OUT_OF_RANGE');
     }
 
-    player.mp -= skill.mpCost;
-    player.cooldowns.set(skill.id, this.now + skill.cooldownMs);
+    this.spendSkill(player, skill);
     events.push({
       kind: 'attack',
       sourceId: player.id,
@@ -662,8 +709,34 @@ export class CombatWorld {
       targetType: 'player',
       skillId: skill.id,
     });
-    this.resolvePlayerAttack(player, target, modifier, events);
+    if (skill.effect.kind === 'dot') {
+      this.applyDot(target.dots, player, skill.id, skill.effect, target.stats.defense);
+    } else {
+      this.resolvePlayerAttack(player, target, attackModifier(skill.effect), events, skill.id);
+    }
     return { accepted: true, events };
+  }
+
+  private spendSkill(player: PlayerRuntime, skill: SkillDefinition): void {
+    player.mp -= skill.mpCost;
+    player.cooldowns.set(skill.id, this.now + skill.cooldownMs);
+  }
+
+  private applyDot(
+    dots: Map<string, ActiveDot>,
+    source: PlayerRuntime,
+    skillId: string,
+    effect: DotEffect,
+    targetDefense: number,
+  ): void {
+    dots.set(skillId, {
+      skillId,
+      sourceId: source.id,
+      damagePerTick: dotTickDamage(source.attack, effect, targetDefense),
+      tickIntervalMs: effect.tickIntervalMs,
+      nextTickAt: this.now + effect.tickIntervalMs,
+      expiresAt: this.now + effect.durationMs,
+    });
   }
 
   /**
@@ -688,6 +761,8 @@ export class CombatWorld {
     const events: CombatEventPayload[] = [];
     this.revivePlayers(events);
     this.regenerateMana(stepMs);
+    this.expireShields(events);
+    this.applyDots(events);
     for (const monster of this.monsters.values()) {
       this.updateMonster(monster, stepMs, events);
     }
@@ -718,6 +793,170 @@ export class CombatWorld {
     }
   }
 
+  private expireShields(events: CombatEventPayload[]): void {
+    for (const player of this.players.values()) {
+      if (player.shield === null || this.now < player.shield.expiresAt) {
+        continue;
+      }
+      player.shield = null;
+      events.push({
+        kind: 'shield',
+        sourceId: player.id,
+        targetId: player.id,
+        amount: 0,
+        expiresInMs: 0,
+      });
+    }
+  }
+
+  /**
+   * Damage-over-time ticks are authoritative and deterministic: the damage is
+   * fixed at cast time and no RNG is drawn, so adding a DoT cannot change the
+   * outcome of subsequent attacks in a seeded replay (ADR-028).
+   */
+  private applyDots(events: CombatEventPayload[]): void {
+    for (const monster of this.monsters.values()) {
+      if (monster.state === 'dead' || monster.dots.size === 0) {
+        continue;
+      }
+      for (const [skillId, dot] of monster.dots) {
+        while (this.now >= dot.nextTickAt && dot.nextTickAt <= dot.expiresAt) {
+          dot.nextTickAt += dot.tickIntervalMs;
+          monster.hp = Math.max(0, monster.hp - dot.damagePerTick);
+          events.push({
+            kind: 'hit',
+            sourceId: dot.sourceId,
+            sourceType: 'player',
+            targetId: monster.id,
+            targetType: 'monster',
+            damage: dot.damagePerTick,
+            critical: false,
+            targetHp: monster.hp,
+            targetMaxHp: monster.definition.maxHp,
+            skillId: dot.skillId,
+            periodic: true,
+          });
+          if (monster.hp === 0) {
+            this.killMonster(monster, dot.sourceId, events);
+            break;
+          }
+        }
+        if (monster.hp === 0) {
+          break;
+        }
+        if (this.now > dot.expiresAt) {
+          monster.dots.delete(skillId);
+        }
+      }
+    }
+
+    for (const player of this.players.values()) {
+      if (!player.alive || player.dots.size === 0) {
+        continue;
+      }
+      for (const [skillId, dot] of player.dots) {
+        while (this.now >= dot.nextTickAt && dot.nextTickAt <= dot.expiresAt) {
+          dot.nextTickAt += dot.tickIntervalMs;
+          const { hpDamage, absorbed } = this.absorbPlayerDamage(player, dot.damagePerTick, events);
+          player.hp = Math.max(0, player.hp - hpDamage);
+          events.push({
+            kind: 'hit',
+            sourceId: dot.sourceId,
+            sourceType: 'player',
+            targetId: player.id,
+            targetType: 'player',
+            damage: dot.damagePerTick,
+            critical: false,
+            targetHp: player.hp,
+            targetMaxHp: player.maxHp,
+            skillId: dot.skillId,
+            periodic: true,
+            ...(absorbed > 0 ? { absorbed } : {}),
+          });
+          if (player.hp === 0) {
+            this.killPlayer(player, dot.sourceId, events);
+            break;
+          }
+        }
+        if (!player.alive) {
+          break;
+        }
+        if (this.now > dot.expiresAt) {
+          player.dots.delete(skillId);
+        }
+      }
+    }
+  }
+
+  private absorbPlayerDamage(
+    player: PlayerRuntime,
+    damage: number,
+    events: CombatEventPayload[],
+  ): { hpDamage: number; absorbed: number } {
+    if (player.shield === null) {
+      return { hpDamage: damage, absorbed: 0 };
+    }
+    const absorbed = Math.min(player.shield.amount, damage);
+    player.shield.amount -= absorbed;
+    if (player.shield.amount <= 0) {
+      player.shield = null;
+      events.push({
+        kind: 'shield',
+        sourceId: player.id,
+        targetId: player.id,
+        amount: 0,
+        expiresInMs: 0,
+      });
+    }
+    return { hpDamage: damage - absorbed, absorbed };
+  }
+
+  private killPlayer(
+    player: PlayerRuntime,
+    killerId: string | undefined,
+    events: CombatEventPayload[],
+  ): void {
+    player.alive = false;
+    player.reviveAt = this.now + this.playerRespawnMs;
+    player.dots.clear();
+    if (player.shield !== null) {
+      player.shield = null;
+      events.push({
+        kind: 'shield',
+        sourceId: player.id,
+        targetId: player.id,
+        amount: 0,
+        expiresInMs: 0,
+      });
+    }
+    events.push({
+      kind: 'death',
+      entityId: player.id,
+      entityType: 'player',
+      ...(killerId === undefined ? {} : { killerId }),
+      reviveInMs: this.playerRespawnMs,
+    });
+  }
+
+  private killMonster(
+    monster: MonsterRuntime,
+    killerId: string,
+    events: CombatEventPayload[],
+  ): void {
+    monster.state = 'dead';
+    monster.moving = false;
+    monster.targetId = null;
+    monster.waypoints = [];
+    monster.dots.clear();
+    monster.respawnAt = this.now + (this.monsterRespawnMs ?? monster.definition.respawnMs);
+    events.push({
+      kind: 'death',
+      entityId: monster.id,
+      entityType: 'monster',
+      killerId,
+    });
+  }
+
   private revivePlayers(events: CombatEventPayload[]): void {
     for (const player of this.players.values()) {
       if (player.alive || this.now < player.reviveAt) {
@@ -729,6 +968,8 @@ export class CombatWorld {
       player.mp = player.maxMp;
       player.alive = true;
       player.reviveAt = 0;
+      player.dots.clear();
+      player.shield = null;
       events.push({
         kind: 'respawn',
         entityId: player.id,
@@ -765,6 +1006,7 @@ export class CombatWorld {
       monster.nextThinkAt = this.now;
       monster.nextRepathAt = 0;
       monster.respawnAt = 0;
+      monster.dots.clear();
       events.push({
         kind: 'spawn',
         entityId: monster.id,
@@ -958,7 +1200,8 @@ export class CombatWorld {
       return;
     }
 
-    player.hp = Math.max(0, player.hp - roll.damage);
+    const { hpDamage, absorbed } = this.absorbPlayerDamage(player, roll.damage, events);
+    player.hp = Math.max(0, player.hp - hpDamage);
     events.push({
       kind: 'hit',
       sourceId: monster.id,
@@ -969,18 +1212,11 @@ export class CombatWorld {
       critical: roll.critical,
       targetHp: player.hp,
       targetMaxHp: player.maxHp,
+      ...(absorbed > 0 ? { absorbed } : {}),
     });
 
     if (player.hp === 0) {
-      player.alive = false;
-      player.reviveAt = this.now + this.playerRespawnMs;
-      events.push({
-        kind: 'death',
-        entityId: player.id,
-        entityType: 'player',
-        killerId: monster.id,
-        reviveInMs: this.playerRespawnMs,
-      });
+      this.killPlayer(player, monster.id, events);
     }
   }
 
@@ -989,6 +1225,7 @@ export class CombatWorld {
     monster: MonsterRuntime,
     modifier: AttackModifier,
     events: CombatEventPayload[],
+    skillId?: string,
   ): void {
     const roll = rollAttack(
       combatStatsAsOffense(player.stats),
@@ -1004,6 +1241,7 @@ export class CombatWorld {
         sourceType: 'player',
         targetId: monster.id,
         targetType: 'monster',
+        ...(skillId === undefined ? {} : { skillId }),
       });
       return;
     }
@@ -1019,20 +1257,11 @@ export class CombatWorld {
       critical: roll.critical,
       targetHp: monster.hp,
       targetMaxHp: monster.definition.maxHp,
+      ...(skillId === undefined ? {} : { skillId }),
     });
 
     if (monster.hp === 0) {
-      monster.state = 'dead';
-      monster.moving = false;
-      monster.targetId = null;
-      monster.waypoints = [];
-      monster.respawnAt = this.now + (this.monsterRespawnMs ?? monster.definition.respawnMs);
-      events.push({
-        kind: 'death',
-        entityId: monster.id,
-        entityType: 'monster',
-        killerId: player.id,
-      });
+      this.killMonster(monster, player.id, events);
     }
   }
 
@@ -1041,6 +1270,7 @@ export class CombatWorld {
     target: PlayerRuntime,
     modifier: AttackModifier,
     events: CombatEventPayload[],
+    skillId?: string,
   ): void {
     const roll = rollAttack(
       combatStatsAsOffense(attacker.stats),
@@ -1056,11 +1286,13 @@ export class CombatWorld {
         sourceType: 'player',
         targetId: target.id,
         targetType: 'player',
+        ...(skillId === undefined ? {} : { skillId }),
       });
       return;
     }
 
-    target.hp = Math.max(0, target.hp - roll.damage);
+    const { hpDamage, absorbed } = this.absorbPlayerDamage(target, roll.damage, events);
+    target.hp = Math.max(0, target.hp - hpDamage);
     events.push({
       kind: 'hit',
       sourceId: attacker.id,
@@ -1071,18 +1303,12 @@ export class CombatWorld {
       critical: roll.critical,
       targetHp: target.hp,
       targetMaxHp: target.maxHp,
+      ...(skillId === undefined ? {} : { skillId }),
+      ...(absorbed > 0 ? { absorbed } : {}),
     });
 
     if (target.hp === 0) {
-      target.alive = false;
-      target.reviveAt = this.now + this.playerRespawnMs;
-      events.push({
-        kind: 'death',
-        entityId: target.id,
-        entityType: 'player',
-        killerId: attacker.id,
-        reviveInMs: this.playerRespawnMs,
-      });
+      this.killPlayer(target, attacker.id, events);
     }
   }
 
@@ -1122,6 +1348,21 @@ export class CombatWorld {
 
 function distanceTilesFromSpawn(monster: MonsterRuntime): number {
   return distanceInTiles(monster, monster.spawnPosition);
+}
+
+function attackModifier(effect: DamageEffect): AttackModifier {
+  return {
+    multiplier: effect.multiplier,
+    flatDamage: effect.flatDamage,
+    canCrit: effect.canCrit,
+  };
+}
+
+function dotTickDamage(attack: number, effect: DotEffect, targetDefense: number): number {
+  return Math.max(
+    1,
+    Math.round(attack * effect.multiplier + effect.flatDamage - targetDefense * 0.5),
+  );
 }
 
 function reject(

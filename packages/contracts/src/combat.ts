@@ -193,6 +193,8 @@ export const combatProfileSchema = z
     maxHp: z.number().int().positive(),
     mp: z.number().int().nonnegative(),
     maxMp: z.number().int().nonnegative(),
+    /** Remaining shield absorb points; absent means no active shield. */
+    shield: z.number().int().nonnegative().optional(),
     skills: z.array(skillViewSchema).max(8),
   })
   .strict();
@@ -228,6 +230,12 @@ const hitEventSchema = z
     critical: z.boolean(),
     targetHp: z.number().int().nonnegative(),
     targetMaxHp: z.number().int().positive(),
+    /** Skill that produced this hit; absent for basic attacks. */
+    skillId: skillIdSchema.optional(),
+    /** Damage absorbed by the target's shield before reaching HP. */
+    absorbed: z.number().int().nonnegative().optional(),
+    /** True for damage-over-time ticks, so the client can label them. */
+    periodic: z.boolean().optional(),
   })
   .strict();
 
@@ -281,6 +289,18 @@ const spawnEventSchema = z
   })
   .strict();
 
+const shieldEventSchema = z
+  .object({
+    ...eventBase,
+    kind: z.literal('shield'),
+    sourceId: z.string().min(1).max(64),
+    targetId: z.string().min(1).max(64),
+    /** Absorb points after this event; 0 means the shield expired. */
+    amount: z.number().int().nonnegative(),
+    expiresInMs: z.number().int().nonnegative(),
+  })
+  .strict();
+
 const respawnEventSchema = z
   .object({
     ...eventBase,
@@ -301,6 +321,7 @@ export const combatEventSchema = z.discriminatedUnion('kind', [
   hitEventSchema,
   missEventSchema,
   healEventSchema,
+  shieldEventSchema,
   deathEventSchema,
   spawnEventSchema,
   respawnEventSchema,

@@ -73,6 +73,8 @@ export type SessionState = {
   combatLog: CombatLogEntry[];
   selectedTargetId: string | null;
   skillCooldowns: Record<string, number>;
+  /** Remaining absorb points of the local player's shield, if any. */
+  shield: { amount: number } | null;
   inventory: InventorySnapshot | null;
   shopCatalog: ShopCatalog | null;
   /** A nearby NPC click; GameScreen turns it into the merchant panel. */
@@ -118,6 +120,7 @@ function initialState(character: CharacterView): SessionState {
     combatLog: [],
     selectedTargetId: null,
     skillCooldowns: {},
+    shield: null,
     inventory: null,
     shopCatalog: null,
     shopRequest: null,
@@ -183,29 +186,55 @@ function combatLogFor(
     tone: kind,
     at: Date.now(),
   });
+  const skillLabel = (skillId: string | undefined): string =>
+    skillId === undefined
+      ? ''
+      : (state.combatProfile?.skills.find((candidate) => candidate.id === skillId)?.name ?? '技能');
+  const damageSuffix = (absorbed: number | undefined): string =>
+    [
+      event.kind === 'hit' && event.critical ? '（暴击）' : '',
+      event.kind === 'hit' && event.periodic === true ? '（持续伤害）' : '',
+      absorbed !== undefined && absorbed > 0 ? `（护盾吸收 ${String(absorbed)}）` : '',
+    ].join('');
 
   switch (event.kind) {
-    case 'hit':
+    case 'hit': {
+      const dealt = Math.max(0, event.damage - (event.absorbed ?? 0));
+      const fullyAbsorbed = dealt === 0 && (event.absorbed ?? 0) > 0;
       if (event.sourceId === characterId) {
+        if (fullyAbsorbed) {
+          return entry(
+            `你的攻击被 ${name(event.targetId)} 的护盾吸收 ${String(event.absorbed)} 点（完全抵挡）`,
+            'self',
+          );
+        }
+        const skill = skillLabel(event.skillId);
         return entry(
-          `你对 ${name(event.targetId)} 造成 ${String(event.damage)} 点伤害${
-            event.critical ? '（暴击）' : ''
-          }`,
+          `${skill.length > 0 ? `${skill}：` : ''}你对 ${name(event.targetId)} 造成 ${String(dealt)} 点伤害${damageSuffix(event.absorbed)}`,
           'self',
         );
       }
       if (event.targetId === characterId) {
-        return entry(
-          `${name(event.sourceId)} 对你造成 ${String(event.damage)} 点伤害${
-            event.critical ? '（暴击）' : ''
-          }`,
-          tone(event.sourceId),
-        );
+        return fullyAbsorbed
+          ? entry(
+              `${name(event.sourceId)} 的攻击被你的护盾吸收 ${String(event.absorbed)} 点（完全抵挡）`,
+              tone(event.sourceId),
+            )
+          : entry(
+              `${name(event.sourceId)} 对你造成 ${String(dealt)} 点伤害${damageSuffix(event.absorbed)}`,
+              tone(event.sourceId),
+            );
       }
-      return entry(
-        `${name(event.sourceId)} 击中 ${name(event.targetId)}，${String(event.damage)} 点伤害`,
-        'other',
-      );
+      return fullyAbsorbed
+        ? entry(
+            `${name(event.sourceId)} 的攻击被 ${name(event.targetId)} 的护盾吸收 ${String(event.absorbed)} 点（完全抵挡）`,
+            'other',
+          )
+        : entry(
+            `${name(event.sourceId)} 击中 ${name(event.targetId)}，${String(dealt)} 点伤害${damageSuffix(event.absorbed)}`,
+            'other',
+          );
+    }
     case 'miss':
       if (event.sourceId === characterId) {
         return entry(`你的攻击被 ${name(event.targetId)} 闪避`, 'self');
@@ -233,6 +262,16 @@ function combatLogFor(
         `${name(event.entityId)} 被击败`,
         event.killerId === characterId ? 'self' : 'other',
       );
+    case 'shield':
+      if (event.targetId === characterId) {
+        return event.amount > 0
+          ? entry(`你获得了 ${String(event.amount)} 点护盾`, 'self')
+          : entry('护盾已消散', 'system');
+      }
+      if (event.sourceId === characterId) {
+        return entry(`你为 ${name(event.targetId)} 施加了护盾`, 'self');
+      }
+      return null;
     case 'respawn':
       return event.entityId === characterId ? entry('你已在地图出生点复活', 'system') : null;
     case 'spawn':
@@ -378,7 +417,14 @@ class WorldSession {
           }));
         },
         onCombatProfile: (profile) => {
-          this.updateState((previous) => ({ ...previous, combatProfile: profile }));
+          this.updateState((previous) => ({
+            ...previous,
+            combatProfile: profile,
+            shield:
+              profile.shield !== undefined && profile.shield > 0
+                ? { amount: profile.shield }
+                : null,
+          }));
         },
         onCombatEvent: (event) => {
           this.bridge.pushCombatEvent(event);
@@ -390,6 +436,11 @@ class WorldSession {
             }
           }
           this.updateState((previous) => {
+            // Deduplicate first: the cooldown and shield bookkeeping below is
+            // not idempotent if the same event ever arrives twice.
+            if (previous.combatLog.some((entry) => entry.id === event.eventId)) {
+              return previous;
+            }
             let next = previous;
             if (
               event.kind === 'attack' &&
@@ -409,8 +460,20 @@ class WorldSession {
                 };
               }
             }
-            if (next.combatLog.some((entry) => entry.id === event.eventId)) {
-              return next;
+            if (event.kind === 'shield' && event.targetId === characterId) {
+              next = {
+                ...next,
+                shield: event.amount > 0 ? { amount: event.amount } : null,
+              };
+            } else if (
+              event.kind === 'hit' &&
+              event.targetId === characterId &&
+              event.absorbed !== undefined &&
+              event.absorbed > 0 &&
+              next.shield !== null
+            ) {
+              const remaining = Math.max(0, next.shield.amount - event.absorbed);
+              next = { ...next, shield: remaining > 0 ? { amount: remaining } : null };
             }
             const logEntry = combatLogFor(next, event, characterId);
             if (logEntry !== null) {
@@ -793,6 +856,11 @@ class WorldSession {
           this.sfx.play('heal');
         }
         break;
+      case 'shield':
+        if (event.targetId === characterId && event.amount > 0) {
+          this.sfx.play('heal');
+        }
+        break;
       case 'death':
         if (event.entityId === characterId) {
           this.sfx.play('death');
@@ -832,6 +900,7 @@ class WorldSession {
       combatLog: [],
       selectedTargetId: null,
       skillCooldowns: {},
+      shield: null,
       shopCatalog: null,
       shopRequest: null,
       levelUpNotice: null,

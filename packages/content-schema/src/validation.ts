@@ -102,8 +102,27 @@ function validateSkills(bundle: ContentBundle, issues: ContentIssue[]): void {
     if (skill.effect.kind === 'heal' && skill.target !== 'self') {
       issue(issues, 'error', `${path}.target`, '治疗技能只能以自身为目标');
     }
-    if (skill.effect.kind === 'directDamage' && skill.target !== 'enemy') {
+    if (skill.effect.kind === 'shield' && skill.target !== 'self') {
+      issue(issues, 'error', `${path}.target`, '护盾技能只能以自身为目标');
+    }
+    if (
+      (skill.effect.kind === 'directDamage' || skill.effect.kind === 'dot') &&
+      skill.target !== 'enemy'
+    ) {
       issue(issues, 'error', `${path}.target`, '伤害技能必须以敌方为目标');
+    }
+    if (skill.effect.kind === 'dot') {
+      if (skill.effect.durationMs < skill.effect.tickIntervalMs) {
+        issue(issues, 'error', `${path}.effect.durationMs`, '持续伤害时长不能短于一个跳伤间隔');
+      }
+      if (skill.cooldownMs > 0 && skill.cooldownMs < skill.effect.durationMs) {
+        issue(
+          issues,
+          'warning',
+          `${path}.cooldownMs`,
+          '冷却短于持续时间；重复施放只会刷新而不会叠层，剩余跳伤会被覆盖',
+        );
+      }
     }
   }
 

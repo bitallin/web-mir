@@ -9,6 +9,7 @@ import {
   monsterStateKindFromCode,
   skillCastSchema,
 } from './combat';
+import { skillEffectSchema } from './content';
 
 const commandId = '0190f2b4-7c1e-7a3c-9f2e-1b2c3d4e5f60';
 
@@ -73,6 +74,40 @@ describe('combat commands', () => {
   });
 });
 
+describe('skill effects', () => {
+  it('accepts damage-over-time and shield handlers', () => {
+    expect(
+      skillEffectSchema.safeParse({
+        kind: 'dot',
+        multiplier: 0.6,
+        flatDamage: 2,
+        tickIntervalMs: 1_000,
+        durationMs: 6_000,
+      }).success,
+    ).toBe(true);
+    expect(
+      skillEffectSchema.safeParse({
+        kind: 'shield',
+        baseAmount: 40,
+        amountPerLevel: 6,
+        durationMs: 8_000,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a tick interval below the server minimum', () => {
+    expect(
+      skillEffectSchema.safeParse({
+        kind: 'dot',
+        multiplier: 0.6,
+        flatDamage: 2,
+        tickIntervalMs: 100,
+        durationMs: 6_000,
+      }).success,
+    ).toBe(false);
+  });
+});
+
 describe('combat events', () => {
   it('validates every event variant', () => {
     const base = { eventId: commandId, serverTime: 1_000 };
@@ -108,12 +143,35 @@ describe('combat events', () => {
       },
       {
         ...base,
+        kind: 'hit',
+        sourceId: 'player-1',
+        sourceType: 'player',
+        targetId: 'player-2',
+        targetType: 'player',
+        damage: 12,
+        critical: false,
+        targetHp: 108,
+        targetMaxHp: 120,
+        skillId: 'taoist_poison',
+        absorbed: 4,
+        periodic: true,
+      },
+      {
+        ...base,
         kind: 'heal',
         sourceId: 'player-1',
         targetId: 'player-1',
         amount: 30,
         targetHp: 90,
         targetMaxHp: 95,
+      },
+      {
+        ...base,
+        kind: 'shield',
+        sourceId: 'player-1',
+        targetId: 'player-1',
+        amount: 64,
+        expiresInMs: 8_000,
       },
       {
         ...base,
