@@ -1001,7 +1001,7 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`feat(alpha-02): give each class its own sprite sheet and animations`
 - 修复 PvP 复活后旁观者显示倒地：`0f33401`
   主题：`fix(alpha-02): keep revived players upright for onlookers`
-- Alpha 0.2 S3 怪物威胁与扑击预警：`HASH_PLACEHOLDER`
+- Alpha 0.2 S3 怪物威胁与扑击预警：`3410881`
   主题：`feat(alpha-02): add monster variety and a telegraphed elite pounce`
 
 ## 11. 当前环境事实

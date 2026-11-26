@@ -2214,3 +2214,5 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 \
 
 1. 在 8584 试玩白狼王扑击预警与远程蜘蛛/石甲守卫。
 2. 做 S3 死亡代价：经验损失进入资产事务、内容化保护阈值与复活点。
+
+提交：`3410881`（`feat(alpha-02): add monster variety and a telegraphed elite pounce`）。
