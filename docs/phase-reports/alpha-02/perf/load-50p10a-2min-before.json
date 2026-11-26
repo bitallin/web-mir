@@ -9,7 +9,7 @@
     "gameWebPort": 84,
     "gameServerPort": 87,
     "controlApiPort": 86,
-    "databaseUrl": "postgres://web_legend:web_legend_dev@192.51.0.1:5432/web_legend",
+    "databaseUrl": "[redacted]",
     "output": "/tmp/wl-before.json",
     "assertGoals": true,
     "minAcceptRate": 0.7

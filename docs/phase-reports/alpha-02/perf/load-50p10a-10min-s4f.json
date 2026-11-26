@@ -9,7 +9,7 @@
     "gameWebPort": 84,
     "gameServerPort": 87,
     "controlApiPort": 86,
-    "databaseUrl": "postgres://web_legend:web_legend_dev@192.51.0.1:5432/web_legend",
+    "databaseUrl": "[redacted]",
     "output": "/data/nlp/ligen/web-mir/docs/phase-reports/alpha-02/perf/load-50p10a-10min-s4f.json",
     "assertGoals": true,
     "minAcceptRate": 0.7

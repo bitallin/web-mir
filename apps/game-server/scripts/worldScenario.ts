@@ -557,7 +557,8 @@ async function main(): Promise<void> {
     clientAccepted + clientRejected === 0 ? 1 : clientAccepted / (clientAccepted + clientRejected);
   const summary = {
     runAt: new Date().toISOString(),
-    options,
+    // Evidence is committed; never persist the connection string.
+    options: { ...options, databaseUrl: '[redacted]' },
     joined: clients.length,
     clientAccepted,
     clientRejected,
