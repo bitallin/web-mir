@@ -267,3 +267,17 @@
 - 下次：放置新传送门前 `grep` `tests/e2e` 的目标坐标与 `moveTo` 调用，并跑
   一遍最小相关用例；从全量 E2E 的失败坐标反查是否是传送触发（玩家出现在
   另一张地图/房间变化），不要先怀疑战斗或同步逻辑。
+
+## EL-025：Playwright 测试文件不要在 ESM 顶层直接 import JSON
+
+- 案例：物品图标切片的 E2E 需要从 `content/assets/manifest.json` 取帧号，最初
+  写成 `import rawManifest from '../../content/assets/manifest.json'`。`vitest`
+  与 `tsc` 都通过，但 `pnpm test:e2e` 在加载测试文件时直接失败：
+  `Module "...manifest.json" needs an import attribute of "type: json"`。Playwright
+  的 ESM 加载器不处理裸 JSON 导入，webServer 尚未启动就被判定失败。
+- 经验：Vitest、TypeScript 与 Vite 都能解析 JSON 导入，但 Playwright 的测试
+  运行时不保证；测试代码应把数据文件当数据读取，而不是依赖打包器的 JSON
+  转换。注意 JSON 读取后的类型需要显式收窄（`Record<string, number>` 在
+  `noUncheckedIndexedAccess` 下是 `number | undefined`）。
+- 下次：E2E 读取内容/资源 JSON 时统一用 `readFileSync` + `JSON.parse`，并在
+  断言前对缺失键给出明确错误；只把 JSON 导入留给应用代码（Vite/Vitest 链路）。

@@ -232,6 +232,38 @@ describe('inventory snapshot schema', () => {
   });
 });
 
+describe('shop offers', () => {
+  const offer = {
+    templateId: 'warrior_flame_cleaver',
+    name: '烈焰斩马刀',
+    kind: 'weapon',
+    quality: 'rare',
+    buyPrice: 900,
+    levelRequirement: 7,
+    stackable: false,
+    maxStack: 1,
+    attackBonus: 14,
+    defenseBonus: 0,
+    maxHpBonus: 0,
+    maxMpBonus: 0,
+    healHp: 0,
+    healMp: 0,
+  };
+  const catalog = (offers: unknown[]): unknown => ({ merchants: [], offers, sellPrices: [] });
+
+  it('carries optional quality for the merchant panel', () => {
+    expect(shopCatalogSchema.safeParse(catalog([offer])).success).toBe(true);
+    const { quality: _quality, ...withoutQuality } = offer;
+    expect(shopCatalogSchema.safeParse(catalog([withoutQuality])).success).toBe(true);
+  });
+
+  it('rejects a quality the client cannot render', () => {
+    expect(shopCatalogSchema.safeParse(catalog([{ ...offer, quality: 'legendary' }])).success).toBe(
+      false,
+    );
+  });
+});
+
 describe('world state loot collection', () => {
   it('carries public drop data and stays independent of private inventory', () => {
     const state = new WorldState();

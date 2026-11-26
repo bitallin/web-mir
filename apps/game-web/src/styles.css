@@ -1340,7 +1340,7 @@ body {
 .loot-row {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   padding: 4px 16px;
@@ -1357,10 +1357,36 @@ body {
   background: rgba(168, 207, 127, 0.1);
 }
 
-.loot-row span:nth-child(2) {
+.loot-qty {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 11px;
+}
+
+/* Generated placeholder atlas; real icons can replace the PNG without code. */
+.item-icon {
+  display: inline-block;
+  flex: none;
+  border: 1px solid #2b323a;
+  border-radius: 2px;
+  background-color: rgba(9, 12, 16, 0.65);
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.item-icon-rare {
+  border-color: rgba(224, 178, 88, 0.65);
+  box-shadow: 0 0 6px rgba(224, 178, 88, 0.35);
+}
+
+.item-quality-tag {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid rgba(224, 178, 88, 0.5);
+  color: #f0c86a;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.08em;
 }
 
 .loot-action {
@@ -1401,6 +1427,11 @@ body {
   background: rgba(16, 20, 25, 0.6);
 }
 
+.equipment-slot[data-quality='rare'] {
+  border-color: rgba(224, 178, 88, 0.55);
+  background: rgba(64, 48, 20, 0.3);
+}
+
 .slot-label {
   display: block;
   margin-bottom: 6px;
@@ -1420,6 +1451,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  font-size: 12px;
+}
+
+.slot-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.slot-title strong {
+  color: var(--parchment);
   font-size: 12px;
 }
 
@@ -1472,6 +1515,22 @@ body {
   border: 1px solid #2b323a;
   background: rgba(16, 20, 25, 0.55);
   font-size: 12px;
+}
+
+.bag-item-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.bag-item-head .bag-item-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.bag-item-head .bag-item-qty {
+  margin-left: auto;
 }
 
 .bag-item-name {
@@ -1866,9 +1925,21 @@ body {
 
 .shop-offer-main {
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.shop-offer-copy {
+  display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+
+.shop-offer[data-quality='rare'] {
+  background: rgba(64, 48, 20, 0.22);
 }
 
 .shop-offer-meta,

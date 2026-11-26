@@ -151,6 +151,8 @@ test('kill, loot, equip and relogin keep the committed economy state', async ({ 
   const bobLoot = bob.page.locator('[data-testid="loot-row"][data-template-id="slime_gel"]');
   await expect(aliceLoot.first()).toBeVisible({ timeout: 10_000 });
   await expect(bobLoot.first()).toBeVisible({ timeout: 10_000 });
+  // Ground drops render the same atlas icon as the bag.
+  await expect(aliceLoot.first().getByTestId('item-icon')).toHaveCount(1);
   await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'loot-visible.png') });
 
   await aliceLoot.first().click();

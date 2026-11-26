@@ -2547,6 +2547,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         templateId: item.id,
         name: item.name,
         kind: item.kind,
+        ...(item.quality === undefined ? {} : { quality: item.quality }),
         buyPrice: itemBuyPrice(item),
         levelRequirement: item.levelRequirement,
         stackable: item.stackable,

@@ -2586,3 +2586,88 @@ pnpm verify:invariants docs/phase-reports/alpha-02/ruins/invariants.txt
   未领取掉落将在下次进入该地图或重启 Game Server 时清理（既有机制）。
 - 观察到重启后的废墟 Room 有玩家实战（14 击杀、15/19 件拾取、2 次死亡、
   0 资产失败），说明新区域在真实客户端可玩；未在对方游玩时重启服务。
+
+## 2026-11-26 Alpha 0.2 S4-C：物品图标与品质呈现
+
+### 目标
+
+让背包、装备槽、商店与附近掉落显示物品图标，统一品质视觉；图标走可复现的
+占位资源管线，正式美术到位时可替换 PNG 而不改代码。
+
+### 实际改动
+
+1. **契约**
+   - `AssetManifest.itemIcons`：图集文件、32px 格子、8×6 行列、模板 → 帧、
+     四种物品类型回退帧与通用回退帧；帧越界或缺少 kind 回退会校验失败；
+     `style: 'procedural-placeholder'` 标记占位。
+   - `ShopOffer.quality?` 可选字段，服务端从内容快照下发。
+2. **资源生成**
+   - 抽出 `content/assets/raster.ts`（像素画布 + PNG 编码），角色生成器改用
+     共享实现；三张角色贴图重新生成后逐字节不变。
+   - 新增 `content/assets/generateItemIcons.ts`：37 件物品的独立造型与配色，
+     生成 256×192 图集；从 `BASE_CONTENT_BUNDLE` 校验覆盖率，缺图标或
+     manifest 映射过期时失败并打印期望 JSON。
+   - `pnpm assets:generate` 同时生成角色与图标；manifest 升到 `alpha0.2.2`，
+     三张编译地图重算。
+3. **客户端**
+   - `lib/itemIcons.ts`：模板 → 类型 → 通用帧解析与 CSS 图集定位。
+   - `GameScreen` 的 `ItemIcon` 组件用于背包、装备槽、商店购买/出售与掉落列表；
+     装备槽和商店行补 `data-quality` 与“稀有”标签，复用背包的金色样式。
+   - 背包卡头部改为图标 + 名称 + 数量；商店行改为图标 + 文本块，价格/按钮列
+     不变；新增样式见 `styles.css`。
+4. **服务端**
+   - `worldMapRoom` 组装商店目录时附带可选 `quality`；价格与结算不变。
+5. **测试**
+   - 契约测试：图集帧越界、缺 kind、商店品质合法/非法。
+   - 客户端纯函数测试：模板优先、kind 回退、通用回退、定位。
+   - E2E `tests/e2e/itemIcons.spec.ts`：背包 3 项、装备槽、商店 9 项与出售行
+     图标帧号与 manifest 一致；economy 用例补掉落行图标断言。
+   - 真实浏览器（8584，未重启开发栈）：背包 3/3、商店 9/9 图标，截图
+     `docs/phase-reports/alpha-02/icons/dev-*.png`。
+
+### 命令与结果
+
+```bash
+pnpm assets:generate
+pnpm maps:compile
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：68 文件、**448 测试**通过（新增 9 条）。
+- 构建：4 个应用成功。
+- 全量 E2E：首次 33/34（combat 点击目标偶发失败，单跑复测通过），第二次
+  **34/34 通过**（4.0 分钟，2 worker，独立数据库与端口）。
+- 开发栈：17:45 前后有玩家在废墟游玩，未重启；客户端资源经 Vite 热更新，
+  真实 Chromium 实测图标渲染正常。服务端仅新增可选商店品质字段，当前商店
+  无稀有商品，旧服务端下按 `common` 展示。
+
+### 遇到的问题及解决方法
+
+1. **Playwright 直接 import JSON 失败**：`itemIcons.spec.ts` 顶层 JSON 导入在
+   加载测试阶段报 `needs an import attribute of "type: json"`。改为
+   `readFileSync` + `JSON.parse`，并显式收窄类型；沉淀 EL-025。
+2. **全量 E2E 的 combat 偶发失败**：点击怪物后目标面板未出现，单独重跑通过；
+   与 TD-QA-11 的共享世界实体/移动时机一致，本轮不扩大处理。
+3. **历史截图被全量 E2E 重写**：按既有做法用 `git stash` 收起产物变更，只保留
+   `docs/phase-reports/alpha-02/icons/` 新证据。
+4. **开发栈未重启**：有玩家在线，按既有约定不打断；待无人在线时重启加载
+   服务端品质字段。
+
+### 尚未解决
+
+- 稀有物品在真实浏览器中的描边/标签仍未截到（无稳定获取路径）。
+- Phaser 场景内地面掉落标记仍是几何图形，只有 HUD 掉落列表显示图标。
+- 开发栈后端仍是 17:24 的进程，未包含商店品质字段。
+
+### 下一步计划
+
+1. 无人在线时重启开发栈；8584 试玩背包/商店图标。
+2. S4 剩余：HUD 完整重排与商店面板停靠（TD-CLI-14）、正式 tileset/角色/怪物
+   与图标美术（TD-CLI-13）、地面掉落物图标。
+3. 为 50 人回归 tick p95 14.75ms 做剖析；确认远端 CI。

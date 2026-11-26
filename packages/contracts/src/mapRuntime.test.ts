@@ -186,6 +186,49 @@ describe('asset manifest', () => {
     expect(assetManifestSchema.safeParse(broken).success).toBe(false);
   });
 
+  it('maps every baseline item and kind inside the icon atlas', () => {
+    const manifest = assetManifestSchema.parse(rawAssetManifest);
+    const icons = manifest.itemIcons;
+    expect(icons.style).toBe('procedural-placeholder');
+    const cells = icons.columns * icons.rows;
+    const frames = [
+      ...Object.values(icons.templates),
+      ...Object.values(icons.kinds),
+      icons.fallback,
+    ];
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) {
+      expect(frame).toBeGreaterThanOrEqual(0);
+      expect(frame).toBeLessThan(cells);
+    }
+    expect(icons.templates.warrior_sword).toBeTypeOf('number');
+    expect(Object.keys(icons.kinds).sort()).toEqual(['armor', 'consumable', 'material', 'weapon']);
+  });
+
+  it('rejects an item icon frame outside the atlas', () => {
+    const manifest = assetManifestSchema.parse(rawAssetManifest);
+    const broken = {
+      ...manifest,
+      itemIcons: {
+        ...manifest.itemIcons,
+        fallback: manifest.itemIcons.columns * manifest.itemIcons.rows,
+      },
+    };
+    expect(assetManifestSchema.safeParse(broken).success).toBe(false);
+  });
+
+  it('requires a fallback icon for every item kind', () => {
+    const manifest = assetManifestSchema.parse(rawAssetManifest);
+    const broken = {
+      ...manifest,
+      itemIcons: {
+        ...manifest.itemIcons,
+        kinds: { weapon: 0, armor: 1, consumable: 2 },
+      },
+    };
+    expect(assetManifestSchema.safeParse(broken).success).toBe(false);
+  });
+
   it('rejects a tileset whose gids are not contiguous', () => {
     const manifest = assetManifestSchema.parse(rawAssetManifest);
     const terrain = manifest.tilesets.terrain;

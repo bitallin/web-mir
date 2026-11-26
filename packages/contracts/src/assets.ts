@@ -129,11 +129,60 @@ export const assetMapEntrySchema = z
   })
   .strict();
 
+/**
+ * Item icons live in one square-cell atlas shared by the bag, the equipment
+ * slots and the merchant. Template ids map to explicit frames; content that
+ * arrives without an icon falls back to its kind and then to `fallback`, so a
+ * content release can never render an empty square.
+ */
+export const assetItemIconsSchema = z
+  .object({
+    image: z.string().min(1).max(200),
+    /** Marks the atlas as generated placeholder art, not production icons. */
+    style: z.literal('procedural-placeholder'),
+    size: z.number().int().min(8).max(128),
+    columns: z.number().int().min(1).max(64),
+    rows: z.number().int().min(1).max(64),
+    templates: z.record(z.string().min(1).max(64), z.number().int().min(0)),
+    kinds: z
+      .object({
+        weapon: z.number().int().min(0),
+        armor: z.number().int().min(0),
+        consumable: z.number().int().min(0),
+        material: z.number().int().min(0),
+      })
+      .strict(),
+    fallback: z.number().int().min(0),
+  })
+  .strict()
+  .superRefine((icons, ctx) => {
+    const cells = icons.columns * icons.rows;
+    const requireCell = (frame: number, path: (string | number)[]): void => {
+      if (frame >= cells) {
+        ctx.addIssue({
+          code: 'custom',
+          path,
+          message: `icon frame ${String(frame)} exceeds the ${String(cells)}-cell atlas`,
+        });
+      }
+    };
+    for (const [templateId, frame] of Object.entries(icons.templates)) {
+      requireCell(frame, ['templates', templateId]);
+    }
+    for (const [kind, frame] of Object.entries(icons.kinds)) {
+      requireCell(frame, ['kinds', kind]);
+    }
+    requireCell(icons.fallback, ['fallback']);
+  });
+
+export type AssetItemIcons = z.infer<typeof assetItemIconsSchema>;
+
 export const assetManifestSchema = z
   .object({
     version: z.string().min(1).max(64),
     tilesets: z.record(z.string(), assetTilesetSchema),
     characters: z.record(z.string(), assetCharacterSchema),
+    itemIcons: assetItemIconsSchema,
     maps: z.record(z.string(), assetMapEntrySchema),
   })
   .strict();

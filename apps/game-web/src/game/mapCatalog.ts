@@ -25,6 +25,10 @@ const CLASS_IMAGE_URLS: Readonly<Record<string, string>> = {
   mage: new URL('../../../../content/assets/generated/class_mage.png', import.meta.url).href,
   taoist: new URL('../../../../content/assets/generated/class_taoist.png', import.meta.url).href,
 };
+export const ITEM_ICON_ATLAS_URL = new URL(
+  '../../../../content/assets/generated/item_icons.png',
+  import.meta.url,
+).href;
 
 export type CharacterAsset = {
   /** Phaser texture key. */

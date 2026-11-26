@@ -7,6 +7,8 @@ import {
   TILE_UNITS,
   type CharacterView,
   type CombatTargetChanged,
+  type ItemKind,
+  type ItemQuality,
   type ItemView,
   type ShopOffer,
   type SkillView,
@@ -14,7 +16,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 
 import { issueGameTicket } from '../api/client';
-import { mapBundleFor, mapNameFor } from '../game/mapCatalog';
+import { assetManifest, ITEM_ICON_ATLAS_URL, mapBundleFor, mapNameFor } from '../game/mapCatalog';
 import {
   describeDelta,
   equipmentDelta,
@@ -23,6 +25,7 @@ import {
   sortBagItems,
   QUALITY_LABELS,
 } from '../lib/inventoryView';
+import { itemIconFrame, itemIconStyle } from '../lib/itemIcons';
 import type { ConnectionStatus } from '../net/worldClient';
 import { useWorldSession } from '../session/useWorldSession';
 import { Minimap } from './Minimap';
@@ -71,6 +74,28 @@ function describeDeathPenalty(
 
 function describeShopOffer(offer: ShopOffer): string {
   return itemStatLine(offer);
+}
+
+function ItemIcon({
+  templateId,
+  kind,
+  quality,
+}: {
+  templateId: string;
+  kind?: ItemKind;
+  quality?: ItemQuality;
+}): JSX.Element {
+  const rare = quality === 'rare';
+  return (
+    <span
+      className={`item-icon${rare ? ' item-icon-rare' : ''}`}
+      data-testid="item-icon"
+      data-frame={itemIconFrame(assetManifest.itemIcons, templateId, kind)}
+      style={itemIconStyle(ITEM_ICON_ATLAS_URL, assetManifest.itemIcons, templateId, kind)}
+      role="img"
+      aria-label="物品图标"
+    />
+  );
 }
 
 function AutoAttackBar({
@@ -716,8 +741,9 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                       pickup(drop.dropId);
                     }}
                   >
+                    <ItemIcon templateId={drop.templateId} />
                     <span>{drop.displayName}</span>
-                    <span>×{drop.quantity}</span>
+                    <span className="loot-qty">×{drop.quantity}</span>
                     <span className="loot-action">拾取</span>
                   </button>
                 </li>
@@ -886,14 +912,27 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                     data-testid="shop-offer"
                     data-template-id={offer.templateId}
                     data-price={offer.buyPrice}
+                    data-quality={qualityOf(offer)}
                   >
                     <div className="shop-offer-main">
-                      <strong>{offer.name}</strong>
-                      <span className="shop-offer-meta">{describeShopOffer(offer)}</span>
-                      <span className="shop-offer-level">
-                        Lv.{offer.levelRequirement}
-                        {offer.levelRequirement > level ? ' · 等级不足' : ''}
-                      </span>
+                      <ItemIcon
+                        templateId={offer.templateId}
+                        kind={offer.kind}
+                        quality={qualityOf(offer)}
+                      />
+                      <div className="shop-offer-copy">
+                        <strong>
+                          {offer.name}
+                          {qualityOf(offer) === 'rare' ? (
+                            <em className="item-quality-tag">{QUALITY_LABELS.rare}</em>
+                          ) : null}
+                        </strong>
+                        <span className="shop-offer-meta">{describeShopOffer(offer)}</span>
+                        <span className="shop-offer-level">
+                          Lv.{offer.levelRequirement}
+                          {offer.levelRequirement > level ? ' · 等级不足' : ''}
+                        </span>
+                      </div>
                     </div>
                     <span className="shop-price">{offer.buyPrice} 金币</span>
                     <button
@@ -939,10 +978,23 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                       data-testid="shop-sell-item"
                       data-item-id={item.itemId}
                       data-price={unitPrice}
+                      data-quality={qualityOf(item)}
                     >
                       <div className="shop-offer-main">
-                        <strong>{item.name}</strong>
-                        <span className="shop-offer-meta">持有 {item.quantity}</span>
+                        <ItemIcon
+                          templateId={item.templateId}
+                          kind={item.kind}
+                          quality={qualityOf(item)}
+                        />
+                        <div className="shop-offer-copy">
+                          <strong>
+                            {item.name}
+                            {qualityOf(item) === 'rare' ? (
+                              <em className="item-quality-tag">{QUALITY_LABELS.rare}</em>
+                            ) : null}
+                          </strong>
+                          <span className="shop-offer-meta">持有 {item.quantity}</span>
+                        </div>
                       </div>
                       <span className="shop-price">{unitPrice} 金币/个</span>
                       <button
@@ -1012,11 +1064,26 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               data-testid="equipment-weapon"
               data-item-id={equipment?.weapon?.itemId ?? ''}
               data-template-id={equipment?.weapon?.templateId ?? ''}
+              data-quality={
+                equipment?.weapon === null || equipment?.weapon === undefined
+                  ? 'none'
+                  : qualityOf(equipment.weapon)
+              }
             >
               <span className="slot-label">武器</span>
               {equipment?.weapon !== null && equipment?.weapon !== undefined ? (
                 <div className="slot-body">
-                  <strong>{equipment.weapon.name}</strong>
+                  <span className="slot-title">
+                    <ItemIcon
+                      templateId={equipment.weapon.templateId}
+                      kind={equipment.weapon.kind}
+                      quality={qualityOf(equipment.weapon)}
+                    />
+                    <strong>{equipment.weapon.name}</strong>
+                    {qualityOf(equipment.weapon) === 'rare' ? (
+                      <em className="item-quality-tag">{QUALITY_LABELS.rare}</em>
+                    ) : null}
+                  </span>
                   <span>{itemStatLine(equipment.weapon)}</span>
                   <button
                     type="button"
@@ -1037,11 +1104,26 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               data-testid="equipment-armor"
               data-item-id={equipment?.armor?.itemId ?? ''}
               data-template-id={equipment?.armor?.templateId ?? ''}
+              data-quality={
+                equipment?.armor === null || equipment?.armor === undefined
+                  ? 'none'
+                  : qualityOf(equipment.armor)
+              }
             >
               <span className="slot-label">护甲</span>
               {equipment?.armor !== null && equipment?.armor !== undefined ? (
                 <div className="slot-body">
-                  <strong>{equipment.armor.name}</strong>
+                  <span className="slot-title">
+                    <ItemIcon
+                      templateId={equipment.armor.templateId}
+                      kind={equipment.armor.kind}
+                      quality={qualityOf(equipment.armor)}
+                    />
+                    <strong>{equipment.armor.name}</strong>
+                    {qualityOf(equipment.armor) === 'rare' ? (
+                      <em className="item-quality-tag">{QUALITY_LABELS.rare}</em>
+                    ) : null}
+                  </span>
                   <span>{itemStatLine(equipment.armor)}</span>
                   <button
                     type="button"
@@ -1075,13 +1157,20 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 data-kind={item.kind}
                 data-quality={qualityOf(item)}
               >
-                <span className="bag-item-name">
-                  {item.name}
-                  {qualityOf(item) === 'rare' ? (
-                    <em className="bag-item-quality">{QUALITY_LABELS.rare}</em>
-                  ) : null}
+                <span className="bag-item-head">
+                  <ItemIcon
+                    templateId={item.templateId}
+                    kind={item.kind}
+                    quality={qualityOf(item)}
+                  />
+                  <span className="bag-item-name">
+                    {item.name}
+                    {qualityOf(item) === 'rare' ? (
+                      <em className="bag-item-quality">{QUALITY_LABELS.rare}</em>
+                    ) : null}
+                  </span>
+                  <span className="bag-item-qty">×{item.quantity}</span>
                 </span>
-                <span className="bag-item-qty">×{item.quantity}</span>
                 <span className="bag-item-meta">{itemStatLine(item)}</span>
                 {comparisonFor(item) !== '' ? (
                   <span

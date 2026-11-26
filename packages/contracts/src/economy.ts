@@ -207,6 +207,8 @@ export const shopOfferSchema = z
     templateId: templateIdSchema,
     name: z.string().min(1).max(24),
     kind: itemKindSchema,
+    /** Optional for the same reason as `itemViewSchema.quality`: old content. */
+    quality: itemQualitySchema.optional(),
     buyPrice: z.number().int().positive(),
     levelRequirement: z.number().int().min(1),
     stackable: z.boolean(),

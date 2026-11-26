@@ -1,5 +1,5 @@
 {
-  "version": "alpha0.2.1",
+  "version": "alpha0.2.2",
   "tilesets": {
     "terrain": {
       "id": "terrain",
@@ -121,6 +121,54 @@
         "death": { "frames": [8, 9], "frameMs": 240, "loop": false }
       }
     }
+  },
+  "itemIcons": {
+    "style": "procedural-placeholder",
+    "image": "item_icons.png",
+    "size": 32,
+    "columns": 8,
+    "rows": 6,
+    "templates": {
+      "alpha_hide_armor": 0,
+      "alpha_pelt": 1,
+      "bone_shard": 2,
+      "chain_armor": 3,
+      "cloth_armor": 4,
+      "corrupt_crystal": 5,
+      "gargoyle_core": 6,
+      "gargoyle_guard_armor": 7,
+      "large_hp_potion": 8,
+      "large_mp_potion": 9,
+      "leather_armor": 10,
+      "mage_jade_staff": 11,
+      "mage_mithril_staff": 12,
+      "mage_ruin_scepter": 13,
+      "mage_staff": 14,
+      "mage_storm_staff": 15,
+      "mage_void_scepter": 16,
+      "plate_armor": 17,
+      "slime_gel": 18,
+      "small_hp_potion": 19,
+      "small_mp_potion": 20,
+      "spider_leg": 21,
+      "stone_core": 22,
+      "stone_plate_armor": 23,
+      "taoist_blade": 24,
+      "taoist_immortal_sword": 25,
+      "taoist_moon_sword": 26,
+      "taoist_ruin_blade": 27,
+      "taoist_soul_sword": 28,
+      "taoist_wood_sword": 29,
+      "warrior_battle_axe": 30,
+      "warrior_flame_cleaver": 31,
+      "warrior_iron_blade": 32,
+      "warrior_ruin_cleaver": 33,
+      "warrior_steel_greataxe": 34,
+      "warrior_sword": 35,
+      "wolf_pelt": 36
+    },
+    "kinds": { "weapon": 37, "armor": 38, "consumable": 39, "material": 40 },
+    "fallback": 41
   },
   "maps": {
     "starter_town": {
