@@ -1033,6 +1033,8 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`fix(alpha-02): keep revived players upright for onlookers`
 - Alpha 0.2 S3 怪物威胁与扑击预警：`3410881`
   主题：`feat(alpha-02): add monster variety and a telegraphed elite pounce`
+- 修复战斗 HUD 遮挡画面：`6f2924b`
+  主题：`fix(alpha-02): move the combat HUD out of the play area`
 
 ## 11. 当前环境事实
 
