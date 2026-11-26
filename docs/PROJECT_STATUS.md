@@ -1281,6 +1281,8 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`feat(alpha-02): add the ruins region and level 8-10 progression`
 - Alpha 0.2 S4-C 物品图标与品质呈现：`8bf1d21`
   主题：`feat(alpha-02): give every item an icon and unify rarity display`
+- Alpha 0.2 S4-D HUD 信息层级重排：`c8ea7b7`
+  主题：`feat(alpha-02): rework the in-world HUD around the play area`
 
 ## 11. 当前环境事实
 
