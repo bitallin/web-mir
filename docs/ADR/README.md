@@ -35,5 +35,7 @@
 | [ADR-028](ADR-028-damage-over-time-and-shield-effects.md)                      | 持续伤害与护盾效果、技能解锁顺序         | Accepted              |
 | [ADR-029](ADR-029-character-animation-clips.md)                                | 角色外观与动画片段由资源 manifest 描述   | Accepted              |
 | [ADR-030](ADR-030-monster-windup-and-telegraph.md)                             | 怪物攻击前摇与扑击预警                   | Accepted              |
+| [ADR-031](ADR-031-death-cost-and-respawn-content.md)                           | 死亡代价、新手保护与复活点内容化         | Accepted              |
+| [ADR-032](ADR-032-equipment-tiers-quality-and-comparison.md)                   | 装备成长线、稀有品质与背包对比           | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

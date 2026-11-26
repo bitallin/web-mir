@@ -133,6 +133,41 @@ describe('content validation', () => {
     expect(result.issues.some((issue) => issue.message.includes('收购价'))).toBe(true);
   });
 
+  it('rejects a quality tag on a non-equipment item', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const potion = bundle.items['small_hp_potion'];
+        if (potion !== undefined) {
+          potion.quality = 'rare';
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.path.endsWith('.quality'))).toBe(true);
+  });
+
+  it('warns about equipment that no player could ever obtain', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        bundle.items['unreachable_blade'] = {
+          ...bundle.items['warrior_sword']!,
+          id: 'unreachable_blade',
+          name: '失落之刃',
+          levelRequirement: 9,
+        };
+      }),
+    );
+    expect(result.valid).toBe(true);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.severity === 'warning' &&
+          issue.path === 'items.unreachable_blade' &&
+          issue.message.includes('无法获得'),
+      ),
+    ).toBe(true);
+  });
+
   it('does not inject price defaults into legacy payloads (EL-004)', () => {
     const legacy = clone(BASE_CONTENT_BUNDLE);
     for (const item of Object.values(legacy.items)) {

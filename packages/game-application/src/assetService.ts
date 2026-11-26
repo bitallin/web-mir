@@ -197,6 +197,7 @@ function itemView(row: ItemInstance, catalog: ItemCatalog): ItemView {
     quantity: row.quantity,
     ...(row.slotIndex === null ? {} : { slotIndex: row.slotIndex }),
     ...(definition.equipSlot === undefined ? {} : { equipSlot: definition.equipSlot }),
+    ...(definition.quality === undefined ? {} : { quality: definition.quality }),
     levelRequirement: definition.levelRequirement,
     attackBonus: definition.attackBonus,
     defenseBonus: definition.defenseBonus,

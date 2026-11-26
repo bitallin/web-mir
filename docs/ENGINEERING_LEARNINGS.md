@@ -238,3 +238,18 @@
 - 下次：新增 section 前先列出全部触点（contracts、基线内容、校验、枚举迁移、
   运营契约、diff/预览、消费方），并判断它是“实体集合”还是“设置对象”；设置类
   规则优先做成一个可扩展的 `rules` 对象字段，避免每加一条规则就新建 section。
+
+## EL-023：新增内容校验规则先判断“历史数据是否必然满足”
+
+- 案例：S4 装备切片新增“装备必须能获得”规则，最初写成 error。EL-004 的
+  legacy payload 测试立刻失败（历史 Release 在商店价格出现前就存在），更严重
+  的是 `ContentStore` 会在 Room 启动时重新校验数据库里的活动 Release：新规则
+  一旦是 error，已发布的旧版本会直接无法加载，白狼王/扑击等线上内容随之消失。
+  最终把该规则改为 warning，只保留“非装备设置 quality”这条历史数据不可能
+  触发的新 error。
+- 经验：内容校验同时服务两种场景——发布候选 bundle（可以严格）与加载历史
+  Release（必须永远可读）。新增规则必须回答：旧 payload 是否一定满足？不确定
+  就先用 warning，等历史版本退役后再升级为 error。
+- 下次：改动 `packages/content-schema/src/validation.ts` 时，用 EL-004 的
+  legacy payload 回归测试和一条“加载已存 Release”的集成路径同时验证；把
+  “新 error 规则不得让历史 Release 失效”当成内容发布的默认门禁。

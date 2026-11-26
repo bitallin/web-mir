@@ -26,6 +26,14 @@ export const ITEM_KINDS = ['weapon', 'armor', 'consumable', 'material'] as const
 export const itemKindSchema = z.enum(ITEM_KINDS);
 export type ItemKind = z.infer<typeof itemKindSchema>;
 
+/**
+ * Loot rarity. `common` is the implicit tier of every item that predates the
+ * field, so it stays optional to keep historical release checksums unchanged.
+ */
+export const ITEM_QUALITIES = ['common', 'rare'] as const;
+export const itemQualitySchema = z.enum(ITEM_QUALITIES);
+export type ItemQuality = z.infer<typeof itemQualitySchema>;
+
 export const EQUIPMENT_SLOTS = ['weapon', 'armor'] as const;
 export const equipmentSlotSchema = z.enum(EQUIPMENT_SLOTS);
 export type EquipmentSlot = z.infer<typeof equipmentSlotSchema>;
@@ -54,6 +62,7 @@ export const itemViewSchema = z
       .max(INVENTORY_CAPACITY - 1)
       .optional(),
     equipSlot: equipmentSlotSchema.optional(),
+    quality: itemQualitySchema.optional(),
     levelRequirement: z.number().int().min(1),
     attackBonus: z.number().int().nonnegative(),
     defenseBonus: z.number().int().nonnegative(),

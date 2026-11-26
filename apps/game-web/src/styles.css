@@ -1300,7 +1300,25 @@ body {
   cursor: pointer;
 }
 
+.panel-sort {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid #3a444f;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.panel-sort[aria-pressed='true'] {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
 .bag-toggle:hover,
+.panel-sort:hover,
 .panel-close:hover {
   background: rgba(201, 162, 39, 0.12);
 }
@@ -1458,6 +1476,31 @@ body {
 
 .bag-item-name {
   color: var(--parchment);
+}
+
+.bag-item-rare {
+  border-color: rgba(224, 178, 88, 0.45);
+  background: rgba(64, 48, 20, 0.35);
+}
+
+.bag-item-rare .bag-item-name {
+  color: #f0c86a;
+}
+
+.bag-item-quality {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid rgba(224, 178, 88, 0.5);
+  color: #f0c86a;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.bag-item-compare {
+  color: #9fd0a1;
+  font-family: var(--mono);
+  font-size: 10px;
 }
 
 .bag-item-qty {

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { characterClassSchema, type CharacterClass } from './character';
-import { equipmentSlotSchema, itemKindSchema } from './economy';
+import { equipmentSlotSchema, itemKindSchema, itemQualitySchema } from './economy';
 
 /**
  * Declarative content bundle shared by the admin editor, the Control API and
@@ -183,6 +183,11 @@ export const itemContentSchema = z
     name: z.string().trim().min(1).max(24),
     kind: itemKindSchema,
     equipSlot: equipmentSlotSchema.optional(),
+    /**
+     * Optional rarity tag. Absent means `common`, so releases published before
+     * quality existed keep their canonical checksum (EL-004).
+     */
+    quality: itemQualitySchema.optional(),
     classId: characterClassSchema.optional(),
     levelRequirement: z.number().int().min(1).max(100),
     stackable: z.boolean(),

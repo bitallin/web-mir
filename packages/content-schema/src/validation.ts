@@ -171,10 +171,26 @@ function validateMonsters(bundle: ContentBundle, issues: ContentIssue[]): void {
 }
 
 function validateItems(bundle: ContentBundle, issues: ContentIssue[]): void {
+  const looted = new Set<string>();
+  for (const table of Object.values(bundle.lootTables)) {
+    for (const entry of table.entries) {
+      looted.add(entry.templateId);
+    }
+  }
+  const starter = new Set<string>();
+  for (const definition of Object.values(bundle.classes)) {
+    for (const entry of definition.starterKit) {
+      starter.add(entry.templateId);
+    }
+  }
+
   for (const [key, item] of Object.entries(bundle.items)) {
     const path = `items.${key}`;
     if (key !== item.id) {
       issue(issues, 'error', path, `物品键名 "${key}" 与 id "${item.id}" 不一致`);
+    }
+    if (item.quality !== undefined && item.kind !== 'weapon' && item.kind !== 'armor') {
+      issue(issues, 'error', `${path}.quality`, '只有武器和防具可以设置品质');
     }
 
     const expectedSlot = item.kind === 'weapon' ? 'weapon' : item.kind === 'armor' ? 'armor' : null;
@@ -211,6 +227,14 @@ function validateItems(bundle: ContentBundle, issues: ContentIssue[]): void {
     const sellPrice = item.sellPrice ?? 0;
     if (buyPrice > 0 && sellPrice >= buyPrice) {
       issue(issues, 'error', path, '收购价必须低于出售价，否则玩家可无限兑换金币');
+    }
+    if (
+      (item.kind === 'weapon' || item.kind === 'armor') &&
+      buyPrice === 0 &&
+      !looted.has(key) &&
+      !starter.has(key)
+    ) {
+      issue(issues, 'warning', path, '装备当前无法获得：加入掉落表、设置出售价或作为初始装备');
     }
   }
 }

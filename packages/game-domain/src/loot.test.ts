@@ -45,7 +45,8 @@ describe('loot tables', () => {
 
   it('drops guaranteed entries even when the chance roll is zero', () => {
     const table = requireLootTable('forest_wolf');
-    const rng = sequenceRng([0, 0, 0, 0.99, 0, 0.99, 0]);
+    // Gold roll 0, then every optional entry misses its chance.
+    const rng = sequenceRng([0, ...table.entries.flatMap(() => [0.99, 0])]);
     const roll = rollLoot(table, rng);
     expect(roll.items).toEqual([{ templateId: 'wolf_pelt', quantity: 1 }]);
   });

@@ -7,6 +7,7 @@ import {
   TILE_UNITS,
   type CharacterView,
   type CombatTargetChanged,
+  type ItemView,
   type ShopOffer,
   type SkillView,
 } from '@web-legend/contracts';
@@ -14,6 +15,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'rea
 
 import { issueGameTicket } from '../api/client';
 import { mapBundleFor, mapNameFor } from '../game/mapCatalog';
+import {
+  describeDelta,
+  equipmentDelta,
+  qualityOf,
+  sortBagItems,
+  QUALITY_LABELS,
+} from '../lib/inventoryView';
 import type { ConnectionStatus } from '../net/worldClient';
 import { useWorldSession } from '../session/useWorldSession';
 import { Minimap } from './Minimap';
@@ -122,6 +130,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const [chatDraft, setChatDraft] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
+  const [bagSorted, setBagSorted] = useState(false);
   const [characterOpen, setCharacterOpen] = useState(false);
   const [combatInfoOpen, setCombatInfoOpen] = useState(true);
   const [shopOpen, setShopOpen] = useState(false);
@@ -181,6 +190,32 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const exp = inventory?.exp ?? character.exp;
   const expToNextLevel = inventory?.expToNextLevel ?? 0;
   const gold = inventory?.gold ?? 0;
+  const displayedItems = bagSorted ? sortBagItems(items) : items;
+
+  const equippedFor = (item: ItemView): ItemView | null => {
+    if (item.equipSlot === 'weapon') {
+      return equipment?.weapon ?? null;
+    }
+    if (item.equipSlot === 'armor') {
+      return equipment?.armor ?? null;
+    }
+    return null;
+  };
+
+  const comparisonFor = (item: ItemView): string => {
+    if (item.equipSlot === undefined) {
+      return '';
+    }
+    const equipped = equippedFor(item);
+    if (equipped?.itemId === item.itemId) {
+      return '';
+    }
+    const delta = describeDelta(equipmentDelta(equipped, item));
+    if (equipped === null) {
+      return delta === '' ? '' : `装备后 ${delta}`;
+    }
+    return delta === '' ? '较当前 属性相同' : `较当前 ${delta}`;
+  };
   const mapBundle = useMemo(() => mapBundleFor(state.mapId), [state.mapId]);
   const pvpEnabled = state.combatProfile?.pvpEnabled ?? mapBundle.manifest.pvpMode === 'open';
   const shopCatalog = state.shopCatalog;
@@ -364,7 +399,12 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               data-testid="inventory-toggle"
               aria-expanded={bagOpen}
               onClick={() => {
-                setBagOpen((open) => !open);
+                const next = !bagOpen;
+                setBagOpen(next);
+                if (next) {
+                  // The centered merchant panel covers the bag's controls.
+                  setShopOpen(false);
+                }
               }}
             >
               背包 B
@@ -387,8 +427,12 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 data-testid="shop-toggle"
                 aria-expanded={shopOpen}
                 onClick={() => {
+                  const next = !shopOpen;
                   setShopTab('buy');
-                  setShopOpen((open) => !open);
+                  setShopOpen(next);
+                  if (next) {
+                    setBagOpen(false);
+                  }
                 }}
               >
                 杂货商
@@ -964,6 +1008,17 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             </span>
             <button
               type="button"
+              className="panel-sort"
+              data-testid="bag-sort"
+              aria-pressed={bagSorted}
+              onClick={() => {
+                setBagSorted((sorted) => !sorted);
+              }}
+            >
+              {bagSorted ? '恢复顺序' : '整理'}
+            </button>
+            <button
+              type="button"
               className="panel-close"
               onClick={() => {
                 setBagOpen(false);
@@ -1026,22 +1081,28 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             </div>
           </div>
 
-          <p className="bag-stats">
+          <p className="bag-stats" data-testid="bag-stats">
             攻击 {inventory.attack} · 防御 {inventory.defense} · 金币 {inventory.gold}
           </p>
 
           <ul className="bag-grid" data-testid="inventory-items">
-            {items.map((item) => (
+            {displayedItems.map((item) => (
               <li
                 key={item.itemId}
-                className="bag-item"
+                className={`bag-item bag-item-${qualityOf(item)}`}
                 data-testid="inventory-item"
                 data-item-id={item.itemId}
                 data-template-id={item.templateId}
                 data-quantity={item.quantity}
                 data-kind={item.kind}
+                data-quality={qualityOf(item)}
               >
-                <span className="bag-item-name">{item.name}</span>
+                <span className="bag-item-name">
+                  {item.name}
+                  {qualityOf(item) === 'rare' ? (
+                    <em className="bag-item-quality">{QUALITY_LABELS.rare}</em>
+                  ) : null}
+                </span>
                 <span className="bag-item-qty">×{item.quantity}</span>
                 <span className="bag-item-meta">
                   {item.kind === 'weapon'
@@ -1054,6 +1115,15 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           }`.trim()
                         : '材料'}
                 </span>
+                {comparisonFor(item) !== '' ? (
+                  <span
+                    className="bag-item-compare"
+                    data-testid="equipment-comparison"
+                    data-comparison={comparisonFor(item)}
+                  >
+                    {comparisonFor(item)}
+                  </span>
+                ) : null}
                 {item.kind === 'weapon' || item.kind === 'armor' ? (
                   <button
                     type="button"

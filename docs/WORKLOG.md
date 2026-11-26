@@ -2376,3 +2376,87 @@ pnpm exec vitest run apps/game-server/test/combat.integration.test.ts -t "experi
 
 1. 8584 试玩死亡代价与新手保护。
 2. 进入 S4：装备/掉落/背包与正式美术。
+
+## 2026-11-26 Alpha 0.2 S4 切片 A：装备成长线、稀有品质与背包对比
+
+### 目标
+
+让 1–7 级有分层装备可追：更多可掉落装备、稀有品质、背包属性对比与整理，
+补齐“打怪 → 掉落 → 装备 → 再成长”的装备内容。
+
+### 实际改动
+
+1. **契约**
+   - `ItemContent.quality?: 'common' | 'rare'`（可选、无默认值，历史 checksum
+     不变）；`ItemView.quality` 可选；导出 `ITEM_QUALITIES` /
+     `itemQualitySchema` / `ItemQuality`。
+2. **内容**
+   - 新增 12 件装备：三职业 3/5/7 级武器（7 级稀有）与 4/6/7 级护甲
+     （狼王皮甲稀有）；装备总数 17。
+   - 掉落：森林狼 3 级武器（各 2%）；毒牙蜘蛛锁子甲 5%；石甲守卫锁子甲 8%、
+     铁板甲 4%、5 级武器各 3%；白狼王铁板甲 8%、狼王皮甲 12%、稀有武器各 4%。
+   - 3 级武器与锁子甲上架商店（120 / 180 金币）。
+3. **校验**
+   - error：非装备设置 `quality`。
+   - warning：装备无法获得（无掉落、无售价、非初始装备）；不设为 error，
+     避免历史 Release 在 `ContentStore` 加载时失效。
+4. **客户端**
+   - `apps/game-web/src/lib/inventoryView.ts`：品质缺省、属性对比、整理顺序，
+     全部纯函数并单测。
+   - 背包显示稀有描边/标签与 `data-quality`；装备显示“装备后 / 较当前 ±属性”；
+     新增“整理”按钮（只改显示顺序）。
+   - 背包与商店面板互斥打开，避免居中商店覆盖背包控制。
+5. **测试**
+   - `tests/e2e/equipment.spec.ts`：买布衣 → 品质与“装备后 防御 +2” → 整理 →
+     装备后服务端防御 8 → 10。
+   - `skills.spec.ts`：两个用例分配独立史莱姆刷点（TD-QA-11 类假失败）。
+6. **内容发布**
+   - 通过 Control API 保存 items/lootTables 草稿（校验 0 问题）、发布并激活
+     `2026.11.26.5`（checksum `a0805598…`，新增 12、变更 4）。
+   - 开发栈 14:00 重启到新代码；真实 Chromium 实测商店出现锁子甲/百炼战斧，
+     背包显示品质与对比。
+7. **文档**
+   - ADR-032、切片报告、路线图/执行计划/状态/债务/经验更新。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：67 文件、**433 测试**通过（新增 9 条）。
+- 构建：4 个应用成功。
+- 全量 E2E：**32/32 通过**（3.8 分钟，2 worker，独立数据库与端口）。
+- 内容发布：draft 200、validate 200（valid=true, 0 issues）、publish 201、
+  activate 200。
+- 开发栈实测：`docs/phase-reports/alpha-02/equipment/dev-bag.png`、
+  `dev-shop.png`。
+
+### 遇到的问题及解决方法
+
+1. **新校验规则拒绝历史 Release**：error 级“装备必须可获得”使 EL-004 的
+   legacy payload 测试失败；`ContentStore` 加载活动 Release 时也会校验，旧
+   baseline 会被拒。改为 warning；沉淀 EL-023。
+2. **掉落表固定 RNG 序列耗尽**：`forest_wolf` 条目变多；测试按条目数生成序列。
+3. **商店居中面板拦截背包按钮**：打开背包时关闭商店、打开商店时关闭背包；
+   商店仍覆盖顶部开关，记录 TD-CLI-14。
+4. **skills E2E 共用史莱姆假失败**：两个用例分别使用 `wilds_slime_10` 与
+   `wilds_slime_8`，全量 32/32 稳定。
+
+### 尚未解决
+
+- 稀有品质只有单测与 CSS 覆盖（E2E 无法稳定获得稀有掉落）。
+- 正式图标/美术（TD-CLI-13）、丢弃物品、装备槽扩展未做。
+- 远端 CI 仍待确认。
+
+### 下一步计划
+
+1. 8584 试玩：击杀森林狼/石甲守卫/白狼王观察掉落，回城购买 3 级武器。
+2. S4 后续：图标与 HUD 重排、正式美术、丢弃物品、装备槽评估。
+3. 确认远端 CI。

@@ -8,10 +8,12 @@ import { setCharacterLevel } from './characterFixture';
 
 const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'alpha-02', 'skills');
 const PASSWORD = 'alpha-two-skills';
-// Other wilds specs use slimes 1–3 around the portal; this one is far away so
-// parallel specs cannot pull its aggro or kill it.
-const SLIME_ID = 'wilds_slime_10';
-const SLIME_TILE = { x: 20, y: 21 };
+// Other wilds specs use slimes 1–3 around the portal; these are far away so
+// parallel specs cannot pull their aggro or kill them. Each test gets its own
+// slime: sharing one made the second test wait for a monster the first had
+// already damaged or pulled off its spawn (TD-QA-11).
+const POISON_SLIME = { id: 'wilds_slime_10', tile: { x: 20, y: 21 } };
+const SHIELD_SLIME = { id: 'wilds_slime_8', tile: { x: 42, y: 30 } };
 
 test.describe.configure({ mode: 'serial', timeout: 180_000 });
 
@@ -71,7 +73,10 @@ async function moveTo(page: Page, x: number, y: number): Promise<void> {
   await page.evaluate((tile) => window.__webLegendDebug?.moveToTile(tile.x, tile.y), { x, y });
 }
 
-async function transferToWilds(page: Page): Promise<void> {
+async function transferToWilds(
+  page: Page,
+  slimeSpot: { id: string; tile: { x: number; y: number } },
+): Promise<void> {
   await moveTo(page, 38, 15);
   await expect(page.getByTestId('map-name')).toHaveAttribute('data-map-id', 'starter_wilds', {
     timeout: 30_000,
@@ -79,8 +84,8 @@ async function transferToWilds(page: Page): Promise<void> {
   await expect(page.getByTestId('connection-status')).toHaveAttribute('data-status', 'connected', {
     timeout: 20_000,
   });
-  await moveTo(page, SLIME_TILE.x, SLIME_TILE.y - 1);
-  const slime = page.locator(`[data-testid="monster-row"][data-monster-id="${SLIME_ID}"]`);
+  await moveTo(page, slimeSpot.tile.x, slimeSpot.tile.y - 1);
+  const slime = page.locator(`[data-testid="monster-row"][data-monster-id="${slimeSpot.id}"]`);
   await expect(slime).toBeVisible({ timeout: 30_000 });
   // The slime only enters its attack state once the player has actually
   // arrived, which is the observable condition for being inside skill range.
@@ -101,13 +106,13 @@ test.afterEach(async () => {
 test('a level-5 taoist casts poison and the server ticks damage over time', async ({ browser }) => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   const world = await registerLeveledWorld(browser, 'Poison', 'taoist', 5);
-  await transferToWilds(world.page);
+  await transferToWilds(world.page, POISON_SLIME);
 
   await expect(world.page.getByTestId('skill-2')).toHaveAttribute('data-skill-id', 'taoist_poison');
 
   await world.page.evaluate(
     (monsterId) => window.__webLegendDebug?.castSkill('taoist_poison', monsterId),
-    SLIME_ID,
+    POISON_SLIME.id,
   );
 
   await expect(world.page.getByTestId('combat-log')).toContainText('持续伤害', {
@@ -117,7 +122,7 @@ test('a level-5 taoist casts poison and the server ticks damage over time', asyn
     .poll(
       async () => {
         const row = world.page.locator(
-          `[data-testid="monster-row"][data-monster-id="${SLIME_ID}"]`,
+          `[data-testid="monster-row"][data-monster-id="${POISON_SLIME.id}"]`,
         );
         const hp = await row.getAttribute('data-hp').catch(() => null);
         return hp === null ? 0 : Number(hp);
@@ -134,7 +139,7 @@ test('a level-5 warrior casts iron skin and the shield absorbs monster damage', 
 }) => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   const world = await registerLeveledWorld(browser, 'Shield', 'warrior', 5);
-  await transferToWilds(world.page);
+  await transferToWilds(world.page, SHIELD_SLIME);
 
   await expect(world.page.getByTestId('skill-2')).toHaveAttribute(
     'data-skill-id',
