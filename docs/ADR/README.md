@@ -37,5 +37,7 @@
 | [ADR-030](ADR-030-monster-windup-and-telegraph.md)                             | 怪物攻击前摇与扑击预警                   | Accepted              |
 | [ADR-031](ADR-031-death-cost-and-respawn-content.md)                           | 死亡代价、新手保护与复活点内容化         | Accepted              |
 | [ADR-032](ADR-032-equipment-tiers-quality-and-comparison.md)                   | 装备成长线、稀有品质与背包对比           | Accepted              |
+| [ADR-033](ADR-033-item-icon-atlas-and-quality-presentation.md)                 | 物品图标由资源 manifest 提供             | Accepted              |
+| [ADR-034](ADR-034-content-driven-quest-chain.md)                               | 内容驱动任务链、事务进度与交付           | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

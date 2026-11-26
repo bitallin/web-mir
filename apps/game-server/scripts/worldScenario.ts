@@ -426,6 +426,8 @@ async function main(): Promise<void> {
       'character.progress',
       'character.levelUp',
       'asset.result',
+      'quest.snapshot',
+      'quest.update',
     ]) {
       room.onMessage(type, () => undefined);
     }

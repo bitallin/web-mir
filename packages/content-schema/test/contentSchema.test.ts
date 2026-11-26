@@ -37,6 +37,7 @@ describe('base content bundle', () => {
       monsters: BASE_CONTENT_BUNDLE.monsters,
       skills: BASE_CONTENT_BUNDLE.skills,
       rules: BASE_CONTENT_BUNDLE.rules,
+      quests: BASE_CONTENT_BUNDLE.quests,
       classes: {
         taoist: BASE_CONTENT_BUNDLE.classes.taoist,
         mage: BASE_CONTENT_BUNDLE.classes.mage,
@@ -387,6 +388,57 @@ describe('draft composition', () => {
     const result = validateContentBundle(composed);
     expect(result.valid).toBe(false);
     expect(result.bundle).toBeNull();
+  });
+});
+
+describe('quest validation', () => {
+  it('rejects a quest whose giver is not on any map', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_slime_cleanup'];
+        if (quest !== undefined) {
+          quest.giverNpcId = 'missing_npc';
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.path.endsWith('.giverNpcId'))).toBe(true);
+  });
+
+  it('rejects a reward item that does not exist', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_slime_cleanup'];
+        if (quest !== undefined) {
+          quest.rewards.items = [{ templateId: 'missing_item', quantity: 1 }];
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes('missing_item'))).toBe(true);
+  });
+
+  it('rejects a prerequisite loop', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const first = bundle.quests?.['quest_slime_cleanup'];
+        const second = bundle.quests?.['quest_wolf_patrol'];
+        if (first !== undefined && second !== undefined) {
+          first.prerequisiteQuestId = 'quest_wolf_patrol';
+          first.levelRequirement = 10;
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes('循环'))).toBe(true);
+  });
+
+  it('keeps the pre-quest releases valid without the section', () => {
+    const withoutQuests = withMutation((bundle) => {
+      delete bundle.quests;
+    });
+    const result = validateContentBundle(withoutQuests);
+    expect(result.valid).toBe(true);
   });
 });
 

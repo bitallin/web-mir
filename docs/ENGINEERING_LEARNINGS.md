@@ -325,3 +325,19 @@
 - 下次：新增每 tick 批量任务（AOI、事件、掉落清理）时，先问“同一实体/观察者
   是否会在一 tick 内被重复处理”；批处理仍要在 tick 结束前 flush，保证下一 tick
   状态一致。
+
+## EL-029：新增内容 section 是一份跨包清单，不是只改 schema
+
+- 案例：S4-G 新增 `quests` section，schema、校验、`CONTENT_SECTIONS`、
+  `contentSectionDataSchemas`、数据库枚举与基线内容都改完后，保存草稿仍然
+  422。原因是 `contracts/admin.ts` 的 `adminContentDraftUpdateSchema` 是手写的
+  section 判别联合，不随 `CONTENT_SECTIONS` 扩展；运行中的 Control API 只报
+  “Invalid discriminator value”。补上 `quests` 分支并重启后，草稿、校验、发布、
+  激活才全部通过。
+- 经验：内容 section 的“新增清单”至少包括 contracts 的 section 枚举与数据
+  schema、content-schema 的基线/校验/diff、persistence 的数据库枚举迁移、
+  admin 草稿联合类型、运营界面标签，以及任何按 section 分支的脚本。类型检查
+  能覆盖大部分，但 z.literal 联合的错误只在运行时出现；新增后应立刻用真实
+  Control API 跑一次“保存草稿 → 校验”。
+- 下次：把 section 清单写进 PR/切片检查表，或在 contracts 中用单一来源生成
+  草稿联合类型；在此之前，任何新增 section 的验收都必须包含一次真实发布链路。

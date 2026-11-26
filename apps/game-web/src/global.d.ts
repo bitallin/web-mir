@@ -1,4 +1,4 @@
-import type { EquipmentSlot, InventorySnapshot } from '@web-legend/contracts';
+import type { EquipmentSlot, InventorySnapshot, QuestView } from '@web-legend/contracts';
 
 import type { PlayerAppearance, TelegraphView, WorldLabelView } from './game/worldBridge';
 import type { LootView } from './net/worldClient';
@@ -42,6 +42,9 @@ declare global {
       useItem: (itemId: string) => boolean;
       buyFromShop: (merchantId: string, templateId: string, quantity: number) => boolean;
       sellToShop: (merchantId: string, itemId: string, quantity: number) => boolean;
+      acceptQuest: (questId: string) => boolean;
+      claimQuest: (questId: string) => boolean;
+      questState: () => QuestView[];
       lootDrops: () => LootView[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
       lootIconFrame: (dropId: string) => number | null;

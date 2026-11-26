@@ -61,3 +61,5 @@ export {
 export type { NewOutboxEvent, OutboxEvent } from './outbox';
 export { REALM_STATUSES, realms } from './realms';
 export type { NewRealm, Realm, RealmStatus } from './realms';
+export { QUEST_STATUS_IDS, characterQuests } from './quests';
+export type { CharacterQuest, NewCharacterQuest, QuestStatusId } from './quests';

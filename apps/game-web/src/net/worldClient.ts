@@ -16,6 +16,8 @@ import {
   levelUpSchema,
   lootClaimedSchema,
   monsterStateKindFromCode,
+  questSnapshotSchema,
+  questUpdateSchema,
   sessionKickedSchema,
   sessionTransferSchema,
   shopCatalogSchema,
@@ -34,6 +36,8 @@ import {
   type LevelUp,
   type LootClaimed,
   type MonsterStateKind,
+  type QuestSnapshot,
+  type QuestUpdate,
   type SessionKicked,
   type ShopCatalog,
   type SystemNotice,
@@ -121,6 +125,8 @@ export type WorldClientCallbacks = {
   onLatency: (latencyMs: number) => void;
   onInventory: (snapshot: InventorySnapshot) => void;
   onShopCatalog: (catalog: ShopCatalog) => void;
+  onQuestSnapshot: (snapshot: QuestSnapshot) => void;
+  onQuestUpdate: (update: QuestUpdate) => void;
   onAssetResult: (result: AssetResult) => void;
   onProgress: (progress: CharacterProgress) => void;
   onLevelUp: (levelUp: LevelUp) => void;
@@ -412,6 +418,36 @@ export class WorldClient {
     return true;
   }
 
+  sendQuestAccept(questId: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.questAccept, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      questId,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
+  sendQuestClaim(questId: string): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(CLIENT_MESSAGES.questClaim, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      questId,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
   sendChat(text: string): boolean {
     const room = this.room;
     const message = text.trim();
@@ -623,6 +659,24 @@ export class WorldClient {
         const parsed = shopCatalogSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onShopCatalog(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.questSnapshot, (payload: unknown) => {
+        const parsed = questSnapshotSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onQuestSnapshot(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.questUpdate, (payload: unknown) => {
+        const parsed = questUpdateSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onQuestUpdate(parsed.data);
         }
       }),
     );

@@ -12,6 +12,7 @@ export const CONTENT_SECTION_IDS = [
   'items',
   'lootTables',
   'rules',
+  'quests',
 ] as const;
 
 export const contentSectionEnum = pgEnum('content_section', CONTENT_SECTION_IDS);

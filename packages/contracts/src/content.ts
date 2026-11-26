@@ -18,6 +18,7 @@ export const CONTENT_SECTIONS = [
   'items',
   'lootTables',
   'rules',
+  'quests',
 ] as const;
 export const contentSectionSchema = z.enum(CONTENT_SECTIONS);
 export type ContentSection = z.infer<typeof contentSectionSchema>;
@@ -29,6 +30,7 @@ export const CONTENT_SECTION_LABELS: Record<ContentSection, string> = {
   items: '物品',
   lootTables: '掉落表',
   rules: '全局规则',
+  quests: '任务',
 };
 
 export const CONTENT_ID_PATTERN = /^[a-z][a-z0-9_]{0,47}$/u;
@@ -258,11 +260,68 @@ export const rulesContentSchema = z
 
 export type RulesContent = z.infer<typeof rulesContentSchema>;
 
+const npcIdSchema = z
+  .string()
+  .min(3)
+  .max(32)
+  .regex(/^[a-z][a-z0-9_]*$/u, 'NPC id must be lowercase snake_case');
+
+/**
+ * Quest objectives are a closed whitelist like skill effects: only the server
+ * knows how to observe progress, so a new kind needs a code release (ADR-034).
+ */
+export const questKillObjectiveSchema = z
+  .object({
+    kind: z.literal('kill'),
+    monsterId: contentIdSchema,
+    count: z.number().int().min(1).max(999),
+  })
+  .strict();
+
+export const questObjectiveSchema = z.discriminatedUnion('kind', [questKillObjectiveSchema]);
+export type QuestObjective = z.infer<typeof questObjectiveSchema>;
+
+export const questRewardItemSchema = z
+  .object({
+    templateId: contentIdSchema,
+    quantity: z.number().int().min(1).max(100),
+  })
+  .strict();
+
+export type QuestRewardItem = z.infer<typeof questRewardItemSchema>;
+
+export const questRewardsSchema = z
+  .object({
+    exp: z.number().int().min(0).max(1_000_000_000),
+    gold: z.number().int().min(0).max(1_000_000_000),
+    items: z.array(questRewardItemSchema).max(6),
+  })
+  .strict();
+
+export type QuestRewards = z.infer<typeof questRewardsSchema>;
+
+export const questContentSchema = z
+  .object({
+    id: contentIdSchema,
+    title: z.string().trim().min(1).max(24),
+    description: z.string().trim().min(1).max(200),
+    /** NPC that gives the quest and accepts the turn-in. */
+    giverNpcId: npcIdSchema,
+    levelRequirement: z.number().int().min(1).max(100),
+    prerequisiteQuestId: contentIdSchema.optional(),
+    objective: questObjectiveSchema,
+    rewards: questRewardsSchema,
+  })
+  .strict();
+
+export type QuestContent = z.infer<typeof questContentSchema>;
+
 const classesSectionSchema = z.record(characterClassSchema, classContentSchema);
 const skillsSectionSchema = z.record(contentIdSchema, skillContentSchema);
 const monstersSectionSchema = z.record(contentIdSchema, monsterContentSchema);
 const itemsSectionSchema = z.record(contentIdSchema, itemContentSchema);
 const lootTablesSectionSchema = z.record(contentIdSchema, lootTableSchema);
+const questsSectionSchema = z.record(contentIdSchema, questContentSchema);
 
 export const contentSectionDataSchemas = {
   classes: classesSectionSchema,
@@ -271,6 +330,7 @@ export const contentSectionDataSchemas = {
   items: itemsSectionSchema,
   lootTables: lootTablesSectionSchema,
   rules: rulesContentSchema,
+  quests: questsSectionSchema,
 } as const;
 
 export type ContentSectionData = {
@@ -280,6 +340,7 @@ export type ContentSectionData = {
   items: Record<string, ItemContent>;
   lootTables: Record<string, LootTableContent>;
   rules: RulesContent;
+  quests: Record<string, QuestContent>;
 };
 
 export const contentBundleSchema = z
@@ -292,6 +353,8 @@ export const contentBundleSchema = z
     lootTables: lootTablesSectionSchema,
     /** Optional for releases published before the section existed (EL-004). */
     rules: rulesContentSchema.optional(),
+    /** Optional for the same reason: quests arrived after the first releases. */
+    quests: questsSectionSchema.optional(),
   })
   .strict();
 

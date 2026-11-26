@@ -27,6 +27,8 @@ export const CLIENT_MESSAGES = {
   inventoryUse: 'inventory.use',
   shopBuy: 'shop.buy',
   shopSell: 'shop.sell',
+  questAccept: 'quest.accept',
+  questClaim: 'quest.claim',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -45,6 +47,8 @@ export const SERVER_MESSAGES = {
   characterLevelUp: 'character.levelUp',
   lootClaimed: 'loot.claimed',
   shopCatalog: 'shop.catalog',
+  questSnapshot: 'quest.snapshot',
+  questUpdate: 'quest.update',
 } as const;
 
 export const FACING = {
@@ -190,6 +194,10 @@ export const COMMAND_REJECTION_CODES = [
   'CANNOT_SELL',
   'NOT_SOLD_HERE',
   'INVALID_QUANTITY',
+  'QUEST_UNAVAILABLE',
+  'QUEST_NOT_ACTIVE',
+  'QUEST_NOT_COMPLETE',
+  'QUEST_ALREADY_CLAIMED',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -226,6 +234,10 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   CANNOT_SELL: '商人不会收购这件物品',
   NOT_SOLD_HERE: '商人不出售这件物品',
   INVALID_QUANTITY: '数量不合法',
+  QUEST_UNAVAILABLE: '任务当前不可接取',
+  QUEST_NOT_ACTIVE: '任务尚未接取',
+  QUEST_NOT_COMPLETE: '任务目标尚未完成',
+  QUEST_ALREADY_CLAIMED: '任务奖励已经领取',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

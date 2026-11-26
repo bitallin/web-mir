@@ -1088,6 +1088,52 @@ const RAW_BASE_CONTENT = {
       protectBelowLevel: 10,
     },
   },
+  quests: {
+    quest_slime_cleanup: {
+      id: 'quest_slime_cleanup',
+      title: '清理史莱姆',
+      description: '村庄东边的史莱姆越聚越多。前往野外清理 3 只史莱姆，然后回来找守卫领取报酬。',
+      giverNpcId: 'town_guard',
+      levelRequirement: 1,
+      objective: { kind: 'kill', monsterId: 'wild_slime', count: 3 },
+      rewards: {
+        exp: 60,
+        gold: 20,
+        items: [{ templateId: 'small_hp_potion', quantity: 1 }],
+      },
+    },
+    quest_wolf_patrol: {
+      id: 'quest_wolf_patrol',
+      title: '狼群的踪迹',
+      description: '森林狼已经逼近道路。去野外击杀 3 只森林狼，让商路重新安全。',
+      giverNpcId: 'town_guard',
+      levelRequirement: 3,
+      prerequisiteQuestId: 'quest_slime_cleanup',
+      objective: { kind: 'kill', monsterId: 'forest_wolf', count: 3 },
+      rewards: {
+        exp: 150,
+        gold: 40,
+        items: [
+          { templateId: 'small_hp_potion', quantity: 1 },
+          { templateId: 'small_mp_potion', quantity: 1 },
+        ],
+      },
+    },
+    quest_alpha_wolf: {
+      id: 'quest_alpha_wolf',
+      title: '白狼王的威胁',
+      description: '白狼王在荒野深处游荡，普通猎人已经不敢靠近。找到它并击败它。',
+      giverNpcId: 'town_guard',
+      levelRequirement: 5,
+      prerequisiteQuestId: 'quest_wolf_patrol',
+      objective: { kind: 'kill', monsterId: 'alpha_wolf', count: 1 },
+      rewards: {
+        exp: 400,
+        gold: 100,
+        items: [{ templateId: 'alpha_pelt', quantity: 1 }],
+      },
+    },
+  },
 };
 
 export const BASE_CONTENT_BUNDLE: ContentBundle = contentBundleSchema.parse(RAW_BASE_CONTENT);

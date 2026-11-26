@@ -1,4 +1,4 @@
-import { SHOP_RANGE_TILES, TILE_UNITS } from '@web-legend/contracts';
+import { QUEST_NPC_RANGE_TILES, SHOP_RANGE_TILES, TILE_UNITS } from '@web-legend/contracts';
 import type {
   CharacterView,
   CharacterProgress,
@@ -10,6 +10,7 @@ import type {
   InventorySnapshot,
   LevelUp,
   LootClaimed,
+  QuestView,
   SessionKicked,
   ShopCatalog,
   SystemNotice,
@@ -79,6 +80,10 @@ export type SessionState = {
   shopCatalog: ShopCatalog | null;
   /** A nearby NPC click; GameScreen turns it into the merchant panel. */
   shopRequest: { npcId: string; seq: number } | null;
+  /** Quest state delivered by the server, already resolved for display. */
+  quests: QuestView[];
+  /** A nearby quest-giver click; GameScreen opens the quest panel. */
+  questRequest: { npcId: string; seq: number } | null;
   levelUpNotice: LevelUp | null;
   /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
   notices: SessionNotice[];
@@ -124,6 +129,8 @@ function initialState(character: CharacterView): SessionState {
     inventory: null,
     shopCatalog: null,
     shopRequest: null,
+    quests: [],
+    questRequest: null,
     levelUpNotice: null,
     notices: [],
     autoAttack: null,
@@ -311,6 +318,8 @@ class WorldSession {
   private inventory: InventorySnapshot | null = null;
   private shopCatalog: ShopCatalog | null = null;
   private shopRequestSequence = 0;
+  private questRequestSequence = 0;
+  private quests: QuestView[] = [];
   private levelBannerTimer: number | null = null;
   private systemMessageSequence = 0;
   private noticeSequence = 0;
@@ -509,6 +518,19 @@ class WorldSession {
           this.shopCatalog = catalog;
           this.updateState((previous) => ({ ...previous, shopCatalog: catalog }));
         },
+        onQuestSnapshot: (snapshot) => {
+          this.quests = snapshot.quests;
+          this.updateState((previous) => ({ ...previous, quests: snapshot.quests }));
+        },
+        onQuestUpdate: (update) => {
+          const exists = this.quests.some((quest) => quest.questId === update.quest.questId);
+          this.quests = exists
+            ? this.quests.map((quest) =>
+                quest.questId === update.quest.questId ? update.quest : quest,
+              )
+            : [...this.quests, update.quest];
+          this.updateState((previous) => ({ ...previous, quests: this.quests }));
+        },
         onAssetResult: (result) => {
           this.inventory = result.snapshot;
           if (import.meta.env.DEV) {
@@ -693,29 +715,68 @@ class WorldSession {
   }
 
   interactNpc(npcId: string): void {
-    const merchant = this.shopCatalog?.merchants.find((entry) => entry.id === npcId);
-    if (merchant === undefined) {
-      return;
-    }
     const self = this.latestSnapshot?.players.find(
       (player) => player.playerId === this.options.character.id,
     );
     if (self === undefined) {
       return;
     }
-    const distance = Math.hypot(
-      self.x / TILE_UNITS - merchant.tile.x,
-      self.y / TILE_UNITS - merchant.tile.y,
-    );
-    if (distance > SHOP_RANGE_TILES) {
-      this.pushNotice('warning', `走近${merchant.name}后再交易`);
+    const merchant = this.shopCatalog?.merchants.find((entry) => entry.id === npcId);
+    if (merchant !== undefined) {
+      const distance = Math.hypot(
+        self.x / TILE_UNITS - merchant.tile.x,
+        self.y / TILE_UNITS - merchant.tile.y,
+      );
+      if (distance > SHOP_RANGE_TILES) {
+        this.pushNotice('warning', `走近${merchant.name}后再交易`);
+        return;
+      }
+      this.shopRequestSequence += 1;
+      this.updateState((previous) => ({
+        ...previous,
+        shopRequest: { npcId, seq: this.shopRequestSequence },
+      }));
       return;
     }
-    this.shopRequestSequence += 1;
+
+    const quest = this.quests.find((entry) => entry.giverNpcId === npcId);
+    if (quest === undefined) {
+      return;
+    }
+    const npc = mapBundleFor(this.mapId).manifest.npcPoints.find((entry) => entry.id === npcId);
+    if (npc === undefined) {
+      return;
+    }
+    const distance = Math.hypot(self.x / TILE_UNITS - npc.tile.x, self.y / TILE_UNITS - npc.tile.y);
+    if (distance > QUEST_NPC_RANGE_TILES) {
+      this.pushNotice('warning', `走近${npc.name}后再交谈`);
+      return;
+    }
+    this.questRequestSequence += 1;
     this.updateState((previous) => ({
       ...previous,
-      shopRequest: { npcId, seq: this.shopRequestSequence },
+      questRequest: { npcId, seq: this.questRequestSequence },
     }));
+  }
+
+  /** Asks the server to accept a quest at its giver; the server re-checks range. */
+  acceptQuest(questId: string): boolean {
+    const sent = this.client?.sendQuestAccept(questId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  /** Turns in a completed quest; rewards commit server-side before the update. */
+  claimQuest(questId: string): boolean {
+    const sent = this.client?.sendQuestClaim(questId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
   }
 
   shopBuy(merchantId: string, templateId: string, quantity: number): boolean {
@@ -890,6 +951,7 @@ class WorldSession {
 
   private handleTransfer(mapId: string): void {
     this.shopCatalog = null;
+    this.quests = [];
     this.latestSnapshot = null;
     for (const timer of this.noticeTimers.values()) {
       window.clearTimeout(timer);
@@ -913,6 +975,8 @@ class WorldSession {
       shield: null,
       shopCatalog: null,
       shopRequest: null,
+      quests: [],
+      questRequest: null,
       levelUpNotice: null,
       notices: [],
       autoAttack: null,
@@ -977,6 +1041,9 @@ class WorldSession {
       buyFromShop: (merchantId, templateId, quantity) =>
         this.shopBuy(merchantId, templateId, quantity),
       sellToShop: (merchantId, itemId, quantity) => this.shopSell(merchantId, itemId, quantity),
+      acceptQuest: (questId) => this.acceptQuest(questId),
+      claimQuest: (questId) => this.claimQuest(questId),
+      questState: () => this.quests,
       lootDrops: () => this.latestLoot,
       lootScreenPoint: (dropId) => this.bridge.lootScreenPoint(dropId),
       lootIconFrame: (dropId) => this.bridge.lootIconFrame(dropId),
@@ -1009,6 +1076,8 @@ export type WorldSessionControls = {
   consumeItem: (itemId: string) => boolean;
   shopBuy: (merchantId: string, templateId: string, quantity: number) => boolean;
   shopSell: (merchantId: string, itemId: string, quantity: number) => boolean;
+  acceptQuest: (questId: string) => boolean;
+  claimQuest: (questId: string) => boolean;
   toggleSfx: () => void;
 };
 
@@ -1090,6 +1159,14 @@ export function useWorldSession(
       sessionRef.current?.shopSell(merchantId, itemId, quantity) ?? false,
     [],
   );
+  const acceptQuest = useCallback(
+    (questId: string) => sessionRef.current?.acceptQuest(questId) ?? false,
+    [],
+  );
+  const claimQuest = useCallback(
+    (questId: string) => sessionRef.current?.claimQuest(questId) ?? false,
+    [],
+  );
   const toggleSfx = useCallback(() => {
     sessionRef.current?.toggleSfx();
   }, []);
@@ -1109,6 +1186,8 @@ export function useWorldSession(
     consumeItem,
     shopBuy,
     shopSell,
+    acceptQuest,
+    claimQuest,
     toggleSfx,
   };
 }

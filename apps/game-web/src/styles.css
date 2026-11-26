@@ -2057,3 +2057,211 @@ body {
   font-size: 11px;
   flex: 0 0 auto;
 }
+
+/* Alpha 0.2 → 0.3 quest slice. The tracker stays inside the status plate so it
+   never covers the player or the centre of the world; the full panel shares
+   the right dock with the merchant and the bag. */
+.quest-tracker {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #232a32;
+}
+
+.quest-tracker-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.quest-tracker-open {
+  padding: 1px 6px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.quest-tracker ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 72px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.quest-tracker li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.quest-tracker-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quest-tracker-meta {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.quest-hint {
+  margin: 8px 0 0;
+  color: var(--gold);
+  font-size: 11px;
+}
+
+.quest-panel {
+  right: 40px;
+  top: 132px;
+  bottom: 84px;
+  z-index: 4;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #2b323a;
+  background: var(--ink-raised);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.quest-panel .panel-heading {
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.quest-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.quest-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  font-size: 12px;
+}
+
+.quest-row + .quest-row {
+  border-top: 1px solid rgba(35, 42, 50, 0.7);
+}
+
+.quest-row-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.quest-row-heading strong {
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.quest-row-heading span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.quest-description {
+  margin: 0;
+  color: var(--parchment);
+  opacity: 0.82;
+  line-height: 1.5;
+}
+
+.quest-objective {
+  margin: 0;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.quest-rewards {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.quest-locked {
+  margin: 0;
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.quest-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.quest-actions button {
+  padding: 3px 12px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.quest-actions button:hover:not(:disabled) {
+  background: rgba(201, 162, 39, 0.12);
+}
+
+.quest-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.quest-progress-state {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.quest-progress-state.done {
+  color: var(--ok);
+}
+
+.quest-distance-hint {
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.quest-list li.empty {
+  padding: 10px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 860px) {
+  .quest-panel {
+    right: 12px;
+    left: 12px;
+    top: auto;
+    bottom: 300px;
+    width: auto;
+  }
+}

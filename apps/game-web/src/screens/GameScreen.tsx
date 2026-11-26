@@ -2,6 +2,7 @@ import {
   CHAT_MESSAGE_MAX_LENGTH,
   CHARACTER_CLASS_CATALOG,
   MONSTER_STATE_LABELS,
+  QUEST_NPC_RANGE_TILES,
   SHOP_MAX_QUANTITY,
   SHOP_RANGE_TILES,
   TILE_UNITS,
@@ -10,6 +11,7 @@ import {
   type ItemKind,
   type ItemQuality,
   type ItemView,
+  type QuestView,
   type ShopOffer,
   type SkillView,
 } from '@web-legend/contracts';
@@ -139,6 +141,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const [chatOpen, setChatOpen] = useState(true);
   const [shopOpen, setShopOpen] = useState(false);
   const [shopTab, setShopTab] = useState<'buy' | 'sell'>('buy');
+  const [questOpen, setQuestOpen] = useState(false);
+  const [questNpcId, setQuestNpcId] = useState<string | null>(null);
   const requestTicket = useCallback(async () => {
     const response = await issueGameTicket(character.id);
     return response.ticket;
@@ -157,6 +161,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     consumeItem,
     shopBuy,
     shopSell,
+    acceptQuest,
+    claimQuest,
     toggleSfx,
   } = useWorldSession(containerRef, {
     character,
@@ -240,6 +246,47 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       new Map((shopCatalog?.sellPrices ?? []).map((entry) => [entry.templateId, entry.sellPrice])),
     [shopCatalog],
   );
+
+  const quests = state.quests;
+  const mapNpcs = mapBundle.manifest.npcPoints;
+  const mapQuests = useMemo(
+    () => quests.filter((quest) => mapNpcs.some((npc) => npc.id === quest.giverNpcId)),
+    [quests, mapNpcs],
+  );
+  const panelQuests = useMemo(
+    () =>
+      questNpcId === null
+        ? mapQuests
+        : mapQuests.filter((quest) => quest.giverNpcId === questNpcId),
+    [mapQuests, questNpcId],
+  );
+  const trackedQuests = useMemo(
+    () =>
+      quests
+        .filter((quest) => quest.status === 'active' || quest.status === 'completed')
+        .slice(0, 3),
+    [quests],
+  );
+  const availableQuest = mapQuests.find((quest) => quest.status === 'available') ?? null;
+  const questNpcName = (npcId: string): string =>
+    mapNpcs.find((npc) => npc.id === npcId)?.name ?? '任务发布者';
+  const canUseQuestGiver = (quest: QuestView): boolean => {
+    if (self === undefined) {
+      return false;
+    }
+    const npc = mapNpcs.find((entry) => entry.id === quest.giverNpcId);
+    if (npc === undefined) {
+      return false;
+    }
+    const distance = Math.hypot(self.x / TILE_UNITS - npc.tile.x, self.y / TILE_UNITS - npc.tile.y);
+    return distance <= QUEST_NPC_RANGE_TILES;
+  };
+  const openQuestPanel = (npcId: string | null): void => {
+    setQuestNpcId(npcId);
+    setQuestOpen(true);
+    setShopOpen(false);
+    setBagOpen(false);
+  };
   const reviveSeconds =
     state.reviveAt === null ? null : Math.max(0, Math.ceil((state.reviveAt - now) / 1_000));
   const deathPenaltyLabel = describeDeathPenalty(state.combatProfile?.deathPenalty ?? null);
@@ -297,6 +344,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         setCharacterOpen((open) => !open);
         return;
       }
+      if (event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        setQuestNpcId(null);
+        setQuestOpen((open) => !open);
+        setShopOpen(false);
+        setBagOpen(false);
+        return;
+      }
       const skill = skills.find((candidate) => candidate.hotkey === event.key);
       if (skill === undefined) {
         return;
@@ -341,7 +396,26 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     }
     setShopTab('buy');
     setShopOpen(true);
+    setQuestOpen(false);
   }, [state.shopRequest, nearbyMerchant]);
+
+  useEffect(() => {
+    const request = state.questRequest;
+    if (request === null) {
+      return;
+    }
+    setQuestNpcId(request.npcId);
+    setQuestOpen(true);
+    setShopOpen(false);
+    setBagOpen(false);
+  }, [state.questRequest]);
+
+  // The dock follows the map's own quest givers; a stale panel from the
+  // previous map must not cover the destination's combat view.
+  useEffect(() => {
+    setQuestOpen(false);
+    setQuestNpcId(null);
+  }, [state.mapId]);
 
   const buyOffer = useCallback(
     (offer: ShopOffer, quantity: number) => {
@@ -411,9 +485,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 const next = !bagOpen;
                 setBagOpen(next);
                 if (next) {
-                  // Panels share the right dock with the merchant, so opening
-                  // the bag replaces the shop instead of stacking on it.
+                  // Panels share the right dock with the merchant and quests,
+                  // so opening the bag replaces them instead of stacking.
                   setShopOpen(false);
+                  setQuestOpen(false);
                 }
               }}
             >
@@ -430,6 +505,21 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             >
               角色 C
             </button>
+            <button
+              type="button"
+              className="bag-toggle"
+              data-testid="quest-toggle"
+              aria-expanded={questOpen}
+              onClick={() => {
+                if (questOpen) {
+                  setQuestOpen(false);
+                } else {
+                  openQuestPanel(null);
+                }
+              }}
+            >
+              任务 J
+            </button>
             {nearbyMerchant !== null ? (
               <button
                 type="button"
@@ -442,6 +532,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   setShopOpen(next);
                   if (next) {
                     setBagOpen(false);
+                    setQuestOpen(false);
                   }
                 }}
               >
@@ -462,6 +553,45 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               返回角色
             </button>
           </div>
+          {trackedQuests.length > 0 ? (
+            <div className="quest-tracker" data-testid="quest-tracker">
+              <div className="quest-tracker-heading">
+                <span>任务追踪</span>
+                <button
+                  type="button"
+                  className="quest-tracker-open"
+                  data-testid="quest-tracker-open"
+                  onClick={() => {
+                    openQuestPanel(null);
+                  }}
+                >
+                  全部
+                </button>
+              </div>
+              <ul>
+                {trackedQuests.map((quest) => (
+                  <li
+                    key={quest.questId}
+                    data-testid="quest-tracker-row"
+                    data-quest-id={quest.questId}
+                    data-status={quest.status}
+                    data-progress={quest.progress}
+                  >
+                    <span className="quest-tracker-title">{quest.title}</span>
+                    <span className="quest-tracker-meta">
+                      {quest.status === 'completed'
+                        ? `可交付 · 回到${quest.giverNpcName}`
+                        : `${quest.objective.monsterName} ${String(quest.progress)}/${String(quest.objective.count)}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : availableQuest !== null ? (
+            <p className="quest-hint" data-testid="quest-hint">
+              可接任务：{availableQuest.title}（找{availableQuest.giverNpcName}）
+            </p>
+          ) : null}
         </section>
 
         <section className={`connection connection-${state.status}`} aria-live="polite">
@@ -1050,6 +1180,107 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             </ul>
           )}
           <p className="shop-hint">交易由服务器结算：金币与背包同时更新，刷新或重登不会丢失。</p>
+        </aside>
+      ) : null}
+
+      {questOpen ? (
+        <aside className="hud quest-panel" data-testid="quest-panel" aria-label="任务">
+          <div className="panel-heading">
+            <h2>{questNpcId === null ? '任务' : questNpcName(questNpcId)}</h2>
+            <button
+              type="button"
+              className="panel-close"
+              data-testid="quest-close"
+              onClick={() => {
+                setQuestOpen(false);
+              }}
+            >
+              关闭
+            </button>
+          </div>
+          <ul className="quest-list" data-testid="quest-list">
+            {panelQuests.map((quest) => {
+              const nearby = canUseQuestGiver(quest);
+              const canAccept = quest.status === 'available';
+              const canClaim = quest.status === 'completed';
+              return (
+                <li
+                  key={quest.questId}
+                  className={`quest-row quest-${quest.status}`}
+                  data-testid="quest-row"
+                  data-quest-id={quest.questId}
+                  data-status={quest.status}
+                  data-progress={quest.progress}
+                  data-near={nearby ? 'true' : 'false'}
+                >
+                  <div className="quest-row-heading">
+                    <strong>{quest.title}</strong>
+                    <span>Lv.{quest.levelRequirement}</span>
+                  </div>
+                  <p className="quest-description">{quest.description}</p>
+                  <p className="quest-objective" data-testid="quest-objective">
+                    {quest.objective.monsterName} {quest.progress}/{quest.objective.count}
+                  </p>
+                  <p className="quest-rewards">
+                    经验 {quest.rewards.exp} · 金币 {quest.rewards.gold}
+                    {quest.rewards.items.map((item) => (
+                      <span key={item.templateId}>
+                        {' '}
+                        · {item.name}×{item.quantity}
+                      </span>
+                    ))}
+                  </p>
+                  {quest.status === 'locked' ? (
+                    <p className="quest-locked" data-testid="quest-locked">
+                      需求等级 {quest.levelRequirement}
+                      {quest.prerequisiteTitle === undefined
+                        ? ''
+                        : `，并完成「${quest.prerequisiteTitle}」`}
+                    </p>
+                  ) : null}
+                  <div className="quest-actions">
+                    {canAccept ? (
+                      <button
+                        type="button"
+                        data-testid="quest-accept"
+                        data-quest-id={quest.questId}
+                        disabled={!nearby}
+                        onClick={() => {
+                          acceptQuest(quest.questId);
+                        }}
+                      >
+                        接取
+                      </button>
+                    ) : null}
+                    {canClaim ? (
+                      <button
+                        type="button"
+                        data-testid="quest-claim"
+                        data-quest-id={quest.questId}
+                        disabled={!nearby}
+                        onClick={() => {
+                          claimQuest(quest.questId);
+                        }}
+                      >
+                        交付
+                      </button>
+                    ) : null}
+                    {quest.status === 'active' ? (
+                      <span className="quest-progress-state">进行中</span>
+                    ) : null}
+                    {quest.status === 'claimed' ? (
+                      <span className="quest-progress-state done">已完成</span>
+                    ) : null}
+                    {(canAccept || canClaim) && !nearby ? (
+                      <span className="quest-distance-hint">走近{quest.giverNpcName}</span>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
+            {panelQuests.length === 0 ? <li className="empty">这里暂时没有任务</li> : null}
+          </ul>
+          <p className="shop-hint">任务进度与奖励由服务器结算，离开地图或重登后仍会保留。</p>
         </aside>
       ) : null}
 

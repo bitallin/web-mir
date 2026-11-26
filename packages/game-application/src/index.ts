@@ -1,18 +1,22 @@
 export { AssetError } from './errors';
 export { AssetService } from './assetService';
 export type {
+  AcceptQuestOutcome,
   AssetCommandOutcome,
   AssetServiceOptions,
   BuyInput,
+  ClaimQuestOutcome,
   DeathPenaltyInput,
   DeathPenaltyOutcome,
   EquipInput,
+  KillQuestUpdate,
   KillRewardInput,
   KillRewardOutcome,
   LoadedAssets,
   LootDropView,
   PickupInput,
   PickupOutcome,
+  QuestCommandInput,
   SellInput,
   ShopBuyOutcome,
   ShopSellOutcome,

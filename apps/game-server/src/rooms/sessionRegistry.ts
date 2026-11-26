@@ -6,6 +6,7 @@ import type {
   CommandAck,
   InventorySnapshot,
 } from '@web-legend/contracts';
+import type { QuestRecordState } from '@web-legend/game-domain';
 
 import type { TokenBucket } from '../world/rateLimiter';
 
@@ -41,6 +42,8 @@ export type SessionRecord = {
   autoAttack: AutoAttackState | null;
   /** Last committed private asset state, merged with live vitals on send. */
   assetSnapshot: InventorySnapshot;
+  /** Committed quest rows, keyed by content quest id (ADR-034). */
+  questRecords: Map<string, QuestRecordState>;
   hp: number;
   mp: number;
   /** Set by a moderator disconnect; such a session never enters the grace window. */

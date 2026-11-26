@@ -1074,6 +1074,246 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     ).toHaveLength(1);
   });
 
+  it('accepts a quest only when the level and prerequisite allow it', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    const commandId = randomUUID();
+    const accepted = await service.acceptQuest({
+      characterId: character.id,
+      commandId,
+      questId: 'quest_slime_cleanup',
+    });
+    expect(accepted.deduplicated).toBe(false);
+    expect(accepted.record).toEqual({
+      questId: 'quest_slime_cleanup',
+      status: 'active',
+      progress: 0,
+    });
+
+    const replay = await service.acceptQuest({
+      characterId: character.id,
+      commandId,
+      questId: 'quest_slime_cleanup',
+    });
+    expect(replay.deduplicated).toBe(true);
+    expect(replay.record.status).toBe('active');
+
+    await expect(
+      service.acceptQuest({
+        characterId: character.id,
+        commandId: randomUUID(),
+        questId: 'quest_wolf_patrol',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_UNAVAILABLE' });
+  });
+
+  it('advances kill objectives inside the kill reward transaction', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    await service.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_slime_cleanup',
+    });
+
+    const kill = (reference: string) =>
+      service.grantKillReward({
+        characterId: character.id,
+        mapId: 'starter_wilds',
+        reference,
+        monsterTemplateId: 'wild_slime',
+        x: 7_500,
+        y: 15_500,
+      });
+
+    const firstReference = `quest-kill-${randomUUID()}`;
+    const first = await kill(firstReference);
+    expect(first?.questUpdates).toHaveLength(1);
+    expect(first?.questUpdates[0]?.record).toMatchObject({ progress: 1, status: 'active' });
+    expect(first?.questUpdates[0]?.completedNow).toBe(false);
+
+    const duplicate = await kill(firstReference);
+    expect(duplicate).toBeNull();
+
+    const wrongMonster = await service.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference: `quest-kill-${randomUUID()}`,
+      monsterTemplateId: 'forest_wolf',
+      x: 7_500,
+      y: 15_500,
+    });
+    expect(wrongMonster?.questUpdates).toEqual([]);
+
+    await kill(`quest-kill-${randomUUID()}`);
+    const last = await kill(`quest-kill-${randomUUID()}`);
+    expect(last?.questUpdates[0]).toMatchObject({
+      record: { progress: 3, status: 'completed' },
+      completedNow: true,
+    });
+
+    const records = await service.loadQuestRecords(character.id);
+    expect(records).toEqual([{ questId: 'quest_slime_cleanup', status: 'completed', progress: 3 }]);
+  });
+
+  it('claims a completed quest with rewards committed exactly once', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    await service.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_slime_cleanup',
+    });
+    for (let index = 0; index < 3; index += 1) {
+      await service.grantKillReward({
+        characterId: character.id,
+        mapId: 'starter_wilds',
+        reference: `quest-claim-${randomUUID()}`,
+        monsterTemplateId: 'wild_slime',
+        x: 7_500,
+        y: 15_500,
+      });
+    }
+    const before = await service.loadAssets(character.id);
+    const potionsBefore = before.snapshot.items.find(
+      (item) => item.templateId === 'small_hp_potion',
+    );
+    const commandId = randomUUID();
+    const claimed = await service.claimQuest({
+      characterId: character.id,
+      commandId,
+      questId: 'quest_slime_cleanup',
+    });
+    expect(claimed.deduplicated).toBe(false);
+    expect(claimed.record.status).toBe('claimed');
+    expect(claimed.expGained).toBe(60);
+    expect(claimed.goldGained).toBe(20);
+    expect(claimed.snapshot.gold).toBe(before.snapshot.gold + 20);
+    const potionsAfter = claimed.snapshot.items.find(
+      (item) => item.templateId === 'small_hp_potion',
+    );
+    expect(potionsAfter?.quantity).toBe((potionsBefore?.quantity ?? 0) + 1);
+
+    const ledger = await db
+      .select()
+      .from(currencyLedger)
+      .where(
+        and(
+          eq(currencyLedger.characterId, character.id),
+          eq(currencyLedger.reason, 'quest_reward'),
+        ),
+      );
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]?.delta).toBe(20);
+    expect(ledger[0]?.referenceId).toBe('quest_slime_cleanup');
+
+    const replay = await service.claimQuest({
+      characterId: character.id,
+      commandId,
+      questId: 'quest_slime_cleanup',
+    });
+    expect(replay.deduplicated).toBe(true);
+    expect(replay.snapshot.gold).toBe(claimed.snapshot.gold);
+
+    await expect(
+      service.claimQuest({
+        characterId: character.id,
+        commandId: randomUUID(),
+        questId: 'quest_slime_cleanup',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_ALREADY_CLAIMED' });
+  });
+
+  it('refuses to claim an unfinished quest without spending the command', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    await service.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_slime_cleanup',
+    });
+    const commandId = randomUUID();
+    await expect(
+      service.claimQuest({
+        characterId: character.id,
+        commandId,
+        questId: 'quest_slime_cleanup',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_NOT_COMPLETE' });
+
+    // The failed transaction rolled back its idempotency row, so the same
+    // command id still works after the objective is completed.
+    for (let index = 0; index < 3; index += 1) {
+      await service.grantKillReward({
+        characterId: character.id,
+        mapId: 'starter_wilds',
+        reference: `quest-retry-${randomUUID()}`,
+        monsterTemplateId: 'wild_slime',
+        x: 7_500,
+        y: 15_500,
+      });
+    }
+    const claimed = await service.claimQuest({
+      characterId: character.id,
+      commandId,
+      questId: 'quest_slime_cleanup',
+    });
+    expect(claimed.record.status).toBe('claimed');
+  });
+
+  it('rolls the claim back when the reward cannot fit in the bag', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    await db
+      .delete(itemInstances)
+      .where(
+        and(eq(itemInstances.characterId, character.id), eq(itemInstances.container, 'inventory')),
+      );
+    await db.insert(itemInstances).values(
+      Array.from({ length: INVENTORY_CAPACITY }, (_, slotIndex) => ({
+        templateId: 'cloth_armor',
+        characterId: character.id,
+        container: 'inventory' as const,
+        slotIndex,
+        quantity: 1,
+      })),
+    );
+    await service.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_slime_cleanup',
+    });
+    for (let index = 0; index < 3; index += 1) {
+      await service.grantKillReward({
+        characterId: character.id,
+        mapId: 'starter_wilds',
+        reference: `quest-full-${randomUUID()}`,
+        monsterTemplateId: 'wild_slime',
+        x: 7_500,
+        y: 15_500,
+      });
+    }
+    const before = await service.loadAssets(character.id);
+    await expect(
+      service.claimQuest({
+        characterId: character.id,
+        commandId: randomUUID(),
+        questId: 'quest_slime_cleanup',
+      }),
+    ).rejects.toMatchObject({ code: 'INVENTORY_FULL' });
+
+    const after = await service.loadAssets(character.id);
+    expect(after.snapshot.gold).toBe(before.snapshot.gold);
+    const records = await service.loadQuestRecords(character.id);
+    expect(records[0]?.status).toBe('completed');
+    expect(
+      await db
+        .select()
+        .from(currencyLedger)
+        .where(
+          and(
+            eq(currencyLedger.characterId, character.id),
+            eq(currencyLedger.reason, 'quest_reward'),
+          ),
+        ),
+    ).toHaveLength(0);
+  });
+
   it('serializes concurrent kill rewards on one character', async () => {
     const character = await createCharacter(db, 'warrior', { gold: 0 });
     const reward = () =>

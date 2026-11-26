@@ -77,3 +77,6 @@ export type { ExperienceResult } from './progression';
 
 export { createChatFilter, defaultChatFilter } from './social';
 export type { ChatFilter, ChatFilterOptions, ChatFilterResult } from './social';
+
+export { advanceQuestOnKill, questViewFor, questViewsFor, requireQuest } from './quests';
+export type { QuestCatalog, QuestKillProgress, QuestRecordState, QuestViewContext } from './quests';

@@ -326,6 +326,112 @@ function validateRules(bundle: ContentBundle, issues: ContentIssue[]): void {
   }
 }
 
+function validateQuests(bundle: ContentBundle, issues: ContentIssue[]): void {
+  const quests = bundle.quests;
+  if (quests === undefined) {
+    return;
+  }
+  const npcIds = new Set(MAP_MANIFESTS.flatMap((map) => map.npcPoints.map((npc) => npc.id)));
+  const spawnedMonsters = new Set(
+    MAP_MANIFESTS.flatMap((map) => map.monsterSpawns.map((spawn) => spawn.monsterId)),
+  );
+
+  for (const [key, quest] of Object.entries(quests)) {
+    const path = `quests.${key}`;
+    if (key !== quest.id) {
+      issue(issues, 'error', path, `任务键名 "${key}" 与 id "${quest.id}" 不一致`);
+    }
+    if (!npcIds.has(quest.giverNpcId)) {
+      issue(issues, 'error', `${path}.giverNpcId`, `发布 NPC "${quest.giverNpcId}" 不在任何地图中`);
+    }
+    if (quest.prerequisiteQuestId !== undefined) {
+      if (quest.prerequisiteQuestId === quest.id) {
+        issue(issues, 'error', `${path}.prerequisiteQuestId`, '任务不能以自己为前置');
+      } else {
+        const prerequisite = quests[quest.prerequisiteQuestId];
+        if (prerequisite === undefined) {
+          issue(
+            issues,
+            'error',
+            `${path}.prerequisiteQuestId`,
+            `前置任务 "${quest.prerequisiteQuestId}" 不存在`,
+          );
+        } else if (prerequisite.levelRequirement > quest.levelRequirement) {
+          issue(
+            issues,
+            'warning',
+            `${path}.levelRequirement`,
+            '等级要求低于前置任务，玩家可能接不到前置',
+          );
+        }
+      }
+    }
+
+    const monster = bundle.monsters[quest.objective.monsterId];
+    if (monster === undefined) {
+      issue(
+        issues,
+        'error',
+        `${path}.objective.monsterId`,
+        `目标怪物 "${quest.objective.monsterId}" 不存在`,
+      );
+    } else {
+      if (!spawnedMonsters.has(monster.id)) {
+        issue(
+          issues,
+          'warning',
+          `${path}.objective.monsterId`,
+          `目标怪物 "${monster.id}" 没有地图刷点，任务无法完成`,
+        );
+      }
+      if (monster.level > quest.levelRequirement + 5) {
+        issue(
+          issues,
+          'warning',
+          `${path}.levelRequirement`,
+          `任务等级 ${String(quest.levelRequirement)} 远低于目标怪物等级 ${String(monster.level)}`,
+        );
+      }
+    }
+
+    for (const [index, reward] of quest.rewards.items.entries()) {
+      const rewardPath = `${path}.rewards.items.${String(index)}`;
+      const item = bundle.items[reward.templateId];
+      if (item === undefined) {
+        issue(issues, 'error', rewardPath, `奖励物品 "${reward.templateId}" 不存在`);
+        continue;
+      }
+      if (reward.quantity > item.maxStack) {
+        issue(
+          issues,
+          'error',
+          rewardPath,
+          `奖励数量 ${String(reward.quantity)} 超过 "${reward.templateId}" 的堆叠上限 ${String(item.maxStack)}`,
+        );
+      }
+    }
+
+    if (quest.rewards.exp === 0 && quest.rewards.gold === 0 && quest.rewards.items.length === 0) {
+      issue(issues, 'warning', `${path}.rewards`, '任务没有任何奖励');
+    }
+  }
+
+  // A prerequisite loop is never reachable: every task in the loop is locked
+  // forever. Detect it here instead of shipping an unplayable chain.
+  for (const questId of Object.keys(quests)) {
+    const seen = new Set<string>();
+    let current: string | undefined = questId;
+    while (current !== undefined) {
+      if (seen.has(current)) {
+        issue(issues, 'error', `quests.${questId}.prerequisiteQuestId`, '任务前置形成循环');
+        break;
+      }
+      seen.add(current);
+      current = quests[current]?.prerequisiteQuestId;
+    }
+  }
+}
+
 /**
  * Schema and semantic validation. The returned bundle is present whenever the
  * JSON shape is valid, even if semantic errors remain, so the admin UI can
@@ -349,6 +455,7 @@ export function validateContentBundle(input: unknown): ContentValidationResult {
   validateItems(parsed.data, issues);
   validateLootTables(parsed.data, issues);
   validateRules(parsed.data, issues);
+  validateQuests(parsed.data, issues);
   validateMaps(parsed.data, issues);
 
   return {

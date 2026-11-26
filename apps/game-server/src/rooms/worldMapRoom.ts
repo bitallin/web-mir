@@ -38,6 +38,10 @@ import {
   lootPickupSchema,
   moveToCommandSchema,
   playerRespawnPointOf,
+  questAcceptSchema,
+  questClaimSchema,
+  questSnapshotSchema,
+  questUpdateSchema,
   sessionTransferSchema,
   shopBuySchema,
   shopCatalogSchema,
@@ -46,6 +50,7 @@ import {
   skillCastSchema,
   systemNoticeSchema,
   tilePointSchema,
+  QUEST_NPC_RANGE_TILES,
   SHOP_RANGE_TILES,
   worldJoinOptionsSchema,
   type AdminCommandEnvelope,
@@ -67,6 +72,9 @@ import {
   type LevelUp,
   type MapMonsterSpawn,
   type MapPortal,
+  type QuestSnapshot,
+  type QuestUpdate,
+  type QuestView,
   type SessionTransfer,
   type ShopCatalog,
   type ShopMerchant,
@@ -88,6 +96,7 @@ import {
   AssetService,
   type DeathPenaltyInput,
   type DeathPenaltyOutcome,
+  type KillQuestUpdate,
   type KillRewardInput,
   type KillRewardOutcome,
   type LoadedAssets,
@@ -98,9 +107,13 @@ import {
   defaultChatFilter,
   itemBuyPrice,
   itemSellPrice,
+  questViewFor,
+  questViewsFor,
   type ChatFilter,
   type CombatCommandResult,
   type CombatStats,
+  type QuestRecordState,
+  type QuestViewContext,
 } from '@web-legend/game-domain';
 import {
   DEFAULT_INTEREST,
@@ -312,6 +325,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   /** Viewers to recompute once at the end of the current simulation tick. */
   private readonly pendingViewRefresh = new Set<string>();
   private readonly pendingAssets = new Map<string, LoadedAssets>();
+  private readonly pendingQuests = new Map<string, QuestRecordState[]>();
+  /** Quest giver display names from this room's compiled map. */
+  private readonly npcNames = new Map<string, string>();
 
   override onCreate(options: WorldMapRoomOptions): void {
     this.options = options;
@@ -373,6 +389,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       content: this.content.bundle,
       ...(options.economyRng === undefined ? {} : { rng: options.economyRng }),
     });
+
+    for (const npc of this.map.runtime.manifest.npcPoints) {
+      this.npcNames.set(npc.id, npc.name);
+    }
 
     this.metrics = options.metrics.register(this.roomId, {
       mapId: this.map.mapId,
@@ -456,6 +476,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.shopSell, (client, message) => {
       this.handleShopSell(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.questAccept, (client, message) => {
+      this.handleQuestAccept(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.questClaim, (client, message) => {
+      this.handleQuestClaim(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
@@ -531,6 +557,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (loaded === undefined) {
       throw new ServerError(ErrorCode.AUTH_FAILED, '角色资产加载失败，请重新进入');
     }
+    const questRecords = this.pendingQuests.get(client.sessionId) ?? [];
+    this.pendingQuests.delete(client.sessionId);
     const snapshot = loaded.snapshot;
 
     // A character that was last checkpointed at 0 HP re-enters at a spawn point
@@ -627,6 +655,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         attack: combatPlayer.attack,
         defense: combatPlayer.defense,
       },
+      questRecords: new Map(questRecords.map((record) => [record.questId, record])),
       hp: combatPlayer.hp,
       mp: combatPlayer.mp,
       terminated: null,
@@ -651,6 +680,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.sendProfile(session.client, session.playerId);
         this.sendAssetSnapshot(session.client, session);
         this.sendShopCatalog(session.client, session);
+        this.sendQuestSnapshot(session.client, session);
         this.broadcastSystemNotice(
           'info',
           `${auth.displayName} 来到了 ${this.map.runtime.manifest.name}`,
@@ -878,8 +908,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     let assets: LoadedAssets;
+    let questRecords: QuestRecordState[];
     try {
-      assets = await this.assets.loadAssets(character.id);
+      [assets, questRecords] = await Promise.all([
+        this.assets.loadAssets(character.id),
+        this.assets.loadQuestRecords(character.id),
+      ]);
     } catch (error) {
       await releaseCharacterLease(this.options.database, character.id, client.sessionId).catch(
         () => undefined,
@@ -891,6 +925,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       throw new ServerError(ErrorCode.AUTH_FAILED, '角色资产加载失败，请稍后重试');
     }
     this.pendingAssets.set(client.sessionId, assets);
+    this.pendingQuests.set(client.sessionId, questRecords);
 
     return {
       accountId: character.accountId,
@@ -2250,6 +2285,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
     session.assetSnapshot = outcome.snapshot;
+    this.applyQuestUpdates(session, outcome.questUpdates);
     this.sendProgress(session, outcome.leveledUp);
     this.sendProfile(session.client, session.playerId);
     if (outcome.leveledUp) {
@@ -2591,6 +2627,182 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
     client.send(SERVER_MESSAGES.shopCatalog, parsed.data);
+  }
+
+  private handleQuestAccept(client: Client, raw: unknown): void {
+    const parsed = questAcceptSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    void this.runAssetCommand(
+      client,
+      command,
+      'quest_accept',
+      (session) => {
+        const alive = this.requireAlive(session);
+        return alive ?? this.validateQuestNpc(session, command.questId);
+      },
+      (session) =>
+        this.assets.acceptQuest({
+          characterId: session.playerId,
+          commandId: command.commandId,
+          questId: command.questId,
+        }),
+      (session, outcome) => {
+        session.questRecords.set(outcome.record.questId, outcome.record);
+        const view = this.sendQuestUpdate(session, outcome.record);
+        if (!outcome.deduplicated && view !== null) {
+          this.sendSystemNotice(session.client, 'info', `已接取任务：${view.title}`);
+        }
+      },
+    );
+  }
+
+  private handleQuestClaim(client: Client, raw: unknown): void {
+    const parsed = questClaimSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    void this.runAssetCommand(
+      client,
+      command,
+      'quest_claim',
+      (session) => {
+        const alive = this.requireAlive(session);
+        return alive ?? this.validateQuestNpc(session, command.questId);
+      },
+      (session) =>
+        this.assets.claimQuest({
+          characterId: session.playerId,
+          commandId: command.commandId,
+          questId: command.questId,
+        }),
+      (session, outcome) => {
+        session.questRecords.set(outcome.record.questId, outcome.record);
+        this.combat.updatePlayerProgress(session.playerId, {
+          level: outcome.snapshot.level,
+          stats: outcome.stats,
+          refill: outcome.leveledUp,
+        });
+        this.sendProgress(session, outcome.leveledUp);
+        this.sendProfile(session.client, session.playerId);
+        const view = this.sendQuestUpdate(session, outcome.record);
+        if (outcome.deduplicated || view === null) {
+          return;
+        }
+        const rewardParts = [
+          outcome.expGained > 0 ? `经验 +${String(outcome.expGained)}` : '',
+          outcome.goldGained > 0 ? `金币 +${String(outcome.goldGained)}` : '',
+          ...view.rewards.items.map((item) => `${item.name} ×${String(item.quantity)}`),
+        ].filter((part) => part.length > 0);
+        this.sendSystemNotice(
+          session.client,
+          'info',
+          `任务完成：${view.title}${rewardParts.length > 0 ? `（${rewardParts.join('，')}）` : ''}`,
+        );
+        if (outcome.leveledUp) {
+          this.broadcastSystemNotice(
+            'info',
+            `${session.displayName} 升到了 Lv.${String(outcome.snapshot.level)}`,
+          );
+        }
+      },
+    );
+  }
+
+  private validateQuestNpc(session: SessionRecord, questId: string): CommandRejectionCode | null {
+    const quest = this.content.bundle.quests?.[questId];
+    if (quest === undefined) {
+      return 'QUEST_UNAVAILABLE';
+    }
+    const player = this.combat.getPlayer(session.playerId);
+    if (player === undefined) {
+      return 'INVALID_SESSION';
+    }
+    // The giver must stand on this map; a quest whose NPC lives elsewhere can
+    // never be accepted from here (the client cannot choose another map).
+    const npc = this.map.runtime.manifest.npcPoints.find((point) => point.id === quest.giverNpcId);
+    if (npc === undefined) {
+      return 'QUEST_UNAVAILABLE';
+    }
+    const tile = tileOfUnits(player);
+    const distance = Math.hypot(tile.x - npc.tile.x, tile.y - npc.tile.y);
+    return distance > QUEST_NPC_RANGE_TILES ? 'OUT_OF_RANGE' : null;
+  }
+
+  private questContext(): QuestViewContext {
+    return {
+      quests: this.content.bundle.quests ?? {},
+      items: this.content.bundle.items,
+      monsters: this.content.bundle.monsters,
+      npcNames: this.npcNames,
+    };
+  }
+
+  private sendQuestSnapshot(client: Client, session: SessionRecord): void {
+    const context = this.questContext();
+    const views = questViewsFor(
+      context.quests,
+      [...session.questRecords.values()],
+      session.assetSnapshot.level,
+      { items: context.items, monsters: context.monsters, npcNames: context.npcNames },
+    );
+    const snapshot: QuestSnapshot = { quests: views, serverTime: Date.now() };
+    // Content grows over releases; a release with too many quests must degrade
+    // to "no quests" instead of throwing inside the deferred join timer.
+    const parsed = questSnapshotSchema.safeParse(snapshot);
+    if (!parsed.success) {
+      this.options.logger.error(
+        { roomId: this.roomId, issues: parsed.error.issues.length },
+        'quest snapshot failed validation; players cannot see quests in this room',
+      );
+      return;
+    }
+    client.send(SERVER_MESSAGES.questSnapshot, parsed.data);
+  }
+
+  private sendQuestUpdate(session: SessionRecord, record: QuestRecordState): QuestView | null {
+    const context = this.questContext();
+    const quest = context.quests[record.questId];
+    if (quest === undefined) {
+      return null;
+    }
+    const view = questViewFor(
+      quest,
+      record,
+      session.assetSnapshot.level,
+      context,
+      session.questRecords,
+    );
+    const update: QuestUpdate = { quest: view, serverTime: Date.now() };
+    const parsed = questUpdateSchema.safeParse(update);
+    if (!parsed.success) {
+      this.options.logger.warn(
+        { roomId: this.roomId, questId: record.questId },
+        'quest update failed validation',
+      );
+      return null;
+    }
+    session.client.send(SERVER_MESSAGES.questUpdate, parsed.data);
+    return view;
+  }
+
+  private applyQuestUpdates(session: SessionRecord, updates: readonly KillQuestUpdate[]): void {
+    for (const update of updates) {
+      session.questRecords.set(update.record.questId, update.record);
+      const view = this.sendQuestUpdate(session, update.record);
+      if (view !== null && update.completedNow) {
+        this.sendSystemNotice(
+          session.client,
+          'info',
+          `任务完成：${view.title}，回到${view.giverNpcName}处交付`,
+        );
+      }
+    }
   }
 
   private requireAlive(session: SessionRecord): CommandRejectionCode | null {

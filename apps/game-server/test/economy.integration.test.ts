@@ -13,6 +13,8 @@ import {
   commandRejectedSchema,
   inventorySnapshotSchema,
   lootClaimedSchema,
+  questSnapshotSchema,
+  questUpdateSchema,
   shopCatalogSchema,
   worldRoomNameFor,
   type AssetResult,
@@ -22,6 +24,8 @@ import {
   type ContentBundle,
   type InventorySnapshot,
   type LootClaimed,
+  type QuestSnapshot,
+  type QuestUpdate,
   type ShopCatalog,
 } from '@web-legend/contracts';
 import { BASE_CONTENT_BUNDLE, contentChecksum } from '@web-legend/content-schema';
@@ -32,7 +36,9 @@ import {
   characters,
   createDatabase,
   currencyLedger,
+  insertCharacterQuest,
   itemInstances,
+  listCharacterQuests,
   type Database,
   type DatabaseHandle,
 } from '@web-legend/persistence';
@@ -644,4 +650,154 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
       false,
     );
   });
+
+  it('serves quests at the guard and accepts one idempotently', async () => {
+    // (24,12) is inside QUEST_NPC_RANGE_TILES of the guard at (26,12).
+    const actor = await createActor(db, 'Quest', {
+      mapId: STARTER_TOWN_MAP_ID,
+      position: tileUnits({ x: 24, y: 12 }),
+    });
+    const room = await createWorld(actor.ticket, STARTER_TOWN_MAP_ID);
+    const snapshots: QuestSnapshot[] = [];
+    const updates: QuestUpdate[] = [];
+    const results: AssetResult[] = [];
+    const rejections: CommandRejected[] = [];
+    room.onMessage('quest.snapshot', (payload: unknown) => {
+      snapshots.push(questSnapshotSchema.parse(payload));
+    });
+    room.onMessage('quest.update', (payload: unknown) => {
+      updates.push(questUpdateSchema.parse(payload));
+    });
+    room.onMessage('asset.result', (payload: unknown) => {
+      results.push(assetResultSchema.parse(payload));
+    });
+    room.onMessage('command.rejected', (payload: unknown) => {
+      rejections.push(commandRejectedSchema.parse(payload));
+    });
+
+    await waitUntil(() => snapshots.length > 0, 5_000, 'quest snapshot');
+    const firstQuest = snapshots[0]?.quests.find(
+      (quest) => quest.questId === 'quest_slime_cleanup',
+    );
+    expect(firstQuest?.status).toBe('available');
+    expect(firstQuest?.giverNpcId).toBe('town_guard');
+    expect(firstQuest?.objective.monsterName).toBe('野地史莱姆');
+
+    const commandId = randomUUID();
+    room.send('quest.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId,
+      clientSequence: 0,
+      questId: 'quest_slime_cleanup',
+    });
+    await waitUntil(() => updates.length > 0, 5_000, 'accept update');
+    expect(updates[0]?.quest.status).toBe('active');
+    expect(updates[0]?.quest.progress).toBe(0);
+    await waitUntil(() => results.length > 0, 5_000, 'accept asset result');
+    expect(results[0]?.kind).toBe('quest_accept');
+
+    room.send('quest.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId,
+      clientSequence: 0,
+      questId: 'quest_slime_cleanup',
+    });
+    await waitUntil(() => results.length > 1, 5_000, 'duplicate accept result');
+    expect(results[1]?.deduplicated).toBe(true);
+    expect(await listCharacterQuests(db, actor.character.id)).toHaveLength(1);
+
+    // The second quest needs level 3 and the first quest claimed.
+    room.send('quest.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 1,
+      questId: 'quest_wolf_patrol',
+    });
+    await waitUntil(() => rejections.length > 0, 5_000, 'locked quest rejection');
+    expect(rejections[0]?.code).toBe('QUEST_UNAVAILABLE');
+  });
+
+  it('rejects quest commands away from the giver', async () => {
+    const actor = await townActor();
+    const room = await createWorld(actor.ticket, STARTER_TOWN_MAP_ID);
+    const rejections: CommandRejected[] = [];
+    room.onMessage('command.rejected', (payload: unknown) => {
+      rejections.push(commandRejectedSchema.parse(payload));
+    });
+    await waitUntil(
+      () => room.state.players.get(actor.character.id) !== undefined,
+      5_000,
+      'player joined',
+    );
+    room.send('quest.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      questId: 'quest_slime_cleanup',
+    });
+    await waitUntil(() => rejections.length > 0, 5_000, 'distance rejection');
+    expect(rejections[0]?.code).toBe('OUT_OF_RANGE');
+  });
+
+  it('advances kill progress in combat and keeps it across a rejoin', async () => {
+    const actor = await wildsActor();
+    await insertCharacterQuest(db, {
+      characterId: actor.character.id,
+      questId: 'quest_slime_cleanup',
+      now: new Date(),
+    });
+    const room = await createWorld(actor.ticket);
+    const updates: QuestUpdate[] = [];
+    const snapshots: QuestSnapshot[] = [];
+    room.onMessage('quest.update', (payload: unknown) => {
+      updates.push(questUpdateSchema.parse(payload));
+    });
+    room.onMessage('quest.snapshot', (payload: unknown) => {
+      snapshots.push(questSnapshotSchema.parse(payload));
+    });
+    await waitUntil(() => snapshots.length > 0, 5_000, 'quest snapshot');
+    expect(
+      snapshots[0]?.quests.find((quest) => quest.questId === 'quest_slime_cleanup')?.status,
+    ).toBe('active');
+
+    let sequence = 0;
+    for (let kill = 0; kill < 3; kill += 1) {
+      await waitUntil(
+        () => room.state.monsters.get(SLIME) !== undefined,
+        5_000,
+        `slime ${String(kill)} visible`,
+      );
+      await waitUntil(
+        () => room.state.monsters.get(SLIME)?.state !== MONSTER_STATE_CODES.dead,
+        5_000,
+        `slime ${String(kill)} alive`,
+      );
+      sequence = await attackUntilDeath(room, sequence);
+      await waitUntil(
+        () => updates.at(-1)?.quest.progress === kill + 1,
+        5_000,
+        `quest progress ${String(kill + 1)}`,
+      );
+      if (kill < 2) {
+        await waitUntil(
+          () => room.state.monsters.get(SLIME)?.state !== MONSTER_STATE_CODES.dead,
+          5_000,
+          `slime ${String(kill)} respawn`,
+        );
+      }
+    }
+    expect(updates.at(-1)?.quest.status).toBe('completed');
+    expect(updates.at(-1)?.quest.progress).toBe(3);
+
+    await room.leave();
+    await waitForLeaseRelease(actor.character.id);
+    const ticket = await issueTicket(db, actor);
+    const secondRoom = await createWorld(ticket);
+    const reloaded = await waitForMessage<QuestSnapshot>(secondRoom, 'quest.snapshot', (payload) =>
+      questSnapshotSchema.parse(payload),
+    );
+    const quest = reloaded.quests.find((entry) => entry.questId === 'quest_slime_cleanup');
+    expect(quest?.status).toBe('completed');
+    expect(quest?.progress).toBe(3);
+  }, 60_000);
 });

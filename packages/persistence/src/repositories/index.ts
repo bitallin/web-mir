@@ -85,6 +85,14 @@ export type {
 export { findRealmByCode, findRealmById, listActiveRealms } from './realms';
 
 export {
+  advanceCharacterQuest,
+  findCharacterQuestForUpdate,
+  insertCharacterQuest,
+  listCharacterQuests,
+  markCharacterQuestClaimed,
+} from './quests';
+
+export {
   findWallet,
   listEquippedItems,
   listInventoryItems,

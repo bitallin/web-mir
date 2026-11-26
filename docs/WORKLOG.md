@@ -2951,3 +2951,100 @@ pnpm verify:invariants
 1. 8584 试玩并观察 tick 长尾与手感。
 2. S4 收尾：正式美术（TD-CLI-13）；丢弃物品；评估扩展装备槽（TD-DATA-05）。
 3. 确认远端 CI；后续版本继续用 `pnpm load:regression` 观察趋势。
+
+## 2026-11-26 Alpha 0.2 S4-G：主城守卫任务链
+
+### 目标
+
+关闭 Alpha 0.2 最后一个非美术体验缺口：新角色进入主城后没有目标、守卫不可
+交互。交付一条内容驱动、服务端权威、可交付的三步击杀任务链。
+
+### 实际改动
+
+1. **契约**
+   - 新增可选内容 section `quests`：任务 id/标题/描述/发布 NPC/等级/前置/
+     击杀目标/奖励；目标类型为封闭白名单（v1 仅 kill）。
+   - 新增 `quests.ts` 线缆契约：`QuestView`、`quest.snapshot`、
+     `quest.update`、`quest.accept` / `quest.claim`；NPC 交互距离 3 格。
+   - 拒绝码增加 `QUEST_UNAVAILABLE` / `QUEST_NOT_ACTIVE` /
+     `QUEST_NOT_COMPLETE` / `QUEST_ALREADY_CLAIMED`；资产命令增加
+     `quest_accept` / `quest_claim`。
+   - `adminContentDraftUpdateSchema` 增加 quests 分支。
+2. **内容与校验**
+   - 基线三条任务：清理史莱姆（3 只）、狼群的踪迹（3 只，3 级+前置）、
+     白狼王的威胁（1 只，5 级+前置）。
+   - 校验发布 NPC/前置循环/目标怪物/奖励物品/堆叠上限；空奖励与等级差距告警。
+3. **持久化**
+   - 迁移 `0007` 建 `character_quests`（唯一角色+任务、状态、进度、三个时间戳、
+     CHECK）；迁移 `0008` 为 `content_section` 增加 `quests`。
+4. **应用与领域**
+   - `grantKillReward` 在同一事务推进活动任务，重复击杀引用不推进。
+   - `acceptQuest` / `claimQuest`：角色行锁、幂等命令、等级/前置/状态校验；
+     交付单事务发经验（可升级）、金币+账本、物品（背包满整体回滚）。
+   - `game-domain/quests.ts` 纯函数：状态推导、前置必须 claimed、视图解析、
+     击杀推进与封顶。
+5. **服务端与客户端**
+   - 加入后发送私有 `quest.snapshot`；击杀提交后发 `quest.update`；接取/交付
+     校验 NPC 在本地图且 ≤3 格。
+   - 状态板「任务 J」按钮、任务追踪、可接提示；右侧任务面板显示描述/进度/
+     奖励/锁定原因；NPC 点击按商人优先、任务发布者次之；切图关闭面板。
+6. **内容发布**
+   - 开发库应用 `0007`/`0008`；保存 quests 草稿、校验 0 issue、发布并激活
+     `2026.11.26.7`（checksum `e1c97389…`，新增 3）。
+   - 开发栈重启到本切片代码；Game Server 日志确认内容刷新。
+7. **文档**
+   - ADR-034、切片报告、PROJECT_STATUS/WORKLOG/EVOLUTION_LOG/债务/经验更新。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm verify:invariants
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 pnpm load:scenario
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：70 文件、**472 测试**通过（新增 17 条）。
+- 构建：4 个应用成功。
+- 全量 E2E：**39/39 通过**（4.3 分钟，2 worker，独立库/端口）。
+- 任务 E2E：接取 → 3 次击杀 → 回城交付 → 金币 +20、药水 +1、追踪清空。
+- 资产不变量：7 项全部 0 违例。
+- 50 人 × 2 分钟：50/50、接受率 98.8%、145 击杀、0 资产失败；
+  tick p95 4.37ms、p99 6.17ms、资产 p95 59.22ms。
+- 真实 Chromium（8584）：可接提示 → 守卫面板 → 接取成功；服务端返回
+  `quest_slime_cleanup=active`、后续任务 locked。
+
+### 遇到的问题及解决方法
+
+1. **保存 quests 草稿 422**：`adminContentDraftUpdateSchema` 是手写的 section
+   判别联合，未随 `CONTENT_SECTIONS` 扩展；补分支并重启 Control API 后通过。
+   沉淀 EL-029。
+2. **任务 E2E 抢走 combat.spec 的刷点**：第一版选“视野内第一只活史莱姆”，
+   与 `wilds_slime_2` 重叠，导致技能冷却断言偶发失败；改为独占
+   `wilds_slime_9` 并在注释登记。全量 39/39。
+3. **1 级角色横穿野区被击杀**：最初让角色去远处三只史莱姆，途中被狼/蜘蛛
+   击杀，攻击被拒；改为入口附近的独占刷点等待刷新，三次击杀都在安全区域。
+4. **压测脚本未注册新消息**：50 人压测每机器人打印未注册 `quest.snapshot`；
+   已在 `worldScenario.ts` 加空处理器。
+
+### 尚未解决
+
+- 50 人 × 10 分钟正式回归未在本切片复跑（2 分钟 sanity 已过）。
+- 8584 人工试玩仍待用户完成；远端 CI 待确认。
+- 任务仅 kill 目标、单 NPC 接取/交付、无放弃/日志/每日/组队共享；经验交付
+  仍无连续流水（TD-DATA-11）。
+
+### 提交
+
+- 待提交：`feat(alpha-02): add the town guard quest chain`。
+
+### 下一步计划
+
+1. 8584 试玩完整任务链（接取 → 出城 → 回城交付）。
+2. 50 人 × 10 分钟容量回归，观察任务查询对资产 p95 的影响。
+3. S4 剩余正式美术（TD-CLI-13）；Alpha 0.3 任务系统扩展在确认 0.2 验收后评估。

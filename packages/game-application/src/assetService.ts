@@ -11,6 +11,7 @@ import {
 } from '@web-legend/contracts';
 import {
   DEFAULT_CONTENT_BUNDLE,
+  advanceQuestOnKill,
   applyDeathPenalty,
   applyExperience,
   canEquip,
@@ -31,17 +32,23 @@ import {
   type CombatStats,
   type ItemCatalog,
   type ItemDefinition,
+  type QuestRecordState,
   type Rng,
 } from '@web-legend/game-domain';
 import {
+  advanceCharacterQuest,
   assetCommands,
   characters,
   currencyLedger,
+  findCharacterQuestForUpdate,
   findWallet,
+  insertCharacterQuest,
   itemInstances,
+  listCharacterQuests,
   listEquippedItems,
   listInventoryItems,
   listOpenWorldDrops,
+  markCharacterQuestClaimed,
   purgeExpiredWorldDrops,
   wallets,
   worldDrops,
@@ -90,6 +97,12 @@ export type LootDropView = {
   expiresAt: number;
 };
 
+export type KillQuestUpdate = {
+  record: QuestRecordState;
+  /** True when this kill completed the objective. */
+  completedNow: boolean;
+};
+
 export type KillRewardOutcome = {
   snapshot: InventorySnapshot;
   stats: CombatStats;
@@ -97,6 +110,8 @@ export type KillRewardOutcome = {
   goldGained: number;
   leveledUp: boolean;
   drops: LootDropView[];
+  /** Active quests whose progress advanced in this same transaction. */
+  questUpdates: KillQuestUpdate[];
 };
 
 export type PickupOutcome = {
@@ -187,6 +202,17 @@ export type ShopSellOutcome = AssetCommandOutcome & {
   } | null;
 };
 
+export type QuestCommandInput = { characterId: string; commandId: string; questId: string };
+
+export type AcceptQuestOutcome = AssetCommandOutcome & { record: QuestRecordState };
+
+export type ClaimQuestOutcome = AssetCommandOutcome & {
+  record: QuestRecordState;
+  leveledUp: boolean;
+  expGained: number;
+  goldGained: number;
+};
+
 function itemView(row: ItemInstance, catalog: ItemCatalog): ItemView {
   const definition = requireItem(row.templateId, catalog);
   return {
@@ -212,6 +238,14 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function questRecordOf(row: {
+  questId: string;
+  status: 'active' | 'completed' | 'claimed';
+  progress: number;
+}): QuestRecordState {
+  return { questId: row.questId, status: row.status, progress: row.progress };
+}
+
 /**
  * Transactional asset use cases for phase 5 (ADR-020). Every mutation here runs
  * in one PostgreSQL transaction, uses a unique idempotency key and reads the
@@ -234,6 +268,12 @@ export class AssetService {
 
   async loadAssets(characterId: string): Promise<LoadedAssets> {
     return this.loadAssetsWithin(this.db, characterId);
+  }
+
+  /** Quest rows for the join handshake; separate from the asset snapshot. */
+  async loadQuestRecords(characterId: string): Promise<QuestRecordState[]> {
+    const rows = await listCharacterQuests(this.db, characterId);
+    return rows.map((row) => questRecordOf(row));
   }
 
   /**
@@ -434,6 +474,16 @@ export class AssetService {
         });
       }
 
+      // Quest progress shares the reward transaction: a committed kill always
+      // advances its objective exactly once, and a rolled-back reward cannot
+      // leave a quest half-credited (ADR-034).
+      const questUpdates = await this.advanceQuestsOnKill(
+        tx,
+        character.id,
+        input.monsterTemplateId,
+        now,
+      );
+
       const loaded = await this.loadAssetsWithin(tx, character.id);
       return {
         snapshot: loaded.snapshot,
@@ -442,6 +492,7 @@ export class AssetService {
         goldGained: roll.gold,
         leveledUp,
         drops,
+        questUpdates,
       };
     });
   }
@@ -1108,6 +1159,320 @@ export class AssetService {
         },
       };
     });
+  }
+
+  /**
+   * Accepts one quest at its giver. The Room validates NPC proximity; this
+   * transaction re-checks the level and prerequisite chain so a forged command
+   * cannot skip the story (ADR-034).
+   */
+  async acceptQuest(input: QuestCommandInput): Promise<AcceptQuestOutcome> {
+    const now = this.now();
+    return this.db.transaction(async (tx) => {
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
+      const inserted = await this.claimCommand(
+        tx,
+        input.characterId,
+        'quest_accept',
+        input.commandId,
+      );
+      if (!inserted) {
+        const existing = await findCharacterQuestForUpdate(tx, input.characterId, input.questId);
+        if (existing === undefined) {
+          throw new AssetError('QUEST_UNAVAILABLE');
+        }
+        const current = await this.loadAssetsWithin(tx, input.characterId);
+        return {
+          snapshot: current.snapshot,
+          stats: current.stats,
+          deduplicated: true,
+          record: questRecordOf(existing),
+        };
+      }
+
+      const quest = this.content.quests?.[input.questId];
+      if (quest === undefined) {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+      if (character.level < quest.levelRequirement) {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+      const existing = await findCharacterQuestForUpdate(tx, input.characterId, input.questId);
+      if (existing !== undefined) {
+        throw new AssetError(
+          existing.status === 'claimed' ? 'QUEST_ALREADY_CLAIMED' : 'QUEST_UNAVAILABLE',
+        );
+      }
+      if (quest.prerequisiteQuestId !== undefined) {
+        const prerequisite = await findCharacterQuestForUpdate(
+          tx,
+          input.characterId,
+          quest.prerequisiteQuestId,
+        );
+        if (prerequisite?.status !== 'claimed') {
+          throw new AssetError('QUEST_UNAVAILABLE');
+        }
+      }
+
+      const row = await insertCharacterQuest(tx, {
+        characterId: input.characterId,
+        questId: quest.id,
+        now,
+      });
+      if (row === undefined) {
+        throw new AssetError('SERVICE_UNAVAILABLE');
+      }
+
+      const loaded = await this.loadAssetsWithin(tx, input.characterId);
+      return {
+        snapshot: loaded.snapshot,
+        stats: loaded.stats,
+        deduplicated: false,
+        record: questRecordOf(row),
+      };
+    });
+  }
+
+  /**
+   * Turns in a completed quest: experience, gold and items commit together with
+   * the claimed row. A broken bag or a duplicate command never pays twice.
+   */
+  async claimQuest(input: QuestCommandInput): Promise<ClaimQuestOutcome> {
+    const now = this.now();
+    return this.db.transaction(async (tx) => {
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
+      const inserted = await this.claimCommand(
+        tx,
+        input.characterId,
+        'quest_claim',
+        input.commandId,
+      );
+      if (!inserted) {
+        const existing = await findCharacterQuestForUpdate(tx, input.characterId, input.questId);
+        if (existing === undefined) {
+          throw new AssetError('QUEST_NOT_ACTIVE');
+        }
+        const current = await this.loadAssetsWithin(tx, input.characterId);
+        return {
+          snapshot: current.snapshot,
+          stats: current.stats,
+          deduplicated: true,
+          record: questRecordOf(existing),
+          leveledUp: false,
+          expGained: 0,
+          goldGained: 0,
+        };
+      }
+
+      const quest = this.content.quests?.[input.questId];
+      if (quest === undefined) {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+      const record = await findCharacterQuestForUpdate(tx, input.characterId, input.questId);
+      if (record === undefined) {
+        throw new AssetError('QUEST_NOT_ACTIVE');
+      }
+      if (record.status === 'claimed') {
+        throw new AssetError('QUEST_ALREADY_CLAIMED');
+      }
+      if (record.status !== 'completed') {
+        throw new AssetError('QUEST_NOT_COMPLETE');
+      }
+
+      const progression = applyExperience(character.level, character.exp, quest.rewards.exp);
+      const leveledUp = progression.levelsGained > 0;
+      const equipped = await listEquippedItems(tx, character.id);
+      const stats = statsWithEquipment(
+        combatStatsFor(character.classId, progression.level, this.content),
+        equipmentBonuses(
+          equipped.map((entry) => requireItem(entry.templateId, this.content.items)),
+        ),
+      );
+      const hp = leveledUp ? stats.maxHp : clamp(character.hp, 0, stats.maxHp);
+      const mp = leveledUp ? stats.maxMp : clamp(character.mp, 0, stats.maxMp);
+
+      await tx
+        .update(characters)
+        .set({
+          level: progression.level,
+          exp: progression.exp,
+          hp,
+          mp,
+          maxHp: stats.maxHp,
+          maxMp: stats.maxMp,
+          version: sql`${characters.version} + 1`,
+          updatedAt: now,
+        })
+        .where(eq(characters.id, character.id));
+
+      if (quest.rewards.gold > 0) {
+        const [wallet] = await tx
+          .insert(wallets)
+          .values({
+            characterId: character.id,
+            balance: quest.rewards.gold,
+            version: 1,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: wallets.characterId,
+            set: {
+              balance: sql`${wallets.balance} + ${quest.rewards.gold}`,
+              version: sql`${wallets.version} + 1`,
+              updatedAt: now,
+            },
+          })
+          .returning({ balance: wallets.balance });
+        if (wallet === undefined) {
+          throw new AssetError('SERVICE_UNAVAILABLE');
+        }
+        await tx.insert(currencyLedger).values({
+          characterId: character.id,
+          currencyType: 'gold',
+          delta: quest.rewards.gold,
+          balanceAfter: wallet.balance,
+          reason: 'quest_reward',
+          referenceId: quest.id,
+          idempotencyKey: `quest_claim:${input.characterId}:${input.commandId}:gold`,
+          createdAt: now,
+        });
+      }
+
+      await this.placeQuestRewardItems(tx, character.id, quest.rewards.items, now);
+
+      const claimed = await markCharacterQuestClaimed(tx, {
+        characterId: input.characterId,
+        questId: quest.id,
+        now,
+      });
+      if (claimed === undefined) {
+        throw new AssetError('SERVICE_UNAVAILABLE');
+      }
+
+      const loaded = await this.loadAssetsWithin(tx, input.characterId);
+      return {
+        snapshot: loaded.snapshot,
+        stats: loaded.stats,
+        deduplicated: false,
+        record: questRecordOf(claimed),
+        leveledUp,
+        expGained: quest.rewards.exp,
+        goldGained: quest.rewards.gold,
+      };
+    });
+  }
+
+  private async advanceQuestsOnKill(
+    executor: DbExecutor,
+    characterId: string,
+    monsterId: string,
+    now: Date,
+  ): Promise<KillQuestUpdate[]> {
+    const quests = this.content.quests;
+    if (quests === undefined) {
+      return [];
+    }
+    const records = await listCharacterQuests(executor, characterId);
+    const updates: KillQuestUpdate[] = [];
+    for (const row of records) {
+      const quest = quests[row.questId];
+      if (quest === undefined) {
+        continue;
+      }
+      const change = advanceQuestOnKill(quest, questRecordOf(row), monsterId);
+      if (change === null) {
+        continue;
+      }
+      const updated = await advanceCharacterQuest(executor, {
+        characterId,
+        questId: quest.id,
+        progress: change.progress,
+        completed: change.completed,
+        now,
+      });
+      if (updated !== undefined) {
+        updates.push({ record: questRecordOf(updated), completedNow: change.completed });
+      }
+    }
+    return updates;
+  }
+
+  private async placeQuestRewardItems(
+    executor: DbExecutor,
+    characterId: string,
+    items: readonly { templateId: string; quantity: number }[],
+    now: Date,
+  ): Promise<void> {
+    if (items.length === 0) {
+      return;
+    }
+    const inventory = await listInventoryItems(executor, characterId);
+    const simulated = inventory.map((entry) => ({
+      itemId: entry.id,
+      templateId: entry.templateId,
+      quantity: entry.quantity,
+      slotIndex: entry.slotIndex ?? 0,
+    }));
+    for (const reward of items) {
+      const placement = findInventoryPlacement(
+        {
+          items: simulated,
+          templateId: reward.templateId,
+          quantity: reward.quantity,
+          capacity: INVENTORY_CAPACITY,
+        },
+        this.content.items,
+      );
+      if (placement === null) {
+        throw new AssetError('INVENTORY_FULL');
+      }
+      if (placement.kind === 'merge') {
+        await executor
+          .update(itemInstances)
+          .set({
+            quantity: sql`${itemInstances.quantity} + ${reward.quantity}`,
+            version: sql`${itemInstances.version} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(itemInstances.id, placement.targetItemId));
+        const target = simulated.find((entry) => entry.itemId === placement.targetItemId);
+        if (target !== undefined) {
+          target.quantity = placement.resultingQuantity;
+        }
+        continue;
+      }
+      await executor.insert(itemInstances).values({
+        templateId: reward.templateId,
+        characterId,
+        container: 'inventory',
+        slotIndex: placement.slotIndex,
+        quantity: reward.quantity,
+        createdAt: now,
+        updatedAt: now,
+      });
+      simulated.push({
+        itemId: `reward-${String(simulated.length)}-${reward.templateId}`,
+        templateId: reward.templateId,
+        quantity: reward.quantity,
+        slotIndex: placement.slotIndex,
+      });
+    }
   }
 
   private async claimCommand(
