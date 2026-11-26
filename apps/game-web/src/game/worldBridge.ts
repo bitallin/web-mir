@@ -1,4 +1,4 @@
-import type { CombatEvent, CommandAck, TilePoint } from '@web-legend/contracts';
+import type { CharacterClip, CombatEvent, CommandAck, TilePoint } from '@web-legend/contracts';
 
 import type { WorldSnapshot } from '../net/worldClient';
 import type { ScreenPoint } from './projection';
@@ -6,6 +6,13 @@ import type { ScreenPoint } from './projection';
 export type SceneSnapshot = {
   snapshot: WorldSnapshot;
   selfId: string;
+};
+
+/** What the E2E diagnostics read back from a rendered player. */
+export type PlayerAppearance = {
+  textureKey: string;
+  clip: CharacterClip;
+  frame: string;
 };
 
 /** The part of the Phaser scene the session layer is allowed to touch. */
@@ -16,6 +23,7 @@ export type WorldSceneHandle = {
   screenPointForTile: (tile: TilePoint) => ScreenPoint;
   monsterScreenPoint: (monsterId: string) => ScreenPoint | null;
   playerScreenPoint: (playerId: string) => ScreenPoint | null;
+  playerAppearance: (playerId: string) => PlayerAppearance | null;
   npcScreenPoint: (npcId: string) => ScreenPoint | null;
   lootScreenPoint: (dropId: string) => ScreenPoint | null;
   selectEntity: (entityId: string) => void;
@@ -104,6 +112,10 @@ export class WorldBridge {
 
   playerScreenPoint(playerId: string): ScreenPoint | null {
     return this.scene?.playerScreenPoint(playerId) ?? null;
+  }
+
+  playerAppearance(playerId: string): PlayerAppearance | null {
+    return this.scene?.playerAppearance(playerId) ?? null;
   }
 
   lootScreenPoint(dropId: string): ScreenPoint | null {

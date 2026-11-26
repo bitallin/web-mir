@@ -142,8 +142,19 @@ export {
   assetMapEntrySchema,
   assetTileSchema,
   assetTilesetSchema,
+  characterAnimationSchema,
+  characterAnimationsSchema,
+  characterClipSchema,
 } from './assets';
-export type { AssetCharacter, AssetManifest, AssetTile, AssetTileset } from './assets';
+export type {
+  AssetCharacter,
+  AssetManifest,
+  AssetTile,
+  AssetTileset,
+  CharacterAnimation,
+  CharacterAnimations,
+  CharacterClip,
+} from './assets';
 
 export {
   ECONOMY_CONTENT_VERSION,

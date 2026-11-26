@@ -27,6 +27,7 @@
     "db:migrate": "pnpm --filter @web-legend/persistence db:migrate",
     "db:seed": "pnpm --filter @web-legend/persistence db:seed && pnpm --filter @web-legend/control-api seed:admin",
     "maps:compile": "tsx packages/map-runtime/src/compileMaps.ts",
+    "assets:generate": "tsx content/assets/generateCharacters.ts",
     "repair:maps": "pnpm --filter @web-legend/control-api repair:maps",
     "load:world": "pnpm --filter @web-legend/game-server load:world",
     "load:scenario": "pnpm --filter @web-legend/game-server load:scenario",

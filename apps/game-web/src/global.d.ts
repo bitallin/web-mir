@@ -1,5 +1,6 @@
 import type { EquipmentSlot, InventorySnapshot } from '@web-legend/contracts';
 
+import type { PlayerAppearance } from './game/worldBridge';
 import type { LootView } from './net/worldClient';
 
 export {};
@@ -27,6 +28,9 @@ declare global {
       castSkill: (skillId: string, targetId: string) => boolean;
       monsterScreenPoint: (monsterId: string) => { x: number; y: number } | null;
       playerScreenPoint: (playerId: string) => { x: number; y: number } | null;
+      /** Which class sheet and clip the local player is rendering. */
+      selfAppearance: () => PlayerAppearance;
+      selfId: () => string;
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
       sendChat: (text: string) => boolean;

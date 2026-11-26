@@ -948,6 +948,13 @@ class WorldSession {
       castSkill: (skillId, targetId) => this.castSkill(skillId, targetId),
       monsterScreenPoint: (monsterId) => this.bridge.monsterScreenPoint(monsterId),
       playerScreenPoint: (playerId) => this.bridge.playerScreenPoint(playerId),
+      selfAppearance: () =>
+        this.bridge.playerAppearance(this.options.character.id) ?? {
+          textureKey: 'unknown',
+          clip: 'idle',
+          frame: '',
+        },
+      selfId: () => this.options.character.id,
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),
       interactNpc: (npcId) => this.interactNpc(npcId),
       sendChat: (text) => this.sendChat(text),

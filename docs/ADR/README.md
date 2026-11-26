@@ -33,5 +33,6 @@
 | [ADR-026](ADR-026-town-merchant-and-gold-sink.md)                              | 主城杂货商、物品价格内容化与金币消耗端   | Accepted              |
 | [ADR-027](ADR-027-server-authoritative-mana-regeneration.md)                   | 服务端权威、内容驱动的法力回复           | Accepted              |
 | [ADR-028](ADR-028-damage-over-time-and-shield-effects.md)                      | 持续伤害与护盾效果、技能解锁顺序         | Accepted              |
+| [ADR-029](ADR-029-character-animation-clips.md)                                | 角色外观与动画片段由资源 manifest 描述   | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

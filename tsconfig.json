@@ -4,5 +4,11 @@
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["node"]
   },
-  "include": ["vitest.config.ts", "playwright.config.ts", "tests/**/*.ts", "infra/scripts/**/*.ts"]
+  "include": [
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "tests/**/*.ts",
+    "infra/scripts/**/*.ts",
+    "content/assets/**/*.ts"
+  ]
 }

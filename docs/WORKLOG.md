@@ -1987,3 +1987,81 @@ pnpm load:regression
 2. 完成三套职业外观；随后进入 S3 怪物威胁与死亡代价。
 3. 评估 tick p95 12.36ms：先复测确认是否为环境噪声，再决定是否按 TD-SRV-03/
    TD-CLI-05 优化。
+
+---
+
+## 2026-11-26 S2 任务 3：三职业外观与动作（TD-CLI-06）
+
+### 本次任务目标
+
+让三个职业在画面上可区分，并让待机/行走/攻击/施法/受击/死亡由服务端战斗事件
+驱动；资源描述留在内容层，正式美术替换时不改客户端代码。
+
+### 实际改动
+
+1. **资源格式与生成**
+   - `assetCharacterSchema` 增加可选 `animations`（片段 → 列索引数组、帧时长、
+     是否循环），校验帧索引不越界、片段内不重复。
+   - 新增 `content/assets/generateCharacters.ts` 与 `pnpm assets:generate`：
+     零依赖生成 3 张 32×48、10 列 × 4 行职业贴图（战士/法师/道士），输出确定。
+   - manifest 版本 `phase3.1 → alpha0.2.1`，新增三职业条目；重新编译地图。
+2. **客户端**
+   - `mapCatalog` 加载三职业贴图与回退占位图；`PlayerVisual` 按 `classId` 选图。
+   - 新增纯函数 `playerAnimation.ts`：`resolveClip`（死亡 > 一次性片段 > 行走 >
+     待机）、`frameIndexFor`（循环取模/一次性停末帧）、`oneShotMs`。
+   - `attack` 事件带 `skillId` 播放施法片段，否则普攻片段；`hit` 播放受击；
+     `death`/`respawn` 切换死亡片段并复位。
+   - 帧命名统一为 `${direction}:${frame}`；旧占位图共用同一命名并保留色相区分。
+   - 新增仅开发环境的 `selfAppearance()` / `selfId()` 诊断钩子。
+3. **测试与证据**
+   - 契约测试：三职业贴图表、越界帧、重复帧。
+   - 动画纯函数测试 7 条；浏览器 E2E `classes.spec.ts` 5 条。
+   - 截图：`docs/phase-reports/alpha-02/classes/`（三职业待机、战士普攻、道士施法）。
+4. **文档**
+   - ADR-029、`ALPHA_02_CLASS_APPEARANCE_REPORT.md`、EL-019、债务 TD-CLI-06 关闭、
+     TD-CLI-13 新增。
+
+### 命令与结果
+
+```bash
+pnpm assets:generate
+pnpm maps:compile
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm verify:invariants
+pnpm exec playwright test tests/e2e/classes.spec.ts --workers=1
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：65 文件、399 测试通过。
+- 构建：4 个应用成功。
+- 全量 E2E：30/30 通过（3.4 分钟，2 worker）。
+- 外观 E2E：5/5（三职业贴图与行走、战士普攻、道士施法）。
+- 资产不变量：7 项全部 0 违例。开发库原有 1 条 09:12 过期的 `slime_gel`
+  （上一轮试玩遗留），通过 `AssetService.purgeExpiredDrops` 清理后归零。
+
+### 遇到的问题及解决方法
+
+1. **E2E 共享刷点**：新用例最初与 `skills.spec.ts` 共用 `wilds_slime_10`，
+   2 worker 并行时互相抢怪，技能用例失败。改用独占 `wilds_slime_12`，并记录
+   EL-019。
+2. **角色名 12 字符上限**：`Warrior` + 6 位 token 超限被截断，角色卡定位失败。
+   改用 `Warr`/`Mage`/`Taoi` 前缀。
+3. **战斗截图被 HUD 遮挡**：野外目标面板更高，挡住摄像机抬升后的玩家；E2E
+   截图前隐藏 HUD，只保留画布层。
+4. **编译地图格式漂移**：`maps:compile` 输出未格式化，diff 变成逐元素展开；
+   运行 Prettier 后只保留 `assetManifestVersion` 与 checksum 变化。
+
+### 尚未解决
+
+- 正式美术（TD-CLI-13）留到 S4；逐技能区分攻击/施法动作未做。
+- 8584 目视、远端 CI、S3 前容量复测。
+
+### 下一步计划
+
+1. 在 8584 目视三职业外观与动作，并用 5 级角色试玩毒/护盾。
+2. 进入 S3：怪物威胁与死亡代价。

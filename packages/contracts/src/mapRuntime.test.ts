@@ -107,6 +107,55 @@ describe('asset manifest', () => {
     expect(Object.keys(manifest.maps).sort()).toEqual(['starter_town', 'starter_wilds']);
   });
 
+  it('gives every class its own sheet and clip table', () => {
+    const manifest = assetManifestSchema.parse(rawAssetManifest);
+    for (const classId of ['warrior', 'mage', 'taoist']) {
+      const character = manifest.characters[classId];
+      expect(character?.image).toBe(`class_${classId}.png`);
+      expect(character?.animations?.walk?.frames).toEqual([1, 2]);
+      expect(character?.animations?.death?.frames).toEqual([8, 9]);
+      expect(character?.animations?.death?.loop).toBe(false);
+    }
+  });
+
+  it('rejects a clip that points past the sheet width', () => {
+    const manifest = assetManifestSchema.parse(rawAssetManifest);
+    const warrior = manifest.characters.warrior;
+    if (warrior === undefined) {
+      throw new Error('warrior character is missing');
+    }
+    const broken = {
+      ...manifest,
+      characters: {
+        ...manifest.characters,
+        warrior: {
+          ...warrior,
+          animations: { ...warrior.animations, idle: { frames: [10], frameMs: 100, loop: true } },
+        },
+      },
+    };
+    expect(assetManifestSchema.safeParse(broken).success).toBe(false);
+  });
+
+  it('rejects a clip that repeats a frame', () => {
+    const manifest = assetManifestSchema.parse(rawAssetManifest);
+    const mage = manifest.characters.mage;
+    if (mage === undefined) {
+      throw new Error('mage character is missing');
+    }
+    const broken = {
+      ...manifest,
+      characters: {
+        ...manifest.characters,
+        mage: {
+          ...mage,
+          animations: { ...mage.animations, walk: { frames: [1, 1], frameMs: 100, loop: true } },
+        },
+      },
+    };
+    expect(assetManifestSchema.safeParse(broken).success).toBe(false);
+  });
+
   it('rejects a tileset whose gids are not contiguous', () => {
     const manifest = assetManifestSchema.parse(rawAssetManifest);
     const terrain = manifest.tilesets.terrain;

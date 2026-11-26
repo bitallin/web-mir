@@ -20,14 +20,27 @@ const PLAYER_IMAGE_URL = new URL(
   '../../../../content/assets/generated/player_placeholder.png',
   import.meta.url,
 ).href;
+const CLASS_IMAGE_URLS: Readonly<Record<string, string>> = {
+  warrior: new URL('../../../../content/assets/generated/class_warrior.png', import.meta.url).href,
+  mage: new URL('../../../../content/assets/generated/class_mage.png', import.meta.url).href,
+  taoist: new URL('../../../../content/assets/generated/class_taoist.png', import.meta.url).href,
+};
+
+export type CharacterAsset = {
+  /** Phaser texture key. */
+  key: string;
+  character: AssetCharacter;
+  imageUrl: string;
+};
 
 export type MapBundle = {
   manifest: MapRuntimeManifest;
   tileset: AssetTileset;
   tilesByGid: ReadonlyMap<number, AssetTile>;
   terrainImageUrl: string;
-  player: AssetCharacter;
-  playerImageUrl: string;
+  /** Shared fallback sheet, also used when a class sheet is missing. */
+  fallbackCharacter: CharacterAsset;
+  characters: ReadonlyMap<string, CharacterAsset>;
 };
 
 function requireTileset(): AssetTileset {
@@ -38,12 +51,24 @@ function requireTileset(): AssetTileset {
   return tileset;
 }
 
-function requirePlayer(): AssetCharacter {
-  const player = assetManifest.characters.player_placeholder;
-  if (player === undefined) {
+function requireFallbackCharacter(): CharacterAsset {
+  const character = assetManifest.characters.player_placeholder;
+  if (character === undefined) {
     throw new Error('asset manifest has no player character');
   }
-  return player;
+  return { key: 'characters', character, imageUrl: PLAYER_IMAGE_URL };
+}
+
+function classCharacters(): ReadonlyMap<string, CharacterAsset> {
+  const characters = new Map<string, CharacterAsset>();
+  for (const [id, url] of Object.entries(CLASS_IMAGE_URLS)) {
+    const character = assetManifest.characters[id];
+    if (character === undefined) {
+      continue;
+    }
+    characters.set(id, { key: `character-${id}`, character, imageUrl: url });
+  }
+  return characters;
 }
 
 /**
@@ -54,14 +79,13 @@ function requirePlayer(): AssetCharacter {
 export function mapBundleFor(mapId: string): MapBundle {
   const manifest = findMapManifest(mapId) ?? STARTER_TOWN_MAP;
   const tileset = requireTileset();
-  const player = requirePlayer();
   return {
     manifest,
     tileset,
     tilesByGid: new Map(tileset.tiles.map((tile) => [tile.gid, tile])),
     terrainImageUrl: TERRAIN_IMAGE_URL,
-    player,
-    playerImageUrl: PLAYER_IMAGE_URL,
+    fallbackCharacter: requireFallbackCharacter(),
+    characters: classCharacters(),
   };
 }
 

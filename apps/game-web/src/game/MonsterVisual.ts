@@ -98,7 +98,7 @@ export class MonsterVisual {
     this.container.setDepth(this.current.y);
   }
 
-  playAttack(): void {
+  playAttack(_kind: 'attack' | 'cast' = 'attack'): void {
     this.scene.tweens.add({
       targets: this.container,
       scaleX: 1.12,

@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import {
   PLAYER_SPEED_UNITS_PER_SECOND,
   TILE_UNITS,
+  type CharacterAnimations,
+  type CharacterClip,
   type CombatEvent,
   type CommandAck,
   type TilePoint,
@@ -9,21 +11,29 @@ import {
 
 import type { PlayerView } from '../net/worldClient';
 import { createProjection, TILE_HEIGHT, TILE_WIDTH, type ScreenPoint } from './projection';
-import type { MapBundle } from './mapCatalog';
+import type { CharacterAsset, MapBundle } from './mapCatalog';
 import { LootVisual } from './LootVisual';
 import { MonsterVisual } from './MonsterVisual';
-import type { SceneSnapshot, WorldBridge, WorldSceneHandle } from './worldBridge';
+import {
+  FALLBACK_ANIMATIONS,
+  animationFor,
+  frameIndexFor,
+  oneShotMs,
+  resolveClip,
+  type OneShot,
+} from './playerAnimation';
+import type { PlayerAppearance, SceneSnapshot, WorldBridge, WorldSceneHandle } from './worldBridge';
 
 const DISPLAY_FONT = '"Noto Serif SC", "Songti SC", "SimSun", Georgia, serif';
 const WALL_HEIGHT = 24;
 const MAX_FRAME_MS = 100;
 const SNAP_DISTANCE_UNITS = 900;
 const GROUND_DEPTH = -10_000;
-const WALK_ANIMATION_MS = 150;
 /** Keeps the player and adjacent monsters above the bottom combat HUD. */
 const CAMERA_LIFT_PX = 200;
 
 const PLAYER_COLORS = [0x9fc4e0, 0xe0b087, 0xa8d6a1, 0xcf9fe0, 0xe0d18f, 0x8fd0d0];
+const MIN_ONE_SHOT_MS = 180;
 
 type UnitPoint = { x: number; y: number };
 
@@ -52,13 +62,18 @@ class PlayerVisual {
   readonly sprite: Phaser.GameObjects.Sprite;
   readonly isSelf: boolean;
   private readonly hpBar: Phaser.GameObjects.Graphics;
+  private readonly character: CharacterAsset;
+  private readonly animations: CharacterAnimations;
   current: ScreenPoint = { x: 0, y: 0 };
   target: ScreenPoint = { x: 0, y: 0 };
   private initialized = false;
-  private animationClock = 0;
+  private elapsed = 0;
+  private clipElapsed = 0;
+  private clip: CharacterClip = 'idle';
+  private oneShot: OneShot | null = null;
   private facing = 2;
   private moving = false;
-  private frameIndex = 0;
+  private dead = false;
   private displayName = '';
   private level = 1;
   private hp = 1;
@@ -70,15 +85,18 @@ class PlayerVisual {
     displayName: string,
     colorIndex: number,
     isSelf: boolean,
-    framePrefix: string,
+    character: CharacterAsset,
   ) {
     this.isSelf = isSelf;
+    this.character = character;
+    this.animations = character.character.animations ?? FALLBACK_ANIMATIONS;
     const color = PLAYER_COLORS[colorIndex % PLAYER_COLORS.length] ?? PLAYER_COLORS[0] ?? 0x9fc4e0;
 
-    this.sprite = scene.add
-      .sprite(0, 0, 'characters', `${framePrefix}d2f0`)
-      .setOrigin(0.5, 1)
-      .setTint(color);
+    this.sprite = scene.add.sprite(0, 0, character.key, '2:0').setOrigin(0.5, 1);
+    // Only the shared placeholder is tinted; class sheets carry their own palette.
+    if (character.character.animations === undefined) {
+      this.sprite.setTint(color);
+    }
 
     this.nameText = scene.add
       .text(0, -58, displayName, {
@@ -147,7 +165,7 @@ class PlayerVisual {
     this.facing = ((facing % 4) + 4) % 4;
   }
 
-  update(deltaMs: number, framePrefix: string): void {
+  update(deltaMs: number): void {
     const factor = 1 - Math.exp(-deltaMs / 70);
     this.current = {
       x: lerp(this.current.x, this.target.x, factor),
@@ -156,17 +174,24 @@ class PlayerVisual {
     this.container.setPosition(this.current.x, this.current.y);
     this.container.setDepth(this.current.y);
 
-    if (this.moving) {
-      this.animationClock += deltaMs;
-      this.frameIndex = Math.floor(this.animationClock / WALK_ANIMATION_MS) % 2;
+    this.elapsed += deltaMs;
+    const clip = resolveClip(
+      { alive: this.alive && !this.dead, moving: this.moving, oneShot: this.oneShot },
+      this.elapsed,
+    );
+    if (clip === this.clip) {
+      this.clipElapsed += deltaMs;
     } else {
-      this.animationClock = 0;
-      this.frameIndex = 0;
+      this.clip = clip;
+      this.clipElapsed = 0;
     }
-    this.sprite.setFrame(`${framePrefix}d${String(this.facing)}f${String(this.frameIndex)}`);
+    const animation = animationFor(this.animations, clip);
+    const frame = animation === undefined ? 0 : frameIndexFor(animation, this.clipElapsed);
+    this.sprite.setFrame(`${String(this.facing)}:${String(frame)}`);
   }
 
-  playAttack(): void {
+  playAttack(kind: 'attack' | 'cast' = 'attack'): void {
+    this.startOneShot(kind);
     this.container.scene.tweens.add({
       targets: this.container,
       scaleX: 1.12,
@@ -177,6 +202,7 @@ class PlayerVisual {
   }
 
   playHit(): void {
+    this.startOneShot('hurt');
     this.container.scene.tweens.add({
       targets: this.container,
       alpha: 0.45,
@@ -186,11 +212,15 @@ class PlayerVisual {
   }
 
   playDeath(): void {
+    this.dead = true;
+    this.oneShot = null;
     this.container.setAlpha(0.28);
     this.hpBar.setVisible(false);
   }
 
   playRespawn(): void {
+    this.dead = false;
+    this.oneShot = null;
     this.container.setAlpha(1);
     this.hpBar.setVisible(true);
     this.container.scene.tweens.add({
@@ -198,6 +228,22 @@ class PlayerVisual {
       alpha: { from: 0.2, to: 1 },
       duration: 260,
     });
+  }
+
+  appearance(): PlayerAppearance {
+    return {
+      textureKey: this.character.key,
+      clip: this.clip,
+      frame: this.sprite.frame.name,
+    };
+  }
+
+  private startOneShot(clip: CharacterClip): void {
+    if (this.dead) {
+      return;
+    }
+    const duration = Math.max(oneShotMs(this.animations, clip), MIN_ONE_SHOT_MS);
+    this.oneShot = { clip, endMs: this.elapsed + duration };
   }
 
   destroy(): void {
@@ -253,7 +299,6 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private predicted: UnitPoint | null = null;
   private path: UnitPoint[] = [];
   private speed: number = PLAYER_SPEED_UNITS_PER_SECOND;
-  private readonly framePrefix = 'p';
 
   constructor(bridge: WorldBridge, bundle: MapBundle) {
     super('world');
@@ -264,12 +309,17 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
   preload(): void {
     this.load.image('terrain', this.bundle.terrainImageUrl);
-    this.load.image('characters', this.bundle.playerImageUrl);
+    for (const character of [this.bundle.fallbackCharacter, ...this.bundle.characters.values()]) {
+      this.load.image(character.key, character.imageUrl);
+    }
   }
 
   create(): void {
     this.registerTilesetFrames();
-    this.registerCharacterFrames();
+    this.registerCharacterFrames(this.bundle.fallbackCharacter);
+    for (const character of this.bundle.characters.values()) {
+      this.registerCharacterFrames(character);
+    }
 
     const camera = this.cameras.main;
     camera.setBackgroundColor('#0b0d10');
@@ -315,7 +365,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
     let focus: ScreenPoint | null = null;
     for (const visual of this.visuals.values()) {
-      visual.update(delta, this.framePrefix);
+      visual.update(delta);
       if (visual.isSelf) {
         focus = visual.current;
       }
@@ -344,7 +394,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
           player.displayName,
           player.colorIndex,
           isSelf,
-          this.framePrefix,
+          this.characterFor(player.classId),
         );
         this.visuals.set(player.playerId, visual);
       }
@@ -469,7 +519,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   applyCombatEvent(event: CombatEvent): void {
     switch (event.kind) {
       case 'attack': {
-        this.visualFor(event.sourceId)?.playAttack();
+        this.visualFor(event.sourceId)?.playAttack(event.skillId === undefined ? 'attack' : 'cast');
         if (event.skillId !== undefined) {
           this.showSkillEffect(event.sourceId, event.targetId);
         }
@@ -736,20 +786,28 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     }
   }
 
-  private registerCharacterFrames(): void {
-    const texture = this.textures.get('characters');
-    const { player } = this.bundle;
-    for (let direction = 0; direction < player.directions.length; direction += 1) {
-      for (let frame = 0; frame < player.frames; frame += 1) {
-        const name = `${this.framePrefix}d${String(direction)}f${String(frame)}`;
+  private characterFor(classId: string): CharacterAsset {
+    return this.bundle.characters.get(classId) ?? this.bundle.fallbackCharacter;
+  }
+
+  playerAppearance(playerId: string): PlayerAppearance | null {
+    return this.visuals.get(playerId)?.appearance() ?? null;
+  }
+
+  private registerCharacterFrames(asset: CharacterAsset): void {
+    const texture = this.textures.get(asset.key);
+    const { character } = asset;
+    for (let direction = 0; direction < character.directions.length; direction += 1) {
+      for (let frame = 0; frame < character.frames; frame += 1) {
+        const name = `${String(direction)}:${String(frame)}`;
         if (!texture.has(name)) {
           texture.add(
             name,
             0,
-            frame * player.frameWidth,
-            direction * player.frameHeight,
-            player.frameWidth,
-            player.frameHeight,
+            frame * character.frameWidth,
+            direction * character.frameHeight,
+            character.frameWidth,
+            character.frameHeight,
           );
         }
       }

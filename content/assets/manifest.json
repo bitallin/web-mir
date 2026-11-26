@@ -1,5 +1,5 @@
 {
-  "version": "phase3.1",
+  "version": "alpha0.2.1",
   "tilesets": {
     "terrain": {
       "id": "terrain",
@@ -69,6 +69,57 @@
       "directions": ["n", "e", "s", "w"],
       "frames": 2,
       "kind": "procedural-placeholder"
+    },
+    "warrior": {
+      "id": "warrior",
+      "image": "class_warrior.png",
+      "frameWidth": 32,
+      "frameHeight": 48,
+      "directions": ["n", "e", "s", "w"],
+      "frames": 10,
+      "kind": "procedural-placeholder",
+      "animations": {
+        "idle": { "frames": [0], "frameMs": 400, "loop": true },
+        "walk": { "frames": [1, 2], "frameMs": 150, "loop": true },
+        "attack": { "frames": [3, 4], "frameMs": 120, "loop": false },
+        "cast": { "frames": [5, 6], "frameMs": 150, "loop": false },
+        "hurt": { "frames": [7], "frameMs": 200, "loop": false },
+        "death": { "frames": [8, 9], "frameMs": 240, "loop": false }
+      }
+    },
+    "mage": {
+      "id": "mage",
+      "image": "class_mage.png",
+      "frameWidth": 32,
+      "frameHeight": 48,
+      "directions": ["n", "e", "s", "w"],
+      "frames": 10,
+      "kind": "procedural-placeholder",
+      "animations": {
+        "idle": { "frames": [0], "frameMs": 400, "loop": true },
+        "walk": { "frames": [1, 2], "frameMs": 150, "loop": true },
+        "attack": { "frames": [3, 4], "frameMs": 120, "loop": false },
+        "cast": { "frames": [5, 6], "frameMs": 150, "loop": false },
+        "hurt": { "frames": [7], "frameMs": 200, "loop": false },
+        "death": { "frames": [8, 9], "frameMs": 240, "loop": false }
+      }
+    },
+    "taoist": {
+      "id": "taoist",
+      "image": "class_taoist.png",
+      "frameWidth": 32,
+      "frameHeight": 48,
+      "directions": ["n", "e", "s", "w"],
+      "frames": 10,
+      "kind": "procedural-placeholder",
+      "animations": {
+        "idle": { "frames": [0], "frameMs": 400, "loop": true },
+        "walk": { "frames": [1, 2], "frameMs": 150, "loop": true },
+        "attack": { "frames": [3, 4], "frameMs": 120, "loop": false },
+        "cast": { "frames": [5, 6], "frameMs": 150, "loop": false },
+        "hurt": { "frames": [7], "frameMs": 200, "loop": false },
+        "death": { "frames": [8, 9], "frameMs": 240, "loop": false }
+      }
     }
   },
   "maps": {
