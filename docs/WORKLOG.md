@@ -2927,6 +2927,10 @@ pnpm verify:invariants
    已写入，不影响 tick 指标；未在本切片修改压测脚本。
 3. **全量 E2E 的 250ms 时序断言再次抖动**：与 S4-E 相同，未降低阈值；单独
    重复与全量重跑均通过。
+4. **压测 summary 带出本地 `DATABASE_URL`**：证据 JSON 的 `options` 原样写入
+   连接串。虽然它与 `.env.example` 的开发默认值相同，仍违反“连接串不进 Git”
+   的卫生要求；已把三份证据中的值改为 `[redacted]`，并让
+   `worldScenario.ts` 以后固定输出占位符。
 
 ### 尚未解决
 
@@ -2939,6 +2943,8 @@ pnpm verify:invariants
 
 - `dcad681` `fix(alpha-02): batch AOI refreshes to cut the 50-player tick tail`
   （10 个文件：AOI/房间/兴趣管理、1 条单测、阶段报告与 5 个性能证据文件）。
+- `a03a5ee` `fix(alpha-02): redact the database URL from load evidence`
+  （4 个文件：压测脚本与三份证据 JSON）。
 
 ### 下一步计划
 

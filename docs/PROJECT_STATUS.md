@@ -1372,6 +1372,8 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`feat(alpha-02): make world drops and name plates readable`
 - Alpha 0.2 S4-F 50 人 tick 剖析与 AOI 批处理：`dcad681`
   主题：`fix(alpha-02): batch AOI refreshes to cut the 50-player tick tail`
+- 压测证据连接串脱敏：`a03a5ee`
+  主题：`fix(alpha-02): redact the database URL from load evidence`
 
 ## 11. 当前环境事实
 
