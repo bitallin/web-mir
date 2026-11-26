@@ -1247,6 +1247,8 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`fix(alpha-02): show every equipment bonus in the bag, slots and shop`
 - Alpha 0.2 S4-B 废墟区域与 8–10 级成长线：`1c2fc83`
   主题：`feat(alpha-02): add the ruins region and level 8-10 progression`
+- Alpha 0.2 S4-C 物品图标与品质呈现：`8bf1d21`
+  主题：`feat(alpha-02): give every item an icon and unify rarity display`
 
 ## 11. 当前环境事实
 
