@@ -56,7 +56,7 @@
 | 格式       | `pnpm format:check`         | 通过                                         |
 | Lint       | `pnpm lint`                 | 通过（0 error / 0 warning）                  |
 | 类型       | `pnpm typecheck`            | 通过（根 + 15 个 workspace）                 |
-| 单元/集成  | `pnpm test`                 | 65 文件、**399 测试**通过（约 29.9s）        |
+| 单元/集成  | `pnpm test`                 | 65 文件、**400 测试**通过（约 29.9s）        |
 | 构建       | `pnpm build`                | 4 个应用成功                                 |
 | 浏览器 E2E | `pnpm test:e2e`             | **30/30 通过**（3.4 分钟，2 worker，独立库） |
 | 外观 E2E   | `tests/e2e/classes.spec.ts` | 三职业贴图/行走、战士普攻、道士施法 5/5 通过 |

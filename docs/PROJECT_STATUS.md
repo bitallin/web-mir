@@ -150,7 +150,7 @@
 ## 0.5 Alpha 0.2 S2 任务 3：三职业外观与动作（2026-11-26）
 
 **已完成：三职业独立贴图与待机/行走/攻击/施法/受击/死亡片段，由服务端战斗
-事件驱动；单元/集成 399 测试、30 个浏览器 E2E 全部通过。TD-CLI-06 关闭。**
+事件驱动；单元/集成 400 测试、30 个浏览器 E2E 全部通过。TD-CLI-06 关闭。**
 
 - 报告：`docs/phase-reports/alpha-02/ALPHA_02_CLASS_APPEARANCE_REPORT.md`
 - ADR：`docs/ADR/ADR-029-character-animation-clips.md`
@@ -162,6 +162,9 @@
   待机）；攻击事件带 `skillId` 播放施法片段。
 - E2E：`tests/e2e/classes.spec.ts` 5/5（三职业贴图与行走、战士普攻、道士施法）；
   证据 `docs/phase-reports/alpha-02/classes/`。
+- 修复（`0f33401`）：PvP 复活后旁观者一直看到倒地。根因是客户端把死亡做成
+  粘性标记，而 `respawn` 事件只发给复活者本人；改为死亡片段以快照 `alive`
+  为准。`pvp.spec.ts` 增加旁观者/本人三方断言（旧实现下会失败），沉淀 EL-020。
 - 未验证：8584 目视、远端 CI；正式美术属 TD-CLI-13（S4）；容量回归未跑
   （本切片无服务端/协议/数据库路径变化）。
 
@@ -818,7 +821,7 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
 | ---------- | --------------------------- | ------------------------------------------------- |
 | 格式/lint  | `pnpm format:check`、`lint` | 通过（0 error / 0 warning）                       |
 | 类型       | `pnpm typecheck`            | 通过（根 + 15 个 workspace）                      |
-| 单元/集成  | `pnpm test`                 | 65 文件、**399 测试**通过                         |
+| 单元/集成  | `pnpm test`                 | 65 文件、**400 测试**通过                         |
 | 构建       | `pnpm build`                | 4 个应用成功                                      |
 | 浏览器 E2E | `pnpm test:e2e`             | **30/30 通过**（3.4 分钟，2 worker，独立库/端口） |
 | 外观 E2E   | `classes.spec.ts`           | 三职业贴图/行走、战士普攻、道士施法 5/5           |
@@ -943,6 +946,8 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
   主题：`feat(alpha-02): add class skills with damage over time and shields`
 - Alpha 0.2 S2 三职业外观与动作：`99b8fd0`
   主题：`feat(alpha-02): give each class its own sprite sheet and animations`
+- 修复 PvP 复活后旁观者显示倒地：`0f33401`
+  主题：`fix(alpha-02): keep revived players upright for onlookers`
 
 ## 11. 当前环境事实
 
