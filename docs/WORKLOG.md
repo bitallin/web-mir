@@ -2120,3 +2120,97 @@ A 日志里“B 被 A 击败，3 秒后复活”是系统公告历史，正常�
 - 范围：包含本项目全部历史提交；本次会话新增 S2 技能、三职业外观与 PvP 复活
   修复。
 - 待确认：远端 CI 的 verify 与 e2e job 结果（本环境无 `gh`，未查询）。
+
+---
+
+## 2026-11-26 S3 任务 1：怪物威胁与扑击预警
+
+### 本次任务目标
+
+S2 之后战斗威胁仍只是“数值更大”，玩家没有可反应的决策。本切片让野外出现远程、
+重甲与精英三类怪物，并给精英扑击一个服务端权威的预警窗口：玩家看到红圈后走位
+可以躲开，命中/闪避仍由服务端裁定。
+
+### 实际改动
+
+1. **契约（加法）**
+   - `monsterContentSchema` 增加可选 `windupMs`（0–5s）与 `windupRadiusTiles`
+     （0–6）；不设默认值，历史 Release checksum 不变（EL-004）。
+   - `combat.event` 新增 `telegraph`：攻击者/目标、落点、闪避半径与落地剩余
+     毫秒。`PROTOCOL_VERSION` 不变（同版本前后端加法发布）。
+2. **内容与校验**
+   - 新增毒牙蜘蛛（远程 3.2 格）、石甲守卫（生命 230/防御 10/移速 900）、
+     白狼王（精英，320 生命、扑击前摇 900ms、半径 1.5 格）。
+   - 新增材料蛛腿/石甲核心/狼王毛皮与三条掉落表；精英经验 80、金币 25–40。
+   - 校验：有闪避半径但无前摇 → error；前摇 ≥ 攻击间隔 → warning。
+   - `starter_wilds` 新增 6 个刷点（精英 1、蜘蛛 3、守卫 2），30 → 36；重新
+     编译地图。
+3. **领域**
+   - `CombatWorld` 增加前摇运行时：攻击冷却到期时冻结怪物、记录落点并发出
+     `telegraph`；落地 tick 才掷命中/暴击/伤害；离开半径产生 `miss`。
+   - 目标死亡/断线 → 攻击作废；怪物死亡/重生清除前摇；前摇不消耗 RNG。
+4. **服务端**
+   - `telegraph` 与 `attack`/`hit`/`miss` 同组按 AOI/归属投递。
+   - 新增 `monsterThreat.integration.test.ts`（真实 PostgreSQL + Colyseus）：
+     预警先于伤害、落点/半径/延迟正确、停留目标被命中。
+5. **客户端**
+   - 预警圈（红色范围 + 展开填充）、目标日志提示与新增预警音效；怪物死亡立即
+     清除预警，落地 120ms 后清除。
+   - 新怪物占位造型；仅开发环境 `activeTelegraphs()` 供 E2E 断言。
+6. **文档与证据**
+   - ADR-030、`ALPHA_02_MONSTER_THREAT_REPORT.md`、EL-021、TD-OPS-18。
+   - E2E `tests/e2e/monsterThreat.spec.ts`；证据
+     `docs/phase-reports/alpha-02/monsters/alpha-pounce.png`。
+   - 发布并激活内容 `2026.11.26.3`（checksum `bd54ce8c…`）。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm maps:compile
+pnpm verify:invariants
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 \
+  LOAD_OUTPUT=docs/phase-reports/alpha-02/load-50p10a-10min-s3-threat.json pnpm load:scenario
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：66 文件、410 测试通过（新增领域前摇/远程用例与 1 条服务端集成）。
+- 构建：4 个应用成功。
+- 全量 E2E：31/31 通过（3.5 分钟，2 worker，独立数据库与端口）。
+- 预警 E2E：1/1（预警出现/半径/剩余时间正确、落地后清除）；开发栈 84 复验
+  1/1。
+- 资产不变量：7 项全部 0 违例。
+- 容量回归：50/50 加入、接受率 99.0%、766 击杀、0 资产失败、0 死亡；tick
+  p50 2.39ms / p95 12.17ms / p99 18.10ms（目标 10ms，与上一轮 12.36ms 持平）；
+  资产事务 p95 48.45ms；RSS 峰值 324MB；房间内容版本 `2026.11.26.3`。证据
+  `docs/phase-reports/alpha-02/load-50p10a-10min-s3-threat.json`。
+
+### 遇到的问题及解决方法
+
+1. **旧内容 Release 校验失败**：重启开发栈后 `ContentStore` 每 5 秒报
+   “active content release failed validation”。原因是编译地图新增刷点引用了
+   旧 Release 没有的怪物模板；服务器保留基线快照并持续报错。发布并激活
+   `2026.11.26.3` 后恢复。沉淀 EL-021 与 TD-OPS-18。
+2. **预警截图被 HUD 遮挡**：第一次 E2E 截图只拍到“当前目标/技能”面板，红圈被
+   盖住。改为等待预警出现前隐藏 HUD、出现后立即截取画布层；`waitForFunction`
+   在预警存在时立即返回，避免 900ms 前摇结束才开始截图。
+3. **地图编译产物格式漂移**：编译器输出未格式化，diff 变成整文件重排；运行
+   Prettier 后只保留新刷点与 checksum。
+4. **旧内容测试断言过窄**：`content.test.ts`/`loot.test.ts` 断言“恰好两种怪物”，
+   编译测试断言“30 个刷点”；已改为覆盖全部 5 种怪物与 36 个刷点。
+
+### 尚未解决
+
+- 死亡代价、10 级前保护与复活点内容化仍是 S3 后续切片。
+- 前摇可被控制技能打断、命中瞬间冲击特效未做。
+- 8584 人工试玩与远端 CI 仍待确认。
+
+### 下一步计划
+
+1. 在 8584 试玩白狼王扑击预警与远程蜘蛛/石甲守卫。
+2. 做 S3 死亡代价：经验损失进入资产事务、内容化保护阈值与复活点。

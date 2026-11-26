@@ -156,6 +156,14 @@ export const monsterContentSchema = z
     leashTiles: z.number().positive().max(50),
     patrolRadiusTiles: z.number().min(0).max(50),
     respawnMs: z.number().int().min(100).max(3_600_000),
+    /**
+     * Wind-up before the attack lands. Optional on purpose: historical
+     * releases predate the field and a default would change their checksum
+     * (EL-004). 0 or absent means the attack resolves immediately.
+     */
+    windupMs: z.number().int().min(0).max(5_000).optional(),
+    /** Dodge window around the telegraphed impact point. */
+    windupRadiusTiles: z.number().positive().max(6).optional(),
   })
   .strict();
 

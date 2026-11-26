@@ -146,6 +146,16 @@ function validateMonsters(bundle: ContentBundle, issues: ContentIssue[]): void {
     if (monster.moveSpeedUnitsPerSecond === 0) {
       issue(issues, 'warning', path, '怪物移动速度为 0，只会原地战斗');
     }
+    if (monster.windupRadiusTiles !== undefined && (monster.windupMs ?? 0) === 0) {
+      issue(issues, 'error', `${path}.windupRadiusTiles`, '设置了闪避半径但没有攻击前摇');
+    }
+    if (
+      monster.windupMs !== undefined &&
+      monster.windupMs > 0 &&
+      monster.windupMs >= monster.attackIntervalMs
+    ) {
+      issue(issues, 'warning', `${path}.windupMs`, '攻击前摇不短于攻击间隔，节奏可能异常');
+    }
     const table = bundle.lootTables[key];
     if (table === undefined) {
       issue(issues, 'error', path, `怪物 "${key}" 缺少掉落表`);

@@ -276,6 +276,11 @@ function combatLogFor(
       return event.entityId === characterId ? entry('你已在地图出生点复活', 'system') : null;
     case 'spawn':
       return entry(`${event.displayName} 重新出现`, 'other');
+    case 'telegraph':
+      if (event.targetId === characterId) {
+        return entry(`${name(event.sourceId)} 蓄势扑击，快离开红圈！`, 'system');
+      }
+      return null;
     case 'attack':
       return null;
   }
@@ -873,6 +878,11 @@ class WorldSession {
           this.sfx.play('heal');
         }
         break;
+      case 'telegraph':
+        if (event.targetId === characterId) {
+          this.sfx.play('warn');
+        }
+        break;
       default:
         break;
     }
@@ -956,6 +966,7 @@ class WorldSession {
         },
       selfId: () => this.options.character.id,
       playerAppearance: (playerId) => this.bridge.playerAppearance(playerId),
+      activeTelegraphs: () => this.bridge.activeTelegraphs(),
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),
       interactNpc: (npcId) => this.interactNpc(npcId),
       sendChat: (text) => this.sendChat(text),

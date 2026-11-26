@@ -623,3 +623,124 @@ describe('CombatWorld mana regen carry', () => {
     expect(world.getPlayer('player-1')?.mp).toBe(13);
   });
 });
+
+const ALPHA_SPAWN = {
+  id: 'wilds_alpha_1',
+  monsterId: 'alpha_wolf',
+  tile: { x: 5, y: 5 },
+} as const;
+
+function contentWithMonster(
+  monsterId: string,
+  mutate: (monster: ContentBundle['monsters'][string]) => void,
+): ContentBundle {
+  const bundle = JSON.parse(JSON.stringify(BASE_CONTENT_BUNDLE)) as ContentBundle;
+  mutate(bundle.monsters[monsterId] as ContentBundle['monsters'][string]);
+  return bundle;
+}
+
+describe('CombatWorld monster threat', () => {
+  it('telegraphs the impact point and only rolls damage when it lands', () => {
+    const content = contentWithMonster('alpha_wolf', (alpha) => {
+      alpha.hitChance = 1;
+    });
+    const world = createTestWorld({ spawns: [ALPHA_SPAWN], content, monsterRespawnMs: 60_000 });
+    world.addPlayer(warrior());
+
+    const opening = world.step(50, positions(world));
+    const telegraph = opening.find((event) => event.kind === 'telegraph');
+    expect(telegraph).toMatchObject({
+      sourceId: ALPHA_SPAWN.id,
+      sourceType: 'monster',
+      targetId: 'player-1',
+      radiusTiles: 1.5,
+      impactInMs: 900,
+      x: center({ x: 4, y: 5 }).x,
+      y: center({ x: 4, y: 5 }).y,
+    });
+    expect(opening.some((event) => event.kind === 'hit' || event.kind === 'attack')).toBe(false);
+    expect(world.getPlayer('player-1')?.hp).toBe(120);
+
+    advance(world, 900);
+    expect(world.getPlayer('player-1')?.hp).toBeLessThan(120);
+  });
+
+  it('misses when the target leaves the telegraphed radius', () => {
+    const content = contentWithMonster('alpha_wolf', (alpha) => {
+      alpha.hitChance = 1;
+    });
+    const world = createTestWorld({ spawns: [ALPHA_SPAWN], content, monsterRespawnMs: 60_000 });
+    world.addPlayer(warrior());
+    world.step(50, positions(world));
+
+    // Step out of the pounce area before the wind-up finishes.
+    const moved = new Map([['player-1', center({ x: 9, y: 5 })]]);
+    const events: CombatEventPayload[] = [];
+    for (let elapsed = 0; elapsed < 900; elapsed += 50) {
+      events.push(...world.step(50, moved));
+    }
+
+    expect(eventKinds(events)).toContain('miss');
+    expect(events.some((event) => event.kind === 'hit')).toBe(false);
+    expect(world.getPlayer('player-1')?.hp).toBe(120);
+  });
+
+  it('cancels a committed attack when the monster dies during the wind-up', () => {
+    const content = contentWithMonster('alpha_wolf', (alpha) => {
+      alpha.maxHp = 1;
+      alpha.defense = 0;
+    });
+    const world = createTestWorld({ spawns: [ALPHA_SPAWN], content, monsterRespawnMs: 60_000 });
+    world.addPlayer(warrior());
+    world.step(50, positions(world));
+
+    const kill = world.basicAttack('player-1', ALPHA_SPAWN.id);
+    expect(kill.accepted).toBe(true);
+    expect(world.getMonster(ALPHA_SPAWN.id)?.state).toBe('dead');
+
+    advance(world, 1_500);
+    expect(world.getPlayer('player-1')?.hp).toBe(120);
+  });
+
+  it('freezes the monster in place while the attack is committed', () => {
+    const world = createTestWorld({
+      spawns: [{ ...ALPHA_SPAWN, tile: { x: 6, y: 5 } }],
+      monsterRespawnMs: 60_000,
+    });
+    world.addPlayer(warrior());
+    world.step(50, positions(world));
+    const committedAt = world.getMonster(ALPHA_SPAWN.id)?.x;
+
+    // The target runs; the committed pounce must not turn into a chase until
+    // the impact resolves.
+    const fleeing = new Map([['player-1', center({ x: 1, y: 5 })]]);
+    for (let elapsed = 0; elapsed < 800; elapsed += 50) {
+      world.step(50, fleeing);
+      expect(world.getMonster(ALPHA_SPAWN.id)?.moving).toBe(false);
+      expect(world.getMonster(ALPHA_SPAWN.id)?.x).toBe(committedAt);
+    }
+
+    advance(world, 300);
+    expect(world.getMonster(ALPHA_SPAWN.id)?.x).not.toBe(committedAt);
+  });
+
+  it('lets a ranged monster attack without closing to melee', () => {
+    const spawn = {
+      id: 'wilds_spider_1',
+      monsterId: 'venom_spider',
+      tile: { x: 5, y: 5 },
+    } as const;
+    const content = contentWithMonster('venom_spider', (spider) => {
+      spider.hitChance = 1;
+    });
+    const world = createTestWorld({ spawns: [spawn], content, monsterRespawnMs: 60_000 });
+    world.addPlayer(warrior({ ...center({ x: 8, y: 5 }) }));
+    const startX = world.getMonster(spawn.id)?.x;
+
+    const events = world.step(100, positions(world));
+
+    expect(eventKinds(events)).toContain('attack');
+    expect(world.getPlayer('player-1')?.hp).toBeLessThan(120);
+    expect(world.getMonster(spawn.id)?.x).toBe(startX);
+  });
+});

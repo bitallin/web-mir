@@ -195,6 +195,16 @@ type MonsterRuntime = {
   nextRepathAt: number;
   respawnAt: number;
   dots: Map<string, ActiveDot>;
+  /** Attack committed at cast time; it lands at `impactAt` on this point. */
+  windup: MonsterWindup | null;
+};
+
+type MonsterWindup = {
+  targetId: string;
+  impactAt: number;
+  x: number;
+  y: number;
+  radiusTiles: number;
 };
 
 const DEFAULT_PLAYER_RESPAWN_MS = 3_000;
@@ -316,6 +326,7 @@ export class CombatWorld {
         nextRepathAt: 0,
         respawnAt: 0,
         dots: new Map(),
+        windup: null,
       });
     }
   }
@@ -948,6 +959,7 @@ export class CombatWorld {
     monster.targetId = null;
     monster.waypoints = [];
     monster.dots.clear();
+    monster.windup = null;
     monster.respawnAt = this.now + (this.monsterRespawnMs ?? monster.definition.respawnMs);
     events.push({
       kind: 'death',
@@ -1007,6 +1019,7 @@ export class CombatWorld {
       monster.nextRepathAt = 0;
       monster.respawnAt = 0;
       monster.dots.clear();
+      monster.windup = null;
       events.push({
         kind: 'spawn',
         entityId: monster.id,
@@ -1021,6 +1034,16 @@ export class CombatWorld {
       return;
     }
 
+    // A committed attack freezes the monster until it lands; the target's
+    // movement during the wind-up decides whether the hit connects.
+    if (monster.windup !== null) {
+      monster.moving = false;
+      if (this.now >= monster.windup.impactAt) {
+        this.resolveWindup(monster, events);
+      }
+      return;
+    }
+
     const target = this.selectTarget(monster);
     const targetInRange =
       target !== null && distanceInTiles(monster, target) <= monster.definition.attackRangeTiles;
@@ -1032,7 +1055,11 @@ export class CombatWorld {
         monster.waypoints = [];
         monster.moving = false;
         if (this.now >= monster.nextAttackAt) {
-          this.monsterAttack(monster, target, events);
+          if ((monster.definition.windupMs ?? 0) > 0) {
+            this.beginWindup(monster, target, events);
+          } else {
+            this.monsterAttack(monster, target, events);
+          }
         }
       } else {
         monster.state = 'chase';
@@ -1161,6 +1188,67 @@ export class CombatWorld {
       }
     }
     monster.moving = monster.waypoints.length > 0;
+  }
+
+  /**
+   * Commits an attack to a telegraphed point. No RNG is drawn here: the hit
+   * roll happens at impact so a player who steps out of the radius is missed
+   * deterministically, not by luck.
+   */
+  private beginWindup(
+    monster: MonsterRuntime,
+    player: PlayerRuntime,
+    events: CombatEventPayload[],
+  ): void {
+    const windupMs = monster.definition.windupMs ?? 0;
+    const radiusTiles = monster.definition.windupRadiusTiles ?? 1.5;
+    monster.facing = facingForDelta(monster, player);
+    monster.moving = false;
+    monster.waypoints = [];
+    monster.windup = {
+      targetId: player.id,
+      impactAt: this.now + windupMs,
+      x: player.x,
+      y: player.y,
+      radiusTiles,
+    };
+    events.push({
+      kind: 'telegraph',
+      sourceId: monster.id,
+      sourceType: 'monster',
+      targetId: player.id,
+      targetType: 'player',
+      x: player.x,
+      y: player.y,
+      radiusTiles,
+      impactInMs: windupMs,
+    });
+  }
+
+  private resolveWindup(monster: MonsterRuntime, events: CombatEventPayload[]): void {
+    const windup = monster.windup;
+    monster.windup = null;
+    if (windup === null) {
+      return;
+    }
+    const target = this.players.get(windup.targetId);
+    if (target === undefined || !target.alive || !target.targetable) {
+      monster.nextAttackAt = this.now + monster.definition.attackIntervalMs;
+      return;
+    }
+    const distanceTiles = Math.hypot(target.x - windup.x, target.y - windup.y) / TILE_UNITS;
+    if (distanceTiles > windup.radiusTiles) {
+      monster.nextAttackAt = this.now + monster.definition.attackIntervalMs;
+      events.push({
+        kind: 'miss',
+        sourceId: monster.id,
+        sourceType: 'monster',
+        targetId: target.id,
+        targetType: 'player',
+      });
+      return;
+    }
+    this.monsterAttack(monster, target, events);
   }
 
   private monsterAttack(

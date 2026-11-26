@@ -15,6 +15,15 @@ export type PlayerAppearance = {
   frame: string;
 };
 
+/** A monster attack warning currently drawn on the ground. */
+export type TelegraphView = {
+  monsterId: string;
+  x: number;
+  y: number;
+  radiusTiles: number;
+  remainingMs: number;
+};
+
 /** The part of the Phaser scene the session layer is allowed to touch. */
 export type WorldSceneHandle = {
   applySnapshot: (data: SceneSnapshot) => void;
@@ -24,6 +33,7 @@ export type WorldSceneHandle = {
   monsterScreenPoint: (monsterId: string) => ScreenPoint | null;
   playerScreenPoint: (playerId: string) => ScreenPoint | null;
   playerAppearance: (playerId: string) => PlayerAppearance | null;
+  activeTelegraphs: () => TelegraphView[];
   npcScreenPoint: (npcId: string) => ScreenPoint | null;
   lootScreenPoint: (dropId: string) => ScreenPoint | null;
   selectEntity: (entityId: string) => void;
@@ -116,6 +126,10 @@ export class WorldBridge {
 
   playerAppearance(playerId: string): PlayerAppearance | null {
     return this.scene?.playerAppearance(playerId) ?? null;
+  }
+
+  activeTelegraphs(): TelegraphView[] {
+    return this.scene?.activeTelegraphs() ?? [];
   }
 
   lootScreenPoint(dropId: string): ScreenPoint | null {

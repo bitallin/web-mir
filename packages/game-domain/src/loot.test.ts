@@ -15,10 +15,17 @@ function sequenceRng(values: readonly number[]): () => number {
 }
 
 describe('loot tables', () => {
-  it('defines a table for both MVP monsters with valid references', () => {
-    expect(Object.keys(MONSTER_LOOT_TABLES).sort()).toEqual(['forest_wolf', 'wild_slime']);
+  it('defines a table for every monster with valid references', () => {
+    expect(Object.keys(MONSTER_LOOT_TABLES).sort()).toEqual([
+      'alpha_wolf',
+      'forest_wolf',
+      'stone_guard',
+      'venom_spider',
+      'wild_slime',
+    ]);
     expect(() => requireLootTable('missing_monster')).toThrow(RangeError);
     expect(requireLootTable('wild_slime').exp).toBeGreaterThan(0);
+    expect(requireLootTable('alpha_wolf').exp).toBeGreaterThan(requireLootTable('wild_slime').exp);
   });
 
   it('rolls gold and every entry with a fixed number of draws', () => {

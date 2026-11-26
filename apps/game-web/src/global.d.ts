@@ -1,6 +1,6 @@
 import type { EquipmentSlot, InventorySnapshot } from '@web-legend/contracts';
 
-import type { PlayerAppearance } from './game/worldBridge';
+import type { PlayerAppearance, TelegraphView } from './game/worldBridge';
 import type { LootView } from './net/worldClient';
 
 export {};
@@ -32,6 +32,7 @@ declare global {
       selfAppearance: () => PlayerAppearance;
       selfId: () => string;
       playerAppearance: (playerId: string) => PlayerAppearance | null;
+      activeTelegraphs: () => TelegraphView[];
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
       sendChat: (text: string) => boolean;

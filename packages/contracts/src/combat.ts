@@ -316,6 +316,27 @@ const respawnEventSchema = z
   })
   .strict();
 
+/**
+ * A monster has committed to an attack and will resolve it after
+ * `impactInMs`; the damage lands only on targets that stay inside
+ * `radiusTiles` of the telegraphed point. Clients render the warning and the
+ * server remains the only judge of whether the hit connects.
+ */
+const telegraphEventSchema = z
+  .object({
+    ...eventBase,
+    kind: z.literal('telegraph'),
+    sourceId: z.string().min(1).max(64),
+    sourceType: combatEntityTypeSchema,
+    targetId: z.string().min(1).max(64),
+    targetType: combatEntityTypeSchema,
+    x: z.number().int().nonnegative(),
+    y: z.number().int().nonnegative(),
+    radiusTiles: z.number().positive().max(10),
+    impactInMs: z.number().int().positive().max(10_000),
+  })
+  .strict();
+
 export const combatEventSchema = z.discriminatedUnion('kind', [
   attackEventSchema,
   hitEventSchema,
@@ -325,6 +346,7 @@ export const combatEventSchema = z.discriminatedUnion('kind', [
   deathEventSchema,
   spawnEventSchema,
   respawnEventSchema,
+  telegraphEventSchema,
 ]);
 
 export type CombatEvent = z.infer<typeof combatEventSchema>;

@@ -5,7 +5,8 @@
  * until then; failures leave the game silent rather than breaking the session.
  */
 
-export type SfxKind = 'attack' | 'hit' | 'hurt' | 'kill' | 'death' | 'heal' | 'loot' | 'levelup';
+export type SfxKind =
+  'attack' | 'hit' | 'hurt' | 'kill' | 'death' | 'heal' | 'loot' | 'levelup' | 'warn';
 
 type Tone = {
   frequency: number;
@@ -48,6 +49,7 @@ const TONES: Record<SfxKind, readonly Tone[]> = {
     { frequency: 659, durationMs: 110, type: 'triangle', gain: 0.05, delayMs: 100 },
     { frequency: 784, durationMs: 220, type: 'triangle', gain: 0.06, delayMs: 200 },
   ],
+  warn: [{ frequency: 330, endFrequency: 260, durationMs: 180, type: 'square', gain: 0.045 }],
 };
 
 const STORAGE_KEY = 'web-legend.sfx-muted';

@@ -40,14 +40,27 @@ describe('phase-4 content catalog', () => {
     expect(effects).toEqual(new Set(['directDamage', 'heal', 'dot', 'shield']));
   });
 
-  it('defines two monsters with aggro, leash and respawn rules', () => {
+  it('defines every monster with aggro, leash and respawn rules', () => {
     const monsters = Object.values(MONSTER_CATALOG);
-    expect(monsters.map((monster) => monster.id).sort()).toEqual(['forest_wolf', 'wild_slime']);
+    expect(monsters.map((monster) => monster.id).sort()).toEqual([
+      'alpha_wolf',
+      'forest_wolf',
+      'stone_guard',
+      'venom_spider',
+      'wild_slime',
+    ]);
     for (const monster of monsters) {
       expect(monster.leashTiles).toBeGreaterThanOrEqual(monster.aggroTiles);
       expect(monster.respawnMs).toBeGreaterThan(0);
       expect(monster.attackRangeTiles).toBeGreaterThan(0);
     }
+  });
+
+  it('gives the elite a wind-up and the spider a ranged attack', () => {
+    const alpha = requireMonster('alpha_wolf');
+    expect(alpha.windupMs ?? 0).toBeGreaterThan(0);
+    expect(alpha.windupRadiusTiles ?? 0).toBeGreaterThan(0);
+    expect(requireMonster('venom_spider').attackRangeTiles).toBeGreaterThan(2);
   });
 
   it('throws for unknown ids instead of returning a default', () => {

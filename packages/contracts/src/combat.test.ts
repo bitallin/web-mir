@@ -212,6 +212,18 @@ describe('combat events', () => {
         mp: 30,
         maxMp: 30,
       },
+      {
+        ...base,
+        kind: 'telegraph',
+        sourceId: 'wilds_alpha_1',
+        sourceType: 'monster',
+        targetId: 'player-1',
+        targetType: 'player',
+        x: 26_500,
+        y: 6_500,
+        radiusTiles: 1.5,
+        impactInMs: 900,
+      },
     ];
 
     for (const event of events) {
@@ -235,6 +247,24 @@ describe('combat events', () => {
         targetMaxHp: 50,
       }).success,
     ).toBe(false);
+  });
+
+  it('rejects a telegraph without a dodge radius or impact delay', () => {
+    const base = {
+      eventId: commandId,
+      serverTime: 1,
+      kind: 'telegraph',
+      sourceId: 'wilds_alpha_1',
+      sourceType: 'monster',
+      targetId: 'player-1',
+      targetType: 'player',
+      x: 26_500,
+      y: 6_500,
+    };
+    expect(combatEventSchema.safeParse({ ...base, radiusTiles: 1.5, impactInMs: 0 }).success).toBe(
+      false,
+    );
+    expect(combatEventSchema.safeParse({ ...base, impactInMs: 900 }).success).toBe(false);
   });
 });
 

@@ -18,6 +18,9 @@ type MonsterPalette = {
 const PALETTES: Record<string, MonsterPalette> = {
   wild_slime: { body: 0x4f7f4a, highlight: 0x7db06a, shadow: 0x22331f },
   forest_wolf: { body: 0x5a5f66, highlight: 0x7d838c, shadow: 0x272b30 },
+  alpha_wolf: { body: 0xc9c4b6, highlight: 0xe8e3d5, shadow: 0x6d6a61 },
+  venom_spider: { body: 0x4a3560, highlight: 0x7f5da3, shadow: 0x201528 },
+  stone_guard: { body: 0x6b6f74, highlight: 0x9aa0a6, shadow: 0x33373b },
 };
 
 const FALLBACK_PALETTE: MonsterPalette = { body: 0x6a5f86, highlight: 0x9a8fbf, shadow: 0x2a2536 };
@@ -190,7 +193,7 @@ export class MonsterVisual {
     graphics.fillStyle(0x000000, 0.35);
     graphics.fillEllipse(0, -2, 30, 10);
 
-    if (this.templateId === 'forest_wolf') {
+    if (this.templateId === 'forest_wolf' || this.templateId === 'alpha_wolf') {
       graphics.fillStyle(palette.body, 1);
       graphics.fillEllipse(0, -16, 34, 18);
       graphics.fillEllipse(13, -24, 14, 12);
@@ -212,6 +215,37 @@ export class MonsterVisual {
       graphics.fillStyle(0x1b1e22, 1);
       graphics.fillCircle(-6, -15, 2);
       graphics.fillCircle(6, -15, 2);
+      return;
+    }
+
+    if (this.templateId === 'venom_spider') {
+      graphics.lineStyle(2, palette.shadow, 1);
+      for (const side of [-1, 1]) {
+        for (const offset of [6, 11, 16]) {
+          graphics.lineBetween(side * 6, -16, side * offset, -2);
+        }
+      }
+      graphics.fillStyle(palette.body, 1);
+      graphics.fillEllipse(0, -18, 26, 20);
+      graphics.fillStyle(palette.highlight, 1);
+      graphics.fillEllipse(0, -22, 14, 10);
+      graphics.fillStyle(0x1b1e22, 1);
+      graphics.fillCircle(-4, -20, 1.8);
+      graphics.fillCircle(4, -20, 1.8);
+      return;
+    }
+
+    if (this.templateId === 'stone_guard') {
+      graphics.fillStyle(palette.body, 1);
+      graphics.fillRect(-17, -34, 34, 30);
+      graphics.fillStyle(palette.highlight, 1);
+      graphics.fillRect(-22, -26, 8, 18);
+      graphics.fillRect(14, -26, 8, 18);
+      graphics.fillStyle(palette.shadow, 1);
+      graphics.fillRect(-17, -34, 34, 4);
+      graphics.fillStyle(0x1b1e22, 1);
+      graphics.fillRect(-8, -24, 5, 3);
+      graphics.fillRect(3, -24, 5, 3);
       return;
     }
 

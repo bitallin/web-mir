@@ -22,7 +22,13 @@ import {
   resolveClip,
   type OneShot,
 } from './playerAnimation';
-import type { PlayerAppearance, SceneSnapshot, WorldBridge, WorldSceneHandle } from './worldBridge';
+import type {
+  PlayerAppearance,
+  SceneSnapshot,
+  TelegraphView,
+  WorldBridge,
+  WorldSceneHandle,
+} from './worldBridge';
 
 const DISPLAY_FONT = '"Noto Serif SC", "Songti SC", "SimSun", Georgia, serif';
 const WALL_HEIGHT = 24;
@@ -36,6 +42,15 @@ const PLAYER_COLORS = [0x9fc4e0, 0xe0b087, 0xa8d6a1, 0xcf9fe0, 0xe0d18f, 0x8fd0d
 const MIN_ONE_SHOT_MS = 180;
 
 type UnitPoint = { x: number; y: number };
+
+type TelegraphVisual = {
+  x: number;
+  y: number;
+  radiusTiles: number;
+  expiresAt: number;
+  container: Phaser.GameObjects.Container;
+  timer: Phaser.Time.TimerEvent;
+};
 
 function lerp(from: number, to: number, factor: number): number {
   return from + (to - from) * factor;
@@ -291,6 +306,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private readonly visuals = new Map<string, PlayerVisual>();
   private readonly monsterVisuals = new Map<string, MonsterVisual>();
   private readonly lootVisuals = new Map<string, LootVisual>();
+  private readonly telegraphs = new Map<string, TelegraphVisual>();
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private targetRing!: Phaser.GameObjects.Graphics;
   private selfId: string | null = null;
@@ -328,6 +344,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     this.visuals.clear();
     this.monsterVisuals.clear();
     this.lootVisuals.clear();
+    this.telegraphs.clear();
     this.selfId = null;
     this.selectedTargetId = null;
     this.predicted = null;
@@ -581,8 +598,13 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         }
         break;
       }
+      case 'telegraph': {
+        this.showTelegraph(event);
+        break;
+      }
       case 'death': {
         this.visualFor(event.entityId)?.playDeath();
+        this.cancelTelegraph(event.entityId);
         break;
       }
       case 'spawn': {
@@ -602,6 +624,76 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         break;
       }
     }
+  }
+
+  /**
+   * The server has committed a monster attack to this point. The ring and the
+   * filling ellipse show where and when it lands; only the server decides
+   * whether the player is still inside.
+   */
+  private showTelegraph(event: Extract<CombatEvent, { kind: 'telegraph' }>): void {
+    this.cancelTelegraph(event.sourceId);
+    const center = this.projection.toScreen(event.x, event.y);
+    const width = event.radiusTiles * TILE_WIDTH;
+    const height = event.radiusTiles * TILE_HEIGHT;
+
+    const ring = this.add.graphics();
+    ring.fillStyle(0xd8452f, 0.18);
+    ring.fillEllipse(0, 0, width, height);
+    ring.lineStyle(2, 0xff7a5c, 0.9);
+    ring.strokeEllipse(0, 0, width, height);
+
+    const fill = this.add.graphics();
+    fill.fillStyle(0xff6b4a, 0.32);
+    fill.fillEllipse(0, 0, width, height);
+    fill.setScale(0.15);
+
+    const container = this.add.container(center.x, center.y, [ring, fill]);
+    container.setDepth(center.y - 1);
+    this.tweens.add({
+      targets: fill,
+      scaleX: 1,
+      scaleY: 1,
+      duration: event.impactInMs,
+      ease: 'Linear',
+    });
+
+    const sourceId = event.sourceId;
+    const timer = this.time.delayedCall(event.impactInMs + 120, () => {
+      this.cancelTelegraph(sourceId);
+    });
+    this.telegraphs.set(sourceId, {
+      x: event.x,
+      y: event.y,
+      radiusTiles: event.radiusTiles,
+      expiresAt: this.time.now + event.impactInMs,
+      container,
+      timer,
+    });
+  }
+
+  private cancelTelegraph(sourceId: string): void {
+    const telegraph = this.telegraphs.get(sourceId);
+    if (telegraph === undefined) {
+      return;
+    }
+    telegraph.timer.remove(false);
+    telegraph.container.destroy(true);
+    this.telegraphs.delete(sourceId);
+  }
+
+  /** Test-only readback so E2E can prove the warning is rendered. */
+  activeTelegraphs(): TelegraphView[] {
+    const now = this.time.now;
+    return [...this.telegraphs.entries()]
+      .filter(([, telegraph]) => telegraph.expiresAt > now)
+      .map(([monsterId, telegraph]) => ({
+        monsterId,
+        x: telegraph.x,
+        y: telegraph.y,
+        radiusTiles: telegraph.radiusTiles,
+        remainingMs: Math.max(0, telegraph.expiresAt - now),
+      }));
   }
 
   restart(): void {

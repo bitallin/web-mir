@@ -24,6 +24,13 @@ declare global {
       playerAppearance: (
         playerId: string,
       ) => { textureKey: string; clip: string; frame: string } | null;
+      activeTelegraphs: () => {
+        monsterId: string;
+        x: number;
+        y: number;
+        radiusTiles: number;
+        remainingMs: number;
+      }[];
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
       sendChat: (text: string) => boolean;

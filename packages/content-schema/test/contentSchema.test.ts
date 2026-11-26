@@ -197,6 +197,29 @@ describe('content validation', () => {
     expect(effects).toEqual(new Set(['directDamage', 'heal', 'dot', 'shield']));
     expect(Object.keys(BASE_CONTENT_BUNDLE.skills)).toHaveLength(9);
   });
+
+  it('ships a telegraphed elite and distinct monster behaviours', () => {
+    const monsters = BASE_CONTENT_BUNDLE.monsters;
+    expect(monsters['alpha_wolf']?.windupMs).toBeGreaterThan(0);
+    expect(monsters['alpha_wolf']?.windupRadiusTiles).toBeGreaterThan(0);
+    expect(monsters['venom_spider']?.attackRangeTiles).toBeGreaterThan(2);
+    expect(monsters['stone_guard']?.moveSpeedUnitsPerSecond).toBeLessThan(
+      monsters['wild_slime']?.moveSpeedUnitsPerSecond ?? 0,
+    );
+  });
+
+  it('rejects a dodge radius without a wind-up', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const monster = bundle.monsters['alpha_wolf'];
+        if (monster !== undefined) {
+          monster.windupMs = 0;
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes('攻击前摇'))).toBe(true);
+  });
 });
 
 describe('content diff', () => {
