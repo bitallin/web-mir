@@ -2065,3 +2065,5 @@ pnpm exec playwright test tests/e2e/classes.spec.ts --workers=1
 
 1. 在 8584 目视三职业外观与动作，并用 5 级角色试玩毒/护盾。
 2. 进入 S3：怪物威胁与死亡代价。
+
+提交：`99b8fd0`（`feat(alpha-02): give each class its own sprite sheet and animations`）。

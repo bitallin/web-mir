@@ -15,7 +15,7 @@
   S1 独立审查修复 4 项（`db57b94`）；S2 法力回复；治理文档落地（`83f750e`）；
   点击杂货商/内容发布修复（`5852975`）；S2 技能（`32d9e13`）；S2 职业外观
   （本轮）。
-- **正在工作**：S2 任务 3 代码、测试与文档已完成；等待提交与 8584 人工试玩。
+- **正在工作**：S2 任务 3 已提交（`99b8fd0`）；等待 8584 人工试玩，随后进入 S3。
 - **未完成/阻塞**：50 人容量回归上一次 tick p95 12.36ms 高于 10ms 目标（已知
   风险）；远端 CI 未执行；正式美术（TD-CLI-13）留到 S4；阶段 7/8 人工试玩确认
   仍待用户完成。
@@ -941,7 +941,8 @@ Alpha 0.1 已完成（见 §0 与阶段报告）。进入 Alpha 0.2 前需要用
   主题：`fix(alpha-02): open the merchant from the world NPC`
 - Alpha 0.2 S2 技能/DoT/护盾：`32d9e13`
   主题：`feat(alpha-02): add class skills with damage over time and shields`
-- Alpha 0.2 S2 三职业外观与动作：本轮提交（见 `docs/WORKLOG.md`）
+- Alpha 0.2 S2 三职业外观与动作：`99b8fd0`
+  主题：`feat(alpha-02): give each class its own sprite sheet and animations`
 
 ## 11. 当前环境事实
 
