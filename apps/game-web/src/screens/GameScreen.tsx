@@ -136,6 +136,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const [bagSorted, setBagSorted] = useState(false);
   const [characterOpen, setCharacterOpen] = useState(false);
   const [combatInfoOpen, setCombatInfoOpen] = useState(true);
+  const [chatOpen, setChatOpen] = useState(true);
   const [shopOpen, setShopOpen] = useState(false);
   const [shopTab, setShopTab] = useState<'buy' | 'sell'>('buy');
   const requestTicket = useCallback(async () => {
@@ -356,15 +357,26 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       <div className="canvas-layer" ref={containerRef} aria-hidden="true" />
 
       <header className="hud hud-top">
-        <div className="brand">
-          <p className="eyebrow">浏览器原生 · 实时多人</p>
-          <h1>Web Legend</h1>
-          <p className="phase">
-            {character.name} · {classDefinition.name} Lv.{level}
-          </p>
+        <section className="player-card" data-testid="player-card" aria-label="角色状态">
+          <div className="player-card-title">
+            <span className="player-card-name">{character.name}</span>
+            <span className="player-card-class">
+              {classDefinition.name} Lv.{level}
+            </span>
+            <span
+              className="pvp-badge"
+              data-testid="pvp-mode"
+              data-pvp={pvpEnabled ? 'open' : 'safe'}
+              data-map-id={state.mapId}
+            >
+              {pvpEnabled ? '野外 · 可自由 PK' : '主城安全区 · 禁止 PK'}
+            </span>
+          </div>
           <p className="vitals" data-testid="vitals">
-            HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
-            <span>
+            <span className="vital-hp">
+              HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
+            </span>
+            <span className="vital-mp">
               法力 {self?.mp ?? character.mp}/{self?.maxMp ?? character.maxMp}
             </span>
             {state.shield !== null ? (
@@ -372,14 +384,6 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 护盾 {state.shield.amount}
               </span>
             ) : null}
-          </p>
-          <p
-            className="pvp-badge"
-            data-testid="pvp-mode"
-            data-pvp={pvpEnabled ? 'open' : 'safe'}
-            data-map-id={state.mapId}
-          >
-            {pvpEnabled ? '野外 · 可自由 PK' : '主城安全区 · 禁止 PK'}
           </p>
           <div
             className="exp-row"
@@ -396,6 +400,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             <span className="gold-label" data-testid="gold">
               金币 {gold}
             </span>
+          </div>
+          <div className="player-actions">
             <button
               type="button"
               className="bag-toggle"
@@ -405,7 +411,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 const next = !bagOpen;
                 setBagOpen(next);
                 if (next) {
-                  // The centered merchant panel covers the bag's controls.
+                  // Panels share the right dock with the merchant, so opening
+                  // the bag replaces the shop instead of stacking on it.
                   setShopOpen(false);
                 }
               }}
@@ -451,8 +458,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             >
               音效 {state.sfxMuted ? '关' : '开'}
             </button>
+            <button type="button" className="bag-toggle" data-testid="exit-world" onClick={onExit}>
+              返回角色
+            </button>
           </div>
-        </div>
+        </section>
 
         <section className={`connection connection-${state.status}`} aria-live="polite">
           <div className="connection-heading">
@@ -465,10 +475,12 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               {STATUS_LABEL[state.status]}
             </span>
           </div>
-          <p className="connection-detail">
-            {state.detail}
-            {selfName !== undefined ? ` · ${selfName}` : ''}
-          </p>
+          {state.status === 'connected' ? null : (
+            <p className="connection-detail">
+              {state.detail}
+              {selfName !== undefined ? ` · ${selfName}` : ''}
+            </p>
+          )}
           <div className="connection-meta">
             <span data-testid="latency">{state.latencyMs ?? '—'} ms</span>
             <span data-testid="room-id">{state.roomId ?? '—'}</span>
@@ -480,9 +492,6 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 重新加入
               </button>
             )}
-            <button type="button" className="rejoin" data-testid="exit-world" onClick={onExit}>
-              返回角色
-            </button>
           </div>
         </section>
       </header>
@@ -808,10 +817,25 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         </section>
       </aside>
 
-      <aside className="hud chat-panel" aria-label="同图聊天">
+      <aside
+        className={`hud chat-panel${chatOpen ? '' : ' collapsed'}`}
+        aria-label="同图聊天"
+        data-testid="chat-panel"
+      >
         <div className="panel-heading">
           <h2>地图频道</h2>
           <span>{mapName}</span>
+          <button
+            type="button"
+            className="chat-toggle"
+            data-testid="chat-toggle"
+            aria-expanded={chatOpen}
+            onClick={() => {
+              setChatOpen((open) => !open);
+            }}
+          >
+            {chatOpen ? '收起' : '展开'}
+          </button>
         </div>
         {state.systemMessages.length > 0 ? (
           <ul className="system-log" data-testid="system-log">

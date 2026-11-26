@@ -281,3 +281,18 @@
   `noUncheckedIndexedAccess` 下是 `number | undefined`）。
 - 下次：E2E 读取内容/资源 JSON 时统一用 `readFileSync` + `JSON.parse`，并在
   断言前对缺失键给出明确错误；只把 JSON 导入留给应用代码（Vite/Vitest 链路）。
+
+## EL-026：固定偏移的 HUD 层要和动态面板的最大高度一起算可点击性
+
+- 案例：S4-D 右栏化 HUD 时把右侧面板起点从 208px 提到 112px，按“已连接”
+  状态（连接卡片约 90px）视觉上留了空隙。全量 E2E 中 `shop.spec.ts` 稳定
+  超时：断线状态多出 detail 行、meta 换行后连接卡片增至 124px，正好越过
+  右栏起点 112px；「返回角色」按钮中心命中的是后渲染的 `minimap-heading`。
+  改为在调试脚本里用 `document.elementFromPoint` 读取按钮中心的真实命中目标
+  后定位，而不是继续猜测 z-index。
+- 经验：叠加式 HUD 的“不重叠”不能只按最矮状态截图确认；绝对定位的相邻面板
+  会随内容（连接状态、玩家数量、列表行）改变高度，视觉相邻不等于可点击。
+  固定偏移应取目标面板在所有状态下最大高度 + 间隔。
+- 下次：新增/移动 HUD 面板后，用 `boundingBox()` 与 `elementFromPoint` 抽查
+  按钮中心，并覆盖“状态变化后”（断线、收起、窄屏）的尺寸；同时把点击可达性
+  写成 E2E 断言（S4-D 的 `hud.spec.ts` 即为此）。

@@ -103,13 +103,11 @@ test('bag shows quality and stat comparison, sorts gear first, and equips it', a
   await armorOffer.getByTestId('shop-buy').click();
   await expect(page.getByTestId('shop-gold')).toHaveText('金币 10', { timeout: 10_000 });
 
-  // The centered merchant panel covers the HUD toggles; close it the way a
-  // player would before opening the bag.
-  await page.getByTestId('shop-panel').getByRole('button', { name: '关闭' }).click();
-  await expect(page.getByTestId('shop-panel')).toBeHidden();
-
+  // The docked merchant panel leaves the top HUD toggles reachable: opening
+  // the bag replaces the shop without closing it first (TD-CLI-14).
   await page.getByTestId('inventory-toggle').click();
   await expect(page.getByTestId('inventory-panel')).toBeVisible();
+  await expect(page.getByTestId('shop-panel')).toBeHidden();
 
   const armor = page.locator('[data-testid="inventory-item"][data-template-id="cloth_armor"]');
   await expect(armor).toHaveCount(1);
