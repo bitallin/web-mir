@@ -2862,3 +2862,86 @@ pnpm verify:invariants
 1. 8584 试玩掉落图标与标签避让。
 2. S4 收尾：正式美术（TD-CLI-13）；丢弃物品；评估扩展装备槽（TD-DATA-05）。
 3. 为 tick p95 14.75ms 做剖析；确认远端 CI。
+
+## 2026-11-26 Alpha 0.2 S4-F：50 人 tick p95 剖析与 AOI 批处理
+
+### 目标
+
+S4-B 的 50 人 × 10 分钟回归 tick p95 14.75ms、p99 21.01ms，高于 10ms 目标；
+p50 只有 1.1ms。先证明长尾来自哪里，只优化被剖面指向的路径。
+
+### 实际改动
+
+1. **剖面方法**
+   - 生产构建 `apps/game-server/dist/index.js` + `NODE_ENV=test`，配合 Vite 84
+     与 Control API 86，排除 tsx 转译与开发日志。
+   - 先跑 50 人 × 2 分钟无剖析基线；再用 `node --cpu-prof
+--cpu-prof-interval=500` 重跑同一负载，按 `simulateTick` 子树聚合自耗时。
+2. **AOI 每 tick 去重刷新**
+   - `WorldMapRoom` 新增 `pendingViewRefresh`；玩家与怪物移动把受影响观察者
+     入队，tick 末 `flushViewRefresh()` 去重后统一刷新。
+   - 刷新仍在 tick 内完成，`session.visible` 对下一 tick 生效的边界不变。
+3. **减少每次刷新的分配**
+   - `InterestManager.collectVisibleIds(id, target)` 直接填充调用方 Set；
+     `collectNeighbourhood` 供 `move` 复用；`visibleIdsFor` API 保留。
+   - `StateViewPublisher` 复用 `requested` 与 `desired` Set。
+   - `simulateTick` 只调用一次 `listPlayers()`，同时供位置快照、传送门检测、
+     AOI 移动与 `syncPlayers` 使用。
+
+### 命令与结果
+
+```bash
+NODE_ENV=test node --cpu-prof --cpu-prof-dir=/tmp/wl-cpu apps/game-server/dist/index.js
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 pnpm load:scenario
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 pnpm load:scenario
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm verify:invariants
+```
+
+- 剖面：`simulateTick` 子树 9.7s/333s（占墙钟 2.9%、非空闲 CPU 约 39%）；
+  `visibleIdsFor` 22.7% + `refresh` 15.8% + `neighbourhoodIds` 6.7%，
+  事件序列化/写入约 28%，寻路 0.4%。
+- 2 分钟改前/改后：p50 1.71 → 1.11ms，p95 12.59 → **5.15ms**，
+  p99 17.30 → 7.87ms，max 20.28 → 9.29ms。
+- 50 人 × 10 分钟：50/50、接受率 99.0%、784 击杀、0 资产失败；
+  p50 0.69ms、p95 **5.34ms**、p99 6.67ms、max 6.92ms；资产 p95 48.4ms，
+  RSS 峰值 289MB。
+- 单元/集成：69 文件、**455 测试**通过（新增 1 条 AOI collect 测试）。
+- 构建：4 个应用成功；lint/typecheck/format 通过。
+- 全量 E2E：首轮 37/38（250ms 可见性 307ms），单跑 3/3、全量重跑
+  **38/38 通过**（4.3 分钟，2 worker）。
+- 资产不变量：重启开发栈后 7/7 为 0。
+
+### 遇到的问题及解决方法
+
+1. **tsx 包装进程吞掉 CPU profile**：最初用 `NODE_OPTIONS=--cpu-prof` 启动
+   `pnpm dev`，只得到 tsx CLI 包装进程的空剖面。改为直接运行生产构建
+   `node --cpu-prof dist/index.js`，并关闭 dev 日志 transport（`NODE_ENV=test`）。
+2. **压测脚本偶尔在收尾 `room.leave()` 挂起**：10 分钟场景本次正常退出；
+   2 分钟场景有一次在写完 summary 后挂起，用 `timeout` 收口。证据文件在挂起前
+   已写入，不影响 tick 指标；未在本切片修改压测脚本。
+3. **全量 E2E 的 250ms 时序断言再次抖动**：与 S4-E 相同，未降低阈值；单独
+   重复与全量重跑均通过。
+
+### 尚未解决
+
+- tick 内战斗事件逐客户端 msgpackr 打包与 `writev` 仍占约 28%（新增 TD-SRV-10，
+  P3）；团战事件增长前再设计批量协议。
+- 资产队列 p95 48.4ms 未变化，未阻塞 tick；按 TD-SRV-03 另行评估。
+- 未做跨机器/多进程容量趋势；本轮为共享开发机上的单进程 50 人。
+
+### 提交
+
+- `dcad681` `fix(alpha-02): batch AOI refreshes to cut the 50-player tick tail`
+  （10 个文件：AOI/房间/兴趣管理、1 条单测、阶段报告与 5 个性能证据文件）。
+
+### 下一步计划
+
+1. 8584 试玩并观察 tick 长尾与手感。
+2. S4 收尾：正式美术（TD-CLI-13）；丢弃物品；评估扩展装备槽（TD-DATA-05）。
+3. 确认远端 CI；后续版本继续用 `pnpm load:regression` 观察趋势。

@@ -289,13 +289,27 @@ Alpha 0.1 的工程目标成立，可以进入 Alpha 0.2。但仍有三件事必
   `docs/phase-reports/alpha-02/scene-readable/`；全量 E2E 38/38。
 - 未包含：正式美术（TD-CLI-13）、传送门/掉落文字参与避让。
 
+### S4-F：50 人 tick p95 剖析与 AOI 批处理（已完成，2026-11-26）
+
+- 生产构建 + `node --cpu-prof` 对 50 人负载取剖面，按 `simulateTick` 子树
+  聚合：AOI 约 61%、tick 内事件序列化与写入约 28%、寻路约 0.4%。
+- `WorldMapRoom` 将玩家/怪物移动的 AOI 刷新按 tick 去重后统一执行；
+  `InterestManager.collectVisibleIds` 与 `StateViewPublisher` 复用 Set，
+  `simulateTick` 只取一次玩家列表。
+- 结果：2 分钟 p95 12.59 → 5.15ms；50 人 × 10 分钟 p95 **5.34ms**、
+  p99 6.67ms、0 资产失败；455 单元/集成、38 E2E。
+- 证据：`docs/phase-reports/alpha-02/ALPHA_02_TICK_PROFILE_REPORT.md`、
+  `docs/phase-reports/alpha-02/perf/`。
+- 未包含：tick 内事件序列化优化、资产队列并发（TD-SRV-03）。
+
 ### S4 剩余工作
 
 - **图标与美术**：正式 tileset、三套角色、怪物与物品图标美术（TD-CLI-13）；
   区域音乐。
 - **背包后续**：丢弃物品；评估扩展装备槽（TD-DATA-05）。
 - **已完成**：战斗信息右栏可收起（体验修复）、角色状态板/可收起聊天/商店
-  右停靠（S4-D）、地面掉落图标与名字标签避让（S4-E）。
+  右停靠（S4-D）、地面掉落图标与名字标签避让（S4-E）、50 人 tick 剖析与
+  AOI 批处理（S4-F）。
 
 ## 5. S1 执行与提交（历史）
 
