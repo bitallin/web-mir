@@ -3044,6 +3044,8 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 pnpm load:scenario
 - `0cad7ee` `feat(alpha-02): add the town guard quest chain`
   （53 个文件：契约/内容/领域/应用/持久化/服务端/客户端、迁移 `0007`/`0008`、
   17 条测试、任务 E2E、ADR/报告/证据与状态文档）。
+- `ca5abd1` `fix(alpha-02): refresh the quest chain after a claim or level-up`
+  （交付/升级后重发整条任务快照，下一任务无需重登即可解锁；E2E 增加解锁断言）。
 
 ### 下一步计划
 
