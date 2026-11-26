@@ -452,6 +452,20 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     };
   }
 
+  npcScreenPoint(npcId: string): ScreenPoint | null {
+    const npc = this.bundle.manifest.npcPoints.find((point) => point.id === npcId);
+    if (npc === undefined) {
+      return null;
+    }
+    const center = this.projection.tileCenter(npc.tile);
+    const camera = this.cameras.main;
+    const canvas = this.game.canvas.getBoundingClientRect();
+    return {
+      x: center.x - camera.scrollX + canvas.left,
+      y: center.y - camera.scrollY + canvas.top,
+    };
+  }
+
   applyCombatEvent(event: CombatEvent): void {
     switch (event.kind) {
       case 'attack': {
@@ -968,6 +982,18 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     }
   }
 
+  private npcAt(worldX: number, worldY: number): string | null {
+    for (const npc of this.bundle.manifest.npcPoints) {
+      const center = this.projection.tileCenter(npc.tile);
+      const dx = worldX - center.x;
+      const dy = worldY - (center.y - 16);
+      if (dx * dx + dy * dy <= 30 * 30) {
+        return npc.id;
+      }
+    }
+    return null;
+  }
+
   private readonly handlePointerDown = (pointer: Phaser.Input.Pointer): void => {
     // A living monster wins over a drop that lies underneath it; the loot list
     // in the HUD can always claim the drop without a precise click.
@@ -988,6 +1014,12 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     const dropId = this.lootAt(pointer.worldX, pointer.worldY);
     if (dropId !== null) {
       this.bridge.requestPickup(dropId);
+      return;
+    }
+
+    const npcId = this.npcAt(pointer.worldX, pointer.worldY);
+    if (npcId !== null) {
+      this.bridge.requestNpcInteraction(npcId);
       return;
     }
 

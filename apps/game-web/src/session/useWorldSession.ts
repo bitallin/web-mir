@@ -1,3 +1,4 @@
+import { SHOP_RANGE_TILES, TILE_UNITS } from '@web-legend/contracts';
 import type {
   CharacterView,
   CharacterProgress,
@@ -28,6 +29,7 @@ import {
   type LootView,
   type MonsterView,
   type PlayerView,
+  type WorldSnapshot,
 } from '../net/worldClient';
 
 export type SessionNotice = {
@@ -73,6 +75,8 @@ export type SessionState = {
   skillCooldowns: Record<string, number>;
   inventory: InventorySnapshot | null;
   shopCatalog: ShopCatalog | null;
+  /** A nearby NPC click; GameScreen turns it into the merchant panel. */
+  shopRequest: { npcId: string; seq: number } | null;
   levelUpNotice: LevelUp | null;
   /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
   notices: SessionNotice[];
@@ -116,6 +120,7 @@ function initialState(character: CharacterView): SessionState {
     skillCooldowns: {},
     inventory: null,
     shopCatalog: null,
+    shopRequest: null,
     levelUpNotice: null,
     notices: [],
     autoAttack: null,
@@ -258,7 +263,10 @@ class WorldSession {
   private commandCount = 0;
   private debugInstalled = false;
   private latestLoot: LootView[] = [];
+  private latestSnapshot: WorldSnapshot | null = null;
   private inventory: InventorySnapshot | null = null;
+  private shopCatalog: ShopCatalog | null = null;
+  private shopRequestSequence = 0;
   private levelBannerTimer: number | null = null;
   private systemMessageSequence = 0;
   private noticeSequence = 0;
@@ -292,6 +300,9 @@ class WorldSession {
     this.bridge.onPickupRequest = (dropId) => {
       this.pickup(dropId);
     };
+    this.bridge.onNpcInteract = (npcId) => {
+      this.interactNpc(npcId);
+    };
   }
 
   start(): void {
@@ -323,6 +334,7 @@ class WorldSession {
             }
           }
           this.latestLoot = snapshot.loot;
+          this.latestSnapshot = snapshot;
           this.updateState((previous) => ({
             ...previous,
             mapId: snapshot.mapId,
@@ -426,6 +438,7 @@ class WorldSession {
           this.updateState((previous) => ({ ...previous, inventory: snapshot }));
         },
         onShopCatalog: (catalog) => {
+          this.shopCatalog = catalog;
           this.updateState((previous) => ({ ...previous, shopCatalog: catalog }));
         },
         onAssetResult: (result) => {
@@ -611,6 +624,32 @@ class WorldSession {
     return sent;
   }
 
+  interactNpc(npcId: string): void {
+    const merchant = this.shopCatalog?.merchants.find((entry) => entry.id === npcId);
+    if (merchant === undefined) {
+      return;
+    }
+    const self = this.latestSnapshot?.players.find(
+      (player) => player.playerId === this.options.character.id,
+    );
+    if (self === undefined) {
+      return;
+    }
+    const distance = Math.hypot(
+      self.x / TILE_UNITS - merchant.tile.x,
+      self.y / TILE_UNITS - merchant.tile.y,
+    );
+    if (distance > SHOP_RANGE_TILES) {
+      this.pushNotice('warning', `走近${merchant.name}后再交易`);
+      return;
+    }
+    this.shopRequestSequence += 1;
+    this.updateState((previous) => ({
+      ...previous,
+      shopRequest: { npcId, seq: this.shopRequestSequence },
+    }));
+  }
+
   shopBuy(merchantId: string, templateId: string, quantity: number): boolean {
     const sent = this.client?.sendShopBuy(merchantId, templateId, quantity) ?? false;
     if (sent) {
@@ -772,6 +811,8 @@ class WorldSession {
   }
 
   private handleTransfer(mapId: string): void {
+    this.shopCatalog = null;
+    this.latestSnapshot = null;
     for (const timer of this.noticeTimers.values()) {
       window.clearTimeout(timer);
     }
@@ -792,6 +833,7 @@ class WorldSession {
       selectedTargetId: null,
       skillCooldowns: {},
       shopCatalog: null,
+      shopRequest: null,
       levelUpNotice: null,
       notices: [],
       autoAttack: null,
@@ -837,6 +879,8 @@ class WorldSession {
       castSkill: (skillId, targetId) => this.castSkill(skillId, targetId),
       monsterScreenPoint: (monsterId) => this.bridge.monsterScreenPoint(monsterId),
       playerScreenPoint: (playerId) => this.bridge.playerScreenPoint(playerId),
+      npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),
+      interactNpc: (npcId) => this.interactNpc(npcId),
       sendChat: (text) => this.sendChat(text),
       pickupDrop: (dropId) => this.pickup(dropId),
       equipItem: (itemId) => this.equip(itemId),

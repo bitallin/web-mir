@@ -19,6 +19,8 @@ declare global {
       castSkill: (skillId: string, targetId: string) => boolean;
       monsterScreenPoint: (monsterId: string) => { x: number; y: number } | null;
       playerScreenPoint: (playerId: string) => { x: number; y: number } | null;
+      npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
+      interactNpc: (npcId: string) => void;
       sendChat: (text: string) => boolean;
       pickupDrop: (dropId: string) => boolean;
       equipItem: (itemId: string) => boolean;

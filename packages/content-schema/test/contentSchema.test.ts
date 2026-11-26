@@ -160,6 +160,26 @@ describe('content validation', () => {
 });
 
 describe('content diff', () => {
+  it('diffs optional fields that are absent on one side', () => {
+    const legacy = clone(BASE_CONTENT_BUNDLE);
+    const potion = legacy.items['small_hp_potion'];
+    const mage = legacy.classes.mage;
+    if (potion === undefined || mage === undefined) {
+      throw new Error('baseline content is missing a fixture');
+    }
+    delete potion.buyPrice;
+    delete mage.mpRegenPerSecond;
+
+    const changes = diffContentBundles(legacy, BASE_CONTENT_BUNDLE);
+    expect(
+      changes.find((change) => change.section === 'items' && change.id === 'small_hp_potion')
+        ?.fields,
+    ).toContain('buyPrice');
+    expect(
+      changes.find((change) => change.section === 'classes' && change.id === 'mage')?.fields,
+    ).toContain('mpRegenPerSecond');
+  });
+
   it('reports added, removed and changed entities with fields', () => {
     const candidate = withMutation((bundle) => {
       const table = bundle.lootTables['wild_slime'];

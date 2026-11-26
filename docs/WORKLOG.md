@@ -1829,3 +1829,53 @@ pnpm test:e2e
 2. 补跑容量回归与资产不变量。
 3. 继续 S2：道士毒符、战士冲锋/减伤、法师技能与三套外观；开工前处理
    TD-DATA-05。
+
+---
+
+## 2026-11-26 修复：点击杂货商无反应与内容发布 500
+
+### 本次任务目标
+
+用户实测 8584 时点击杂货商打不开。定位真实原因并修复，而不是只解释环境问题。
+
+### 根因
+
+1. **开发栈运行旧后端**：84–87 的进程启动于 Alpha 0.1 代码，没有
+   `shop.catalog`/买卖命令；前端 Vite 已热更新到新代码，但拿不到目录，靠 HUD
+   入口也无法出现。
+2. **场景 NPC 没有点击交互**：此前只有“靠近后 HUD 出现杂货商按钮”这一条
+   路径，点击世界里的杂货商标记只会触发寻路。
+3. **内容发布 500**：第一次发布包含可选字段（`buyPrice`/`mpRegenPerSecond`）
+   的 Release 时，diff 把旧版本缺失的字段当作 `undefined` 传给
+   `canonicalJson`，抛出 `content cannot contain undefined`，验证/发布失败。
+
+### 实际改动
+
+- `WorldScene` 增加 NPC 命中检测与 `npcScreenPoint`；`WorldBridge.onNpcInteract`
+  把点击转给会话层。
+- `WorldSession.interactNpc`：商人且距离 ≤ 3 格时发出 `shopRequest` 打开面板；
+  太远时显示“走近杂货商后再交易”；HUD 按钮仍保留。
+- `diff.ts` 增加 `jsonForDiff`，把 `undefined` 视为合法差异值；checksum 仍拒绝
+  undefined 内容。补“旧版本缺字段 vs 新版本有字段”的回归测试。
+- 重启开发栈，用运营 API 发布并激活内容 `2026.11.26.1`
+  （checksum `e7cad61d…`），刷新后游戏服务器确认使用新版本。
+- 更新 `tests/e2e/shop.spec.ts`：改为直接点击场景中的商人，并覆盖距离不足的
+  提示。
+
+### 命令与结果
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm exec playwright test tests/e2e/shop.spec.ts --workers=1
+# 真实 8584 浏览器脚本：注册→创建→移动到商人→点击 NPC→打开面板
+```
+
+- 类型/lint：通过；商店 E2E：1/1 通过（NPC 点击 + 远距离提示）。
+- 8584 实测：新角色 50 金币，点击杂货商成功打开购买面板。
+- 全量门禁：63 文件 374 测试、23/23 浏览器 E2E、4 应用构建通过。
+
+### 尚未解决
+
+- 用户当前页面若仍停留在旧 Room，需要刷新/返回角色再进入才能拿到新内容。
+- 50 人容量回归与远端 CI 仍未执行。

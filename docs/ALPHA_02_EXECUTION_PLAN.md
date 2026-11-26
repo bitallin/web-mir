@@ -171,7 +171,7 @@ Alpha 0.1 的工程目标成立，可以进入 Alpha 0.2。但仍有三件事必
   内容驱动且旧 Release checksum 不变；确定性回放；浏览器 E2E 可见。
 - 证据：`docs/phase-reports/alpha-02/ALPHA_02_MANA_REPORT.md`、ADR-027、
   `tests/e2e/mana.spec.ts`。
-- 仍未验证：50 人容量复跑、开发栈重启后的 8584 人工试玩。
+- 仍未验证：50 人容量复跑；8584 商店点击已人工验证，法力回复待试玩。
 
 ### S2 剩余工作
 

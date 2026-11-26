@@ -282,6 +282,15 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     }
   }, [nearbyMerchant]);
 
+  useEffect(() => {
+    const request = state.shopRequest;
+    if (request === null || nearbyMerchant === null || nearbyMerchant.id !== request.npcId) {
+      return;
+    }
+    setShopTab('buy');
+    setShopOpen(true);
+  }, [state.shopRequest, nearbyMerchant]);
+
   const buyOffer = useCallback(
     (offer: ShopOffer, quantity: number) => {
       if (nearbyMerchant !== null) {

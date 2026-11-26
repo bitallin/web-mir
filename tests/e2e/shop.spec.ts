@@ -83,7 +83,17 @@ test('new character uses starting gold at the town merchant and can sell back', 
   await moveTo(page, 12, 9);
   const shopToggle = page.getByTestId('shop-toggle');
   await expect(shopToggle).toBeVisible({ timeout: 15_000 });
-  await shopToggle.click();
+
+  // The reported entry point: click the merchant NPC in the world. The HUD
+  // toggle is only the secondary entry.
+  const npcPoint = await page.evaluate(
+    () => window.__webLegendDebug?.npcScreenPoint('town_merchant') ?? null,
+  );
+  expect(npcPoint).not.toBeNull();
+  if (npcPoint === null) {
+    return;
+  }
+  await page.mouse.click(npcPoint.x, npcPoint.y);
 
   await expect(page.getByTestId('shop-panel')).toBeVisible();
   await expect(page.getByTestId('shop-gold')).toHaveText('金币 50');
@@ -145,6 +155,10 @@ test('new character uses starting gold at the town merchant and can sell back', 
   await moveTo(page, 17, 10);
   await expect(shopToggle).toBeHidden({ timeout: 15_000 });
   await expect(page.getByTestId('shop-panel')).toHaveCount(0);
+
+  // Clicking the merchant from out of range must explain why nothing opened.
+  await page.evaluate(() => window.__webLegendDebug?.interactNpc('town_merchant'));
+  await expect(page.getByTestId('last-notice')).toContainText('走近', { timeout: 10_000 });
 
   // Leaving and re-entering must read the committed wallet and bag back from
   // PostgreSQL, not from the client cache.

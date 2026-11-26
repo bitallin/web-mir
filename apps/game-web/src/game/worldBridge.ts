@@ -16,6 +16,7 @@ export type WorldSceneHandle = {
   screenPointForTile: (tile: TilePoint) => ScreenPoint;
   monsterScreenPoint: (monsterId: string) => ScreenPoint | null;
   playerScreenPoint: (playerId: string) => ScreenPoint | null;
+  npcScreenPoint: (npcId: string) => ScreenPoint | null;
   lootScreenPoint: (dropId: string) => ScreenPoint | null;
   selectEntity: (entityId: string) => void;
   restart: () => void;
@@ -35,6 +36,7 @@ export class WorldBridge {
   onSkillRequest: ((skillId: string, targetId: string) => void) | null = null;
   onTargetChange: ((targetId: string | null) => void) | null = null;
   onPickupRequest: ((dropId: string) => void) | null = null;
+  onNpcInteract: ((npcId: string) => void) | null = null;
 
   attach(scene: WorldSceneHandle): void {
     this.scene = scene;
@@ -88,6 +90,10 @@ export class WorldBridge {
     this.onPickupRequest?.(dropId);
   }
 
+  requestNpcInteraction(npcId: string): void {
+    this.onNpcInteract?.(npcId);
+  }
+
   screenPointForTile(tile: TilePoint): ScreenPoint | null {
     return this.scene?.screenPointForTile(tile) ?? null;
   }
@@ -102,6 +108,10 @@ export class WorldBridge {
 
   lootScreenPoint(dropId: string): ScreenPoint | null {
     return this.scene?.lootScreenPoint(dropId) ?? null;
+  }
+
+  npcScreenPoint(npcId: string): ScreenPoint | null {
+    return this.scene?.npcScreenPoint(npcId) ?? null;
   }
 
   selectTarget(entityId: string): void {

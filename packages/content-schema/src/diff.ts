@@ -19,9 +19,18 @@ function isRecord(value: unknown): value is RecordLike {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Optional content fields (buyPrice, mpRegenPerSecond, ...) can be absent on
+ * either side of a diff. `canonicalJson` intentionally rejects undefined
+ * content, so the diff handles absence explicitly instead of throwing.
+ */
+function jsonForDiff(value: unknown): string {
+  return value === undefined ? 'undefined' : canonicalJson(value);
+}
+
 function changedFields(before: RecordLike, after: RecordLike): string[] {
   const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
-  return [...keys].filter((key) => canonicalJson(before[key]) !== canonicalJson(after[key])).sort();
+  return [...keys].filter((key) => jsonForDiff(before[key]) !== jsonForDiff(after[key])).sort();
 }
 
 /**
@@ -55,7 +64,7 @@ export function diffContentBundles(
         if (fields.length > 0) {
           changes.push({ section, id, kind: 'changed', fields });
         }
-      } else if (canonicalJson(beforeEntry) !== canonicalJson(afterEntry)) {
+      } else if (jsonForDiff(beforeEntry) !== jsonForDiff(afterEntry)) {
         changes.push({ section, id, kind: 'changed', fields: [] });
       }
     }
