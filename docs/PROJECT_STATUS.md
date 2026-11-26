@@ -1433,7 +1433,7 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`fix(alpha-02): batch AOI refreshes to cut the 50-player tick tail`
 - 压测证据连接串脱敏：`a03a5ee`
   主题：`fix(alpha-02): redact the database URL from load evidence`
-- Alpha 0.2 S4-G 主城守卫任务链：本轮待提交
+- Alpha 0.2 S4-G 主城守卫任务链：`0cad7ee`
   主题：`feat(alpha-02): add the town guard quest chain`
 
 ## 11. 当前环境事实
