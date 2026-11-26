@@ -179,13 +179,45 @@ body {
   margin-left: 0;
 }
 
-.players-panel {
+/* Right column: minimap/players above, combat information below. */
+.hud-right {
   top: 208px;
   right: 40px;
-  width: 272px;
-  max-height: calc(100% - 300px);
+  bottom: 84px;
+  width: 300px;
   display: flex;
   flex-direction: column;
+  gap: 12px;
+}
+
+.hud-right .players-panel {
+  flex: 0 0 auto;
+  max-height: 72%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.players-panel .minimap,
+.players-panel .panel-heading {
+  flex: 0 0 auto;
+}
+
+.players-panel ul {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.hud-right .combat-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.players-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border: 1px solid #232a32;
   background: var(--ink-raised);
   backdrop-filter: blur(8px);
@@ -403,21 +435,59 @@ body {
 }
 
 .combat-panel {
-  left: 50%;
-  bottom: 84px;
-  z-index: 3;
-  width: 500px;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
+  overflow-y: auto;
   border: 1px solid #232a32;
   background: var(--ink-raised);
   backdrop-filter: blur(8px);
   pointer-events: auto;
 }
 
+.combat-panel.collapsed {
+  flex: 0 0 auto !important;
+  overflow: hidden;
+}
+
+.combat-panel.collapsed > section {
+  display: none;
+}
+
+.combat-panel-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--ink-raised);
+}
+
+.combat-info-toggle {
+  padding: 2px 10px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.combat-info-toggle:hover {
+  border-color: var(--gold);
+}
+
 .combat-panel .panel-heading {
   padding: 10px 14px;
+}
+
+/* The skills stay at the bottom center: always reachable, minimal footprint. */
+.skill-dock {
+  left: 50%;
+  bottom: 84px;
+  z-index: 3;
+  width: 460px;
+  transform: translateX(-50%);
+  border: 1px solid #232a32;
+  background: var(--ink-raised);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
 }
 
 .target-panel .panel-heading span,
@@ -627,15 +697,20 @@ body {
 }
 
 @media (max-width: 1180px) {
-  .combat-panel {
-    left: 40px;
-    right: 40px;
-    width: auto;
-    transform: none;
+  .hud-right {
+    top: 220px;
+    right: 20px;
+    bottom: 64px;
+    width: 280px;
+  }
+
+  .skill-dock {
+    bottom: 64px;
+    width: min(420px, calc(100% - 620px));
   }
 
   .chat-panel {
-    bottom: 372px;
+    bottom: 220px;
   }
 }
 
@@ -726,24 +801,24 @@ body {
     width: 100%;
   }
 
-  .players-panel {
+  .hud-right {
     top: 236px;
-    right: 20px;
-    left: 20px;
-    width: auto;
-    max-height: 28%;
+    left: auto;
+    right: 12px;
+    bottom: 220px;
+    width: 240px;
   }
 
   .chat-panel {
     display: none;
   }
 
-  .combat-panel {
-    left: 20px;
-    right: 20px;
+  .skill-dock {
+    left: 12px;
+    right: 12px;
     bottom: 64px;
-    max-height: 42%;
-    overflow-y: auto;
+    width: auto;
+    transform: none;
   }
 
   .hud-bottom {

@@ -2216,3 +2216,53 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 \
 2. 做 S3 死亡代价：经验损失进入资产事务、内容化保护阈值与复活点。
 
 提交：`3410881`（`feat(alpha-02): add monster variety and a telegraphed elite pounce`）。
+
+---
+
+## 2026-11-26 体验修复：战斗 HUD 不再遮挡游戏画面
+
+### 问题
+
+用户试玩反馈：中央「当前目标 / 技能 / 战斗记录」面板宽 500px、高度随附近怪物
+数量增长，直接盖住角色与战斗视野；面板没有收起方式，技能与日志也混在同一块
+区域里。
+
+### 实际改动
+
+- 右侧新增 `hud-right` 纵向栏：小地图 + 附近玩家在上、战斗信息（目标/掉落/
+  战斗记录）在下；战斗信息标题栏提供收起/展开（`combat-info-toggle`）。
+- 技能拆出为底部居中的 `skill-dock`，高度固定，始终可达；原有 `data-testid`
+  全部保留。
+- 玩家面板裁剪溢出并让列表内部滚动；修复回归中发现的点击拦截——列表溢出的
+  「攻击」按钮会被下方战斗信息面板盖住（pvp 安全区用例先失败后通过）。
+- 响应式：≤1180px 收窄右栏/技能坞并把聊天上移；≤860px 维持既有简化布局
+  （移动端不在 MVP 范围）。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：66 文件、410 测试通过。
+- 构建：4 个应用成功。
+- 浏览器 E2E：31/31 通过（3.6 分钟）；首次全量运行时 pvp 安全区用例因列表
+  溢出拦截按钮失败，修复后全量通过。
+- 真实浏览器布局：1280×720、1600×1000、收起态三张截图。
+
+### 证据
+
+`docs/phase-reports/alpha-02/hud/`（`world-1280x720.png`、
+`world-1600x1000.png`、`combat-info-collapsed.png`）；
+报告 `docs/phase-reports/alpha-02/ALPHA_02_HUD_LAYOUT_FIX.md`。
+
+### 尚未解决
+
+- ≤860px 移动端布局未做（不在 MVP 范围）。
+- 完整 HUD 重排（对比度、字号、分组）仍属 S4。

@@ -112,6 +112,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
   const [characterOpen, setCharacterOpen] = useState(false);
+  const [combatInfoOpen, setCombatInfoOpen] = useState(true);
   const [shopOpen, setShopOpen] = useState(false);
   const [shopTab, setShopTab] = useState<'buy' | 'sell'>('buy');
   const requestTicket = useCallback(async () => {
@@ -427,250 +428,288 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         </section>
       </header>
 
-      <aside className="hud players-panel" aria-label="在线玩家">
-        <Minimap
-          mapId={state.mapId}
-          selfId={state.selfId}
-          players={state.players}
-          monsters={state.monsters}
-          loot={state.loot}
-        />
-        <div className="panel-heading">
-          <h2>附近玩家</h2>
-          <span>
-            <span data-testid="player-count">{state.players.length}</span>
-            {state.roomPlayerCount > state.players.length
-              ? ` / ${String(state.roomPlayerCount)}`
-              : ''}
-          </span>
-        </div>
-        <ul>
-          {state.players.map((player) => {
-            const tile = tileOf(player);
-            const isSelf = player.playerId === state.selfId;
-            return (
-              <li
-                key={player.playerId}
-                data-testid="player-row"
-                data-player-id={player.playerId}
-                data-name={player.displayName}
-                data-self={isSelf ? 'true' : 'false'}
-                data-tile-x={tile.x}
-                data-tile-y={tile.y}
-                data-connected={player.connected ? 'true' : 'false'}
-                data-moving={player.moving ? 'true' : 'false'}
-                data-alive={player.alive ? 'true' : 'false'}
-                data-hp={player.hp}
-                data-max-hp={player.maxHp}
-              >
-                <span
-                  className="swatch"
-                  style={{
-                    background: COLOR_HEX[player.colorIndex % COLOR_HEX.length] ?? COLOR_HEX[0],
-                  }}
-                />
-                <span className="player-name">
-                  {player.displayName}
-                  {isSelf ? <em>你</em> : null}
-                </span>
-                <span className="player-coords">
-                  {player.hp}/{player.maxHp}
-                </span>
-                <span className={`player-state ${player.alive ? '' : 'offline'}`}>
-                  {!player.alive ? '倒下' : player.connected ? '在线' : '断线'}
-                </span>
-                {!isSelf && player.alive ? (
-                  <button
-                    type="button"
-                    className="player-attack"
-                    data-testid="player-attack"
-                    data-player-id={player.playerId}
-                    onClick={() => {
-                      attackEntity(player.playerId);
-                    }}
-                  >
-                    攻击
-                  </button>
-                ) : null}
-              </li>
-            );
-          })}
-          {state.players.length === 0 ? <li className="empty">附近没有其他玩家</li> : null}
-        </ul>
-      </aside>
-
-      <aside className="hud combat-panel" aria-label="战斗">
-        <section className="target-panel" data-testid="target-panel">
+      <div className="hud hud-right">
+        <aside className="players-panel" aria-label="在线玩家">
+          <Minimap
+            mapId={state.mapId}
+            selfId={state.selfId}
+            players={state.players}
+            monsters={state.monsters}
+            loot={state.loot}
+          />
           <div className="panel-heading">
-            <h2>当前目标</h2>
-            <span data-testid="monster-count">附近怪物 {state.monsters.length}</span>
+            <h2>附近玩家</h2>
+            <span>
+              <span data-testid="player-count">{state.players.length}</span>
+              {state.roomPlayerCount > state.players.length
+                ? ` / ${String(state.roomPlayerCount)}`
+                : ''}
+            </span>
           </div>
-          {targetMonster === undefined && targetPlayer === undefined ? (
-            <p className="target-empty">点击附近的怪物或其他玩家发起攻击</p>
-          ) : targetMonster !== undefined ? (
-            <>
-              <div className="target-heading">
-                <strong data-testid="target-name">{targetMonster.displayName}</strong>
-                <span>Lv.{targetMonster.level}</span>
-                <span data-testid="target-kind" data-kind="monster">
-                  怪物
-                </span>
-                <span data-testid="target-state">
-                  {MONSTER_STATE_LABELS[targetMonster.state] ?? ''}
-                </span>
-              </div>
-              <div className="hp-track">
-                <span
-                  className="hp-fill"
-                  style={{ width: `${String(hpPercent(targetMonster.hp, targetMonster.maxHp))}%` }}
-                />
-              </div>
-              <div className="target-footer">
-                <p className="target-hp" data-testid="target-hp">
-                  {targetMonster.hp}/{targetMonster.maxHp}
-                </p>
-                {attackingTargetIsShown(targetMonster.monsterId) ? (
-                  <button
-                    type="button"
-                    className="target-attack stopping"
-                    data-testid="target-stop"
-                    onClick={() => {
-                      stopAutoAttack();
-                    }}
-                  >
-                    停止攻击
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="target-attack"
-                    data-testid="target-attack"
-                    onClick={() => {
-                      attackEntity(targetMonster.monsterId);
-                    }}
-                  >
-                    攻击
-                  </button>
-                )}
-              </div>
-              {attackingTargetIsShown(targetMonster.monsterId) && autoAttack !== null ? (
-                <AutoAttackBar autoAttack={autoAttack} progress={autoProgress} />
-              ) : null}
-            </>
-          ) : targetPlayer !== undefined ? (
-            <>
-              <div className="target-heading">
-                <strong data-testid="target-name">{targetPlayer.displayName}</strong>
-                <span>Lv.{targetPlayer.level}</span>
-                <span data-testid="target-kind" data-kind="player">
-                  玩家
-                </span>
-                <span data-testid="target-state">
-                  {!targetPlayer.alive ? '倒下' : targetPlayer.connected ? '在线' : '断线'}
-                </span>
-              </div>
-              <div className="hp-track">
-                <span
-                  className="hp-fill"
-                  style={{ width: `${String(hpPercent(targetPlayer.hp, targetPlayer.maxHp))}%` }}
-                />
-              </div>
-              <div className="target-footer">
-                <p className="target-hp" data-testid="target-hp">
-                  {targetPlayer.hp}/{targetPlayer.maxHp}
-                </p>
-                {attackingTargetIsShown(targetPlayer.playerId) ? (
-                  <button
-                    type="button"
-                    className="target-attack stopping"
-                    data-testid="target-stop"
-                    onClick={() => {
-                      stopAutoAttack();
-                    }}
-                  >
-                    停止攻击
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="target-attack"
-                    data-testid="target-attack"
-                    disabled={!pvpEnabled || !targetPlayer.alive}
-                    title={pvpEnabled ? '攻击玩家' : '安全区内禁止攻击玩家'}
-                    onClick={() => {
-                      attackEntity(targetPlayer.playerId);
-                    }}
-                  >
-                    {pvpEnabled ? '攻击玩家' : '安全区'}
-                  </button>
-                )}
-              </div>
-              {attackingTargetIsShown(targetPlayer.playerId) && autoAttack !== null ? (
-                <AutoAttackBar autoAttack={autoAttack} progress={autoProgress} />
-              ) : null}
-            </>
-          ) : null}
-        </section>
-
-        <section className="monster-list-panel" aria-label="附近怪物">
-          <ul data-testid="monster-list">
-            {state.monsters.map((monster) => (
-              <li key={monster.monsterId}>
-                <button
-                  type="button"
-                  className={`monster-row${monster.monsterId === state.selectedTargetId ? ' selected' : ''}`}
-                  data-testid="monster-row"
-                  data-monster-id={monster.monsterId}
-                  data-hp={monster.hp}
-                  data-max-hp={monster.maxHp}
-                  data-state={monster.state}
-                  onClick={() => {
-                    selectTarget(monster.monsterId);
-                    attack(monster.monsterId);
-                  }}
+          <ul>
+            {state.players.map((player) => {
+              const tile = tileOf(player);
+              const isSelf = player.playerId === state.selfId;
+              return (
+                <li
+                  key={player.playerId}
+                  data-testid="player-row"
+                  data-player-id={player.playerId}
+                  data-name={player.displayName}
+                  data-self={isSelf ? 'true' : 'false'}
+                  data-tile-x={tile.x}
+                  data-tile-y={tile.y}
+                  data-connected={player.connected ? 'true' : 'false'}
+                  data-moving={player.moving ? 'true' : 'false'}
+                  data-alive={player.alive ? 'true' : 'false'}
+                  data-hp={player.hp}
+                  data-max-hp={player.maxHp}
                 >
-                  <span>{monster.displayName}</span>
-                  <span>
-                    {monster.hp}/{monster.maxHp}
+                  <span
+                    className="swatch"
+                    style={{
+                      background: COLOR_HEX[player.colorIndex % COLOR_HEX.length] ?? COLOR_HEX[0],
+                    }}
+                  />
+                  <span className="player-name">
+                    {player.displayName}
+                    {isSelf ? <em>你</em> : null}
                   </span>
-                  <span>{MONSTER_STATE_LABELS[monster.state] ?? monster.state}</span>
-                </button>
-              </li>
-            ))}
-            {state.monsters.length === 0 ? <li className="empty">附近没有怪物</li> : null}
+                  <span className="player-coords">
+                    {player.hp}/{player.maxHp}
+                  </span>
+                  <span className={`player-state ${player.alive ? '' : 'offline'}`}>
+                    {!player.alive ? '倒下' : player.connected ? '在线' : '断线'}
+                  </span>
+                  {!isSelf && player.alive ? (
+                    <button
+                      type="button"
+                      className="player-attack"
+                      data-testid="player-attack"
+                      data-player-id={player.playerId}
+                      onClick={() => {
+                        attackEntity(player.playerId);
+                      }}
+                    >
+                      攻击
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+            {state.players.length === 0 ? <li className="empty">附近没有其他玩家</li> : null}
           </ul>
-        </section>
+        </aside>
 
-        <section className="loot-panel" aria-label="地面掉落">
-          <div className="panel-heading">
-            <h2>附近掉落</h2>
-            <span data-testid="loot-count">{state.loot.length}</span>
+        <aside
+          className={`combat-panel${combatInfoOpen ? '' : ' collapsed'}`}
+          aria-label="战斗"
+          data-testid="combat-info"
+        >
+          <div className="panel-heading combat-panel-heading">
+            <h2>战斗信息</h2>
+            <button
+              type="button"
+              className="combat-info-toggle"
+              data-testid="combat-info-toggle"
+              aria-expanded={combatInfoOpen}
+              onClick={() => {
+                setCombatInfoOpen((open) => !open);
+              }}
+            >
+              {combatInfoOpen ? '收起' : '展开'}
+            </button>
           </div>
-          <ul data-testid="loot-list">
-            {state.loot.map((drop) => (
-              <li key={drop.dropId}>
-                <button
-                  type="button"
-                  className="loot-row"
-                  data-testid="loot-row"
-                  data-drop-id={drop.dropId}
-                  data-template-id={drop.templateId}
-                  data-owner-id={drop.ownerId}
-                  onClick={() => {
-                    pickup(drop.dropId);
-                  }}
-                >
-                  <span>{drop.displayName}</span>
-                  <span>×{drop.quantity}</span>
-                  <span className="loot-action">拾取</span>
-                </button>
-              </li>
-            ))}
-            {state.loot.length === 0 ? <li className="empty">击败怪物后会掉落物品</li> : null}
-          </ul>
-        </section>
+          <section className="target-panel" data-testid="target-panel">
+            <div className="panel-heading">
+              <h2>当前目标</h2>
+              <span data-testid="monster-count">附近怪物 {state.monsters.length}</span>
+            </div>
+            {targetMonster === undefined && targetPlayer === undefined ? (
+              <p className="target-empty">点击附近的怪物或其他玩家发起攻击</p>
+            ) : targetMonster !== undefined ? (
+              <>
+                <div className="target-heading">
+                  <strong data-testid="target-name">{targetMonster.displayName}</strong>
+                  <span>Lv.{targetMonster.level}</span>
+                  <span data-testid="target-kind" data-kind="monster">
+                    怪物
+                  </span>
+                  <span data-testid="target-state">
+                    {MONSTER_STATE_LABELS[targetMonster.state] ?? ''}
+                  </span>
+                </div>
+                <div className="hp-track">
+                  <span
+                    className="hp-fill"
+                    style={{
+                      width: `${String(hpPercent(targetMonster.hp, targetMonster.maxHp))}%`,
+                    }}
+                  />
+                </div>
+                <div className="target-footer">
+                  <p className="target-hp" data-testid="target-hp">
+                    {targetMonster.hp}/{targetMonster.maxHp}
+                  </p>
+                  {attackingTargetIsShown(targetMonster.monsterId) ? (
+                    <button
+                      type="button"
+                      className="target-attack stopping"
+                      data-testid="target-stop"
+                      onClick={() => {
+                        stopAutoAttack();
+                      }}
+                    >
+                      停止攻击
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="target-attack"
+                      data-testid="target-attack"
+                      onClick={() => {
+                        attackEntity(targetMonster.monsterId);
+                      }}
+                    >
+                      攻击
+                    </button>
+                  )}
+                </div>
+                {attackingTargetIsShown(targetMonster.monsterId) && autoAttack !== null ? (
+                  <AutoAttackBar autoAttack={autoAttack} progress={autoProgress} />
+                ) : null}
+              </>
+            ) : targetPlayer !== undefined ? (
+              <>
+                <div className="target-heading">
+                  <strong data-testid="target-name">{targetPlayer.displayName}</strong>
+                  <span>Lv.{targetPlayer.level}</span>
+                  <span data-testid="target-kind" data-kind="player">
+                    玩家
+                  </span>
+                  <span data-testid="target-state">
+                    {!targetPlayer.alive ? '倒下' : targetPlayer.connected ? '在线' : '断线'}
+                  </span>
+                </div>
+                <div className="hp-track">
+                  <span
+                    className="hp-fill"
+                    style={{ width: `${String(hpPercent(targetPlayer.hp, targetPlayer.maxHp))}%` }}
+                  />
+                </div>
+                <div className="target-footer">
+                  <p className="target-hp" data-testid="target-hp">
+                    {targetPlayer.hp}/{targetPlayer.maxHp}
+                  </p>
+                  {attackingTargetIsShown(targetPlayer.playerId) ? (
+                    <button
+                      type="button"
+                      className="target-attack stopping"
+                      data-testid="target-stop"
+                      onClick={() => {
+                        stopAutoAttack();
+                      }}
+                    >
+                      停止攻击
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="target-attack"
+                      data-testid="target-attack"
+                      disabled={!pvpEnabled || !targetPlayer.alive}
+                      title={pvpEnabled ? '攻击玩家' : '安全区内禁止攻击玩家'}
+                      onClick={() => {
+                        attackEntity(targetPlayer.playerId);
+                      }}
+                    >
+                      {pvpEnabled ? '攻击玩家' : '安全区'}
+                    </button>
+                  )}
+                </div>
+                {attackingTargetIsShown(targetPlayer.playerId) && autoAttack !== null ? (
+                  <AutoAttackBar autoAttack={autoAttack} progress={autoProgress} />
+                ) : null}
+              </>
+            ) : null}
+          </section>
 
-        <section className="skill-bar" aria-label="技能">
+          <section className="monster-list-panel" aria-label="附近怪物">
+            <ul data-testid="monster-list">
+              {state.monsters.map((monster) => (
+                <li key={monster.monsterId}>
+                  <button
+                    type="button"
+                    className={`monster-row${monster.monsterId === state.selectedTargetId ? ' selected' : ''}`}
+                    data-testid="monster-row"
+                    data-monster-id={monster.monsterId}
+                    data-hp={monster.hp}
+                    data-max-hp={monster.maxHp}
+                    data-state={monster.state}
+                    onClick={() => {
+                      selectTarget(monster.monsterId);
+                      attack(monster.monsterId);
+                    }}
+                  >
+                    <span>{monster.displayName}</span>
+                    <span>
+                      {monster.hp}/{monster.maxHp}
+                    </span>
+                    <span>{MONSTER_STATE_LABELS[monster.state] ?? monster.state}</span>
+                  </button>
+                </li>
+              ))}
+              {state.monsters.length === 0 ? <li className="empty">附近没有怪物</li> : null}
+            </ul>
+          </section>
+
+          <section className="loot-panel" aria-label="地面掉落">
+            <div className="panel-heading">
+              <h2>附近掉落</h2>
+              <span data-testid="loot-count">{state.loot.length}</span>
+            </div>
+            <ul data-testid="loot-list">
+              {state.loot.map((drop) => (
+                <li key={drop.dropId}>
+                  <button
+                    type="button"
+                    className="loot-row"
+                    data-testid="loot-row"
+                    data-drop-id={drop.dropId}
+                    data-template-id={drop.templateId}
+                    data-owner-id={drop.ownerId}
+                    onClick={() => {
+                      pickup(drop.dropId);
+                    }}
+                  >
+                    <span>{drop.displayName}</span>
+                    <span>×{drop.quantity}</span>
+                    <span className="loot-action">拾取</span>
+                  </button>
+                </li>
+              ))}
+              {state.loot.length === 0 ? <li className="empty">击败怪物后会掉落物品</li> : null}
+            </ul>
+          </section>
+
+          <section className="combat-log-panel" aria-label="战斗日志">
+            <div className="panel-heading">
+              <h2>战斗记录</h2>
+            </div>
+            <ul data-testid="combat-log">
+              {state.combatLog.length === 0 ? <li className="empty">尚未发生战斗</li> : null}
+              {state.combatLog.map((entry) => (
+                <li key={entry.id} data-testid="combat-log-entry" data-tone={entry.tone}>
+                  {entry.text}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </aside>
+      </div>
+
+      <aside className="hud skill-dock" aria-label="技能">
+        <section className="skill-bar">
           <div className="panel-heading">
             <h2>技能</h2>
             <span>点击怪物攻击 · 快捷键</span>
@@ -706,20 +745,6 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             })}
             {skills.length === 0 ? <p className="target-empty">正在同步技能…</p> : null}
           </div>
-        </section>
-
-        <section className="combat-log-panel" aria-label="战斗日志">
-          <div className="panel-heading">
-            <h2>战斗记录</h2>
-          </div>
-          <ul data-testid="combat-log">
-            {state.combatLog.length === 0 ? <li className="empty">尚未发生战斗</li> : null}
-            {state.combatLog.map((entry) => (
-              <li key={entry.id} data-testid="combat-log-entry" data-tone={entry.tone}>
-                {entry.text}
-              </li>
-            ))}
-          </ul>
         </section>
       </aside>
 
