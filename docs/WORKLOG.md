@@ -2563,3 +2563,26 @@ pnpm verify:invariants docs/phase-reports/alpha-02/ruins/invariants.txt
 1. 重启开发栈后试玩废墟与 8–10 级掉落。
 2. 复跑 50×10min 容量回归（三张地图）。
 3. S4 剩余：图标、HUD 重排、正式美术；确认远端 CI。
+
+### 追加（2026-11-26 17:24–17:36）：开发栈重启、废墟实测与 50 人容量回归
+
+- 用户授权助手负责开发栈重启（"以后也由你重启"）。旧的 14:00 进程组 61918
+  已停止，17:24 以 `nohup pnpm dev` 重启到 S4-B 代码（进程组 1087，日志
+  `/tmp/wl-dev-stack.log`），四个服务 `/health/ready` 与页面均 200。
+- 重启后 Control API `POST /admin/content/validate`：`valid=true`、`issues=[]`
+  （旧进程的 3 条“无刷点使用该怪物”警告消失）。
+- 8584 真实 Chromium：注册→主城→西北角传送→残垣废墟（地图名、野外 PK、
+  附近怪物 3、Lv.8 骷髅武士）→返回主城；截图
+  `docs/phase-reports/alpha-02/ruins/dev-ruins.png`。
+- 14:17 遗留的过期 `slime_gel` 已由重启后的 Room 启动清理归零；复查 stale=0。
+- 50 人 × 10 分钟容量回归（17:25–17:35，内容 `2026.11.26.6`）：
+  50/50 加入、接受率 99.1%、780 击杀、0 玩家死亡、0 资产失败；
+  tick p50 1.1ms / p95 14.75ms / p99 21.01ms / max 23ms；资产事务 p95
+  47.37ms；wsOut 485MB / wsIn 8.8MB；RSS 峰值 329MB（中段后 250–330MB）。
+  证据 `docs/phase-reports/alpha-02/ruins/load-50p10a-10min-s4b.json`。
+  脚本门禁（p95<25、p99<40、接受率≥70%、0 资产失败）通过，但路线图 10ms
+  p95 目标仍超标；tick 路径本切片未改，下一步单独剖析。
+- 压测后资产不变量（`invariants-after-restart.txt`）全部通过；压测遗留的
+  未领取掉落将在下次进入该地图或重启 Game Server 时清理（既有机制）。
+- 观察到重启后的废墟 Room 有玩家实战（14 击杀、15/19 件拾取、2 次死亡、
+  0 资产失败），说明新区域在真实客户端可玩；未在对方游玩时重启服务。
