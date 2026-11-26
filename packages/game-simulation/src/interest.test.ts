@@ -16,6 +16,20 @@ describe('InterestManager', () => {
     expect([...interest.visibleIdsFor('carol')]).toEqual(['carol']);
   });
 
+  it('collects visible ids into a caller-owned set without clearing it', () => {
+    const interest = new InterestManager(config);
+    interest.add('alice', { x: 10, y: 10 });
+    interest.add('bob', { x: 11, y: 10 });
+
+    const seen = new Set(['carol']);
+    interest.collectVisibleIds('alice', seen);
+    expect([...seen].sort()).toEqual(['alice', 'bob', 'carol']);
+
+    const empty = new Set<string>();
+    interest.collectVisibleIds('missing', empty);
+    expect(empty.size).toBe(0);
+  });
+
   it('reports both neighbourhoods when an entity crosses a cell boundary', () => {
     const interest = new InterestManager(config);
     interest.add('alice', { x: 10, y: 10 });

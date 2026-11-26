@@ -81,11 +81,10 @@ export class InterestManager {
       return [];
     }
 
-    const affected = new Set<string>(this.neighbourhoodIds(key));
+    const affected = new Set<string>();
+    this.collectNeighbourhood(key, affected);
     if (previous !== undefined) {
-      for (const viewer of this.neighbourhoodIds(previous)) {
-        affected.add(viewer);
-      }
+      this.collectNeighbourhood(previous, affected);
       this.entitiesByCell.get(previous)?.delete(id);
     }
     this.cellOf.set(id, key);
@@ -100,11 +99,22 @@ export class InterestManager {
 
   /** Entities this entity should currently receive, including itself. */
   visibleIdsFor(id: string): Set<string> {
+    const visible = new Set<string>();
+    this.collectVisibleIds(id, visible);
+    return visible;
+  }
+
+  /**
+   * Fills `target` with the entities visible from `id` without allocating an
+   * intermediate array. Callers that refresh many viewers in one tick reuse a
+   * single Set instead of creating one per viewer.
+   */
+  collectVisibleIds(id: string, target: Set<string>): void {
     const key = this.cellOf.get(id);
     if (key === undefined) {
-      return new Set();
+      return;
     }
-    return new Set(this.neighbourhoodIds(key));
+    this.collectNeighbourhood(key, target);
   }
 
   cellOfEntity(id: string): string | undefined {
@@ -116,10 +126,15 @@ export class InterestManager {
   }
 
   private neighbourhoodIds(key: string): string[] {
+    const ids = new Set<string>();
+    this.collectNeighbourhood(key, ids);
+    return [...ids];
+  }
+
+  private collectNeighbourhood(key: string, target: Set<string>): void {
     const [cellXText, cellYText] = key.split(':');
     const cellX = Number(cellXText);
     const cellY = Number(cellYText);
-    const ids: string[] = [];
     for (let y = cellY - this.config.radiusCells; y <= cellY + this.config.radiusCells; y += 1) {
       for (let x = cellX - this.config.radiusCells; x <= cellX + this.config.radiusCells; x += 1) {
         const members = this.entitiesByCell.get(cellKey(x, y));
@@ -127,10 +142,9 @@ export class InterestManager {
           continue;
         }
         for (const id of members) {
-          ids.push(id);
+          target.add(id);
         }
       }
     }
-    return ids;
   }
 }

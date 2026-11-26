@@ -18,6 +18,9 @@ type StateEntity = PlayerStateInstance | MonsterStateInstance | LootStateInstanc
  * (TD-SRV-01).
  */
 export class StateViewPublisher {
+  private readonly requested = new Set<string>();
+  private readonly desired = new Set<string>();
+
   constructor(
     private readonly interest: InterestManager,
     private readonly state: WorldStateInstance,
@@ -25,13 +28,20 @@ export class StateViewPublisher {
   ) {}
 
   refresh(playerIds: readonly string[]): void {
-    for (const playerId of new Set(playerIds)) {
+    this.requested.clear();
+    for (const playerId of playerIds) {
+      this.requested.add(playerId);
+    }
+
+    for (const playerId of this.requested) {
       const session = this.registry.findByPlayerId(playerId);
       if (session === undefined) {
         continue;
       }
 
-      const desired = this.interest.visibleIdsFor(playerId);
+      const desired = this.desired;
+      desired.clear();
+      this.interest.collectVisibleIds(playerId, desired);
       for (const visibleId of desired) {
         if (session.visible.has(visibleId)) {
           continue;

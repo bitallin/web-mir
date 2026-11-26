@@ -110,6 +110,7 @@ import {
   tileOfUnits,
   WorldSimulation,
   type FixedStepRunner,
+  type SimulationPlayer,
 } from '@web-legend/game-simulation';
 import {
   acquireCharacterLease,
@@ -308,6 +309,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private readonly registry = new SessionRegistry();
   private guard!: CommandGuard;
   private views!: StateViewPublisher;
+  /** Viewers to recompute once at the end of the current simulation tick. */
+  private readonly pendingViewRefresh = new Set<string>();
   private readonly pendingAssets = new Map<string, LoadedAssets>();
 
   override onCreate(options: WorldMapRoomOptions): void {
@@ -994,20 +997,19 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const stepMs = 1_000 / this.state.tickHz;
     this.simulation.step(stepMs);
 
-    const positions = new Map(
-      this.simulation.listPlayers().map((player) => [player.id, { x: player.x, y: player.y }]),
-    );
+    const players = this.simulation.listPlayers();
+    const positions = new Map(players.map((player) => [player.id, { x: player.x, y: player.y }]));
     const combatEvents = this.combat.step(stepMs, positions);
     this.applyCombatEvents(combatEvents);
     this.updateAutoAttacks();
 
-    this.syncPlayers();
+    this.syncPlayers(players);
     this.syncMonsters();
     if (this.tick % LOOT_EXPIRY_CHECK_TICKS === 0) {
       this.expireLoot();
     }
 
-    for (const player of this.simulation.listPlayers()) {
+    for (const player of players) {
       const sessionId = this.registry.sessionIdForPlayer(player.id);
       const session = sessionId === undefined ? undefined : this.registry.get(sessionId);
       if (session === undefined || session.transferring) {
@@ -1025,14 +1027,32 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       }
     }
 
-    for (const player of this.simulation.listPlayers()) {
-      const affected = this.interest.move(player.id, tileOfUnits(player));
-      if (affected.length > 0) {
-        this.views.refresh(affected);
-      }
+    for (const player of players) {
+      this.queueViewRefresh(this.interest.move(player.id, tileOfUnits(player)));
     }
+    this.flushViewRefresh();
 
     this.metrics.recordTick(performance.now() - started);
+  }
+
+  /**
+   * AOI moves are queued per tick: many entities crossing cells at once would
+   * otherwise recompute the same viewer repeatedly. The flush still happens
+   * before the tick ends, so `session.visible` is current for the next tick.
+   */
+  private queueViewRefresh(affected: readonly string[]): void {
+    for (const id of affected) {
+      this.pendingViewRefresh.add(id);
+    }
+  }
+
+  private flushViewRefresh(): void {
+    if (this.pendingViewRefresh.size === 0) {
+      return;
+    }
+    const affected = [...this.pendingViewRefresh];
+    this.pendingViewRefresh.clear();
+    this.views.refresh(affected);
   }
 
   private applyCombatEvents(events: readonly CombatEventPayload[]): void {
@@ -1128,8 +1148,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
   }
 
-  private syncPlayers(): void {
-    for (const player of this.simulation.listPlayers()) {
+  private syncPlayers(players: readonly SimulationPlayer[]): void {
+    for (const player of players) {
       const statePlayer = this.state.players.get(player.id);
       const combatPlayer = this.combat.getPlayer(player.id);
       if (statePlayer === undefined || combatPlayer === undefined) {
@@ -1169,10 +1189,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       stateMonster.moving = monster.moving;
       stateMonster.state = MONSTER_STATE_CODES[monster.state];
 
-      const affected = this.interest.move(monster.id, tileOfUnits(monster));
-      if (affected.length > 0) {
-        this.views.refresh(affected);
-      }
+      this.queueViewRefresh(this.interest.move(monster.id, tileOfUnits(monster)));
     }
   }
 
