@@ -3585,6 +3585,8 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 LOAD_OUTPUT=... pnpm l
   （`alpha-03/dailies/load-50p2a-dailies.json`）。
 - 真实浏览器（宿主机 8584）：日常标签、`每日 21:00 重置`（浏览器 UTC）、
   接取后追踪器 `野地史莱姆 0/5`；截图 `alpha-03/dailies/dev-daily-*.png`。
+- 压测后开发库留下 208 条过期未领取掉落（既有地面掉落生命周期）；重启开发
+  栈触发启动清理后归零，最终资产不变量 7/7 为 0。
 
 ### 遇到的问题及解决方法
 

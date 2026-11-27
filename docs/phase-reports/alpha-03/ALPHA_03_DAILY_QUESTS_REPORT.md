@@ -102,6 +102,8 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 LOAD_OUTPUT=... pnpm l
   「每日 21:00 重置」（浏览器为 UTC；中国时区显示 05:00），接取后追踪器
   显示 `日常 每日：清理史莱姆 野地史莱姆 0/5`。截图
   `dailies/dev-daily-offer.png`、`dailies/dev-daily-tracker.png`。
+- 压测留下的 208 条过期未领取掉落在开发栈重启时由启动清理归零；最终资产
+  不变量 7/7 为 0。
 
 ## 4. 内容发布
 
