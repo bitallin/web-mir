@@ -3092,20 +3092,40 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         );
         return;
       }
-    } else if (record?.status === 'claimed') {
-      this.sendRejection(
-        client,
-        { commandId: command.commandId, clientSequence: command.clientSequence },
-        'QUEST_ALREADY_CLAIMED',
+    } else if (command.purpose === 'return') {
+      if (record?.status === 'claimed') {
+        this.sendRejection(
+          client,
+          { commandId: command.commandId, clientSequence: command.clientSequence },
+          'QUEST_ALREADY_CLAIMED',
+        );
+        return;
+      }
+      if (record?.status !== 'completed') {
+        this.sendRejection(
+          client,
+          { commandId: command.commandId, clientSequence: command.clientSequence },
+          'QUEST_NOT_COMPLETE',
+        );
+        return;
+      }
+    } else {
+      // Accept guidance only makes sense while the quest is still available.
+      const view = questViewFor(
+        quest,
+        record,
+        session.assetSnapshot.level,
+        this.questContext(),
+        session.questRecords,
       );
-      return;
-    } else if (record?.status !== 'completed') {
-      this.sendRejection(
-        client,
-        { commandId: command.commandId, clientSequence: command.clientSequence },
-        'QUEST_NOT_COMPLETE',
-      );
-      return;
+      if (view.status !== 'available') {
+        this.sendRejection(
+          client,
+          { commandId: command.commandId, clientSequence: command.clientSequence },
+          record?.status === 'claimed' ? 'QUEST_ALREADY_CLAIMED' : 'QUEST_UNAVAILABLE',
+        );
+        return;
+      }
     }
 
     this.stopQuestNavigation(session, { silent: true, clearPath: false });
@@ -3146,7 +3166,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private planQuestNavigation(
     session: SessionRecord,
     quest: QuestContent,
-    purpose: 'hunt' | 'return',
+    purpose: 'hunt' | 'return' | 'accept',
     navigation: QuestNavigationState,
   ): QuestNavigationReason | null {
     const player = this.combat.getPlayer(session.playerId);
@@ -3285,13 +3305,21 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         continue;
       }
 
-      if (record?.status === 'claimed') {
-        this.stopQuestNavigation(session, { silent: true, clearPath: true });
-        continue;
-      }
-      if (record?.status !== 'completed') {
-        this.stopQuestNavigation(session, { reason: 'quest_changed' });
-        continue;
+      if (navigation.purpose === 'accept') {
+        if (record !== undefined) {
+          // The client accepted at the giver; its hunt intent takes over.
+          this.stopQuestNavigation(session, { silent: true, clearPath: true });
+          continue;
+        }
+      } else {
+        if (record?.status === 'claimed') {
+          this.stopQuestNavigation(session, { silent: true, clearPath: true });
+          continue;
+        }
+        if (record?.status !== 'completed') {
+          this.stopQuestNavigation(session, { reason: 'quest_changed' });
+          continue;
+        }
       }
       const giver = this.map.runtime.manifest.npcPoints.find((npc) => npc.id === quest.giverNpcId);
       if (giver !== undefined && this.tileDistanceTo(player, giver.tile) <= QUEST_NPC_RANGE_TILES) {
@@ -3309,7 +3337,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       if (!this.questPathExhausted(session)) {
         continue;
       }
-      const failure = this.planQuestNavigation(session, quest, 'return', navigation);
+      const failure = this.planQuestNavigation(session, quest, navigation.purpose, navigation);
       if (failure !== null) {
         this.stopQuestNavigation(session, { reason: failure });
         continue;

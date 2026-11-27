@@ -6,7 +6,7 @@ import {
   type AssetTileset,
   type MapRuntimeManifest,
 } from '@web-legend/contracts';
-import { STARTER_TOWN_MAP, findMapManifest } from '@web-legend/contracts/maps';
+import { MAP_MANIFESTS, STARTER_TOWN_MAP, findMapManifest } from '@web-legend/contracts/maps';
 
 import rawAssetManifest from '../../../../content/assets/manifest.json';
 
@@ -96,6 +96,27 @@ export function mapBundleFor(mapId: string): MapBundle {
 
 export function mapNameFor(mapId: string): string {
   return findMapManifest(mapId)?.name ?? STARTER_TOWN_MAP.name;
+}
+
+export type NpcLocation = {
+  mapId: string;
+  mapName: string;
+  npcName: string;
+};
+
+/**
+ * Resolves where a quest giver lives. The world map is small enough that the
+ * compiled manifests are already in the bundle; a quest from another map can
+ * therefore still show its destination without a server round trip.
+ */
+export function locateNpc(npcId: string): NpcLocation | null {
+  for (const map of MAP_MANIFESTS) {
+    const npc = map.npcPoints.find((point) => point.id === npcId);
+    if (npc !== undefined) {
+      return { mapId: map.mapId, mapName: map.name, npcName: npc.name };
+    }
+  }
+  return null;
 }
 
 export { assetManifest };

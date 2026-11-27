@@ -30,7 +30,7 @@ export type AutoAttackState = {
  */
 export type QuestNavigationState = {
   questId: string;
-  purpose: 'hunt' | 'return';
+  purpose: 'hunt' | 'return' | 'accept';
   status: 'moving' | 'waiting' | 'arrived';
   /** Combat-world time (ms) before which the next target search is skipped. */
   nextSearchAt: number;

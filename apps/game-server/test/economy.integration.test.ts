@@ -797,6 +797,36 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     );
   });
 
+  it('guides an available quest back to its giver from another map', async () => {
+    const actor = await wildsActor();
+    const room = await createWorld(actor.ticket, STARTER_WILDS_MAP_ID);
+    const navigations: QuestNavigation[] = [];
+    room.onMessage('quest.navigation', (payload: unknown) => {
+      navigations.push(questNavigationSchema.parse(payload));
+    });
+    await waitUntil(
+      () => room.state.players.get(actor.character.id) !== undefined,
+      5_000,
+      'player joined',
+    );
+
+    room.send('quest.navigate', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      questId: 'quest_slime_cleanup',
+      purpose: 'accept',
+    });
+    await waitUntil(() => navigations.length > 0, 5_000, 'accept navigation started');
+    // The giver stands in town; from the wilds the first hop is that portal.
+    expect(navigations[0]).toMatchObject({
+      questId: 'quest_slime_cleanup',
+      purpose: 'accept',
+      status: 'moving',
+      mapId: STARTER_TOWN_MAP_ID,
+    });
+  });
+
   it('rejects quest commands away from the giver', async () => {
     const actor = await townActor();
     const room = await createWorld(actor.ticket, STARTER_TOWN_MAP_ID);

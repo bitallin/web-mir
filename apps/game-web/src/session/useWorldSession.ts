@@ -353,10 +353,11 @@ class WorldSession {
   private shopRequestSequence = 0;
   private questRequestSequence = 0;
   /** Client-side intent re-issued after a map transfer or a reconnect. */
-  private autoQuest: { questId: string; purpose: 'hunt' | 'return' } | null = null;
+  private autoQuest: { questId: string; purpose: 'hunt' | 'return' | 'accept' } | null = null;
   private autoQuestSentMapId: string | null = null;
   private autoQuestPending: string | null = null;
   private autoClaimSent = false;
+  private autoAcceptSent = false;
   private pendingNavCommandId: string | null = null;
   private quests: QuestView[] = [];
   private party: PartyView | null = null;
@@ -486,6 +487,11 @@ class WorldSession {
             // automation and let the player claim from the panel.
             this.autoClaimSent = false;
             this.cancelAutoQuestLocally();
+          } else if (this.autoAcceptSent) {
+            // The giver rejected the arrival hand-off; stop guiding and let
+            // the player retry from the quest panel.
+            this.autoAcceptSent = false;
+            this.stopQuestNavigation();
           }
           this.pushNotice('warning', rejected.message);
         },
@@ -644,6 +650,16 @@ class WorldSession {
           }
         },
         onQuestNavigation: (navigation) => {
+          if (navigation.status === 'arrived' && navigation.purpose === 'accept') {
+            const quest = this.quests.find((entry) => entry.questId === navigation.questId);
+            if (quest !== undefined && quest.status === 'available' && !this.autoAcceptSent) {
+              this.autoAcceptSent = true;
+              this.acceptQuest(navigation.questId, true);
+              this.pushNotice('info', `已到达${quest.giverNpcName}，正在接取…`);
+            }
+            this.updateState((prev) => ({ ...prev, questNavigation: navigation }));
+            return;
+          }
           if (navigation.status === 'arrived' && navigation.purpose === 'return') {
             const quest = this.quests.find((entry) => entry.questId === navigation.questId);
             if (quest !== undefined && quest.status === 'completed' && !this.autoClaimSent) {
@@ -660,6 +676,7 @@ class WorldSession {
             this.autoQuestSentMapId = null;
             this.pendingNavCommandId = null;
             this.autoClaimSent = false;
+            this.autoAcceptSent = false;
             this.updateState((prev) => ({ ...prev, questNavigation: null }));
             if (hadIntent && navigation.reason !== undefined && navigation.reason !== 'manual') {
               this.pushNotice('warning', questNavigationStopMessage(navigation.reason));
@@ -670,6 +687,7 @@ class WorldSession {
             this.autoQuest = null;
             this.autoQuestSentMapId = null;
             this.pendingNavCommandId = null;
+            this.autoAcceptSent = false;
             this.updateState((prev) => ({ ...prev, questNavigation: null }));
             return;
           }
@@ -967,6 +985,7 @@ class WorldSession {
     this.autoQuest = { questId, purpose };
     this.autoQuestSentMapId = this.mapId;
     this.autoClaimSent = false;
+    this.autoAcceptSent = false;
     this.pendingNavCommandId = commandId;
     this.updateState((previous) => ({
       ...previous,
@@ -993,6 +1012,7 @@ class WorldSession {
     this.autoQuestSentMapId = null;
     this.autoQuestPending = null;
     this.autoClaimSent = false;
+    this.autoAcceptSent = false;
     this.pendingNavCommandId = null;
     if (wasActive) {
       this.updateState((previous) =>
@@ -1257,6 +1277,7 @@ class WorldSession {
     // The guidance intent survives the transfer; the new room gets it again.
     this.autoQuestSentMapId = null;
     this.autoClaimSent = false;
+    this.autoAcceptSent = false;
     this.pendingNavCommandId = null;
     if (this.partyInviteTimer !== null) {
       window.clearTimeout(this.partyInviteTimer);

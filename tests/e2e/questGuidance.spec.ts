@@ -118,8 +118,9 @@ test('one-click quest guidance hunts, returns and delivers', async ({ browser })
   const tracker = page.locator(`[data-testid="quest-tracker-row"][data-quest-id="${QUEST_ID}"]`);
   await expect(tracker).toHaveAttribute('data-status', 'completed', { timeout: 180_000 });
   await expect(tracker).toHaveAttribute('data-progress', '5');
-  // The giver name comes from the whole world, not only the current map.
-  await expect(tracker).toContainText('回到守卫');
+  // The giver name and its map come from the whole world, not only the current
+  // map; the wilds must not show the raw `town_guard` id.
+  await expect(tracker).toContainText('晨曦主城·守卫');
   await page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-nav-complete.png') });
 
   // One click back: the server routes to the wilds portal, then to the guard.
@@ -146,4 +147,58 @@ test('one-click quest guidance hunts, returns and delivers', async ({ browser })
   await expect(page.getByTestId('quest-nav-banner')).toHaveCount(0);
   await expect(tracker).toHaveCount(0);
   await page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-nav-claimed.png') });
+});
+
+test('the global quest panel accepts a town quest from the wilds', async ({ browser }) => {
+  mkdirSync(ARTIFACT_DIR, { recursive: true });
+  const page = await registerWorld(browser);
+
+  // Stand in the wilds with no quest accepted yet: the town chain quest must
+  // still be listed, with its location and a one-click accept.
+  await moveTo(page, 38, 15);
+  await expect(page.getByTestId('map-name')).toHaveAttribute('data-map-id', 'starter_wilds', {
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId('connection-status')).toHaveAttribute('data-status', 'connected', {
+    timeout: 20_000,
+  });
+
+  await page.getByTestId('quest-toggle').click();
+  await expect(page.getByTestId('quest-panel')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('quest-panel')).toContainText('任务 · 全部地图');
+  const chainRow = page.locator('[data-testid="quest-row"][data-quest-id="quest_slime_cleanup"]');
+  await expect(chainRow).toHaveAttribute('data-status', 'available');
+  await expect(chainRow.getByTestId('quest-location')).toContainText('晨曦主城');
+  await expect(chainRow.getByTestId('quest-location')).toHaveAttribute(
+    'data-giver-map',
+    'starter_town',
+  );
+  await page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-global-panel.png') });
+
+  await chainRow.getByTestId('quest-accept-go').click();
+  const banner = page.getByTestId('quest-nav-banner');
+  await expect(banner).toHaveAttribute('data-purpose', 'accept', { timeout: 10_000 });
+  await expect(banner).toContainText('自动前往接取');
+
+  // The server walks back to town; arrival auto-sends the existing accept.
+  await expect(page.getByTestId('map-name')).toHaveAttribute('data-map-id', 'starter_town', {
+    timeout: 60_000,
+  });
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          (questId) =>
+            window.__webLegendDebug?.questState().find((quest) => quest.questId === questId)
+              ?.status ?? null,
+          'quest_slime_cleanup',
+        ),
+      { timeout: 30_000 },
+    )
+    .toBe('active');
+  // Acceptance then starts the hunt automatically; stop it before it leaves.
+  await expect(banner).toHaveAttribute('data-purpose', 'hunt', { timeout: 10_000 });
+  await page.getByTestId('quest-nav-stop').click();
+  await expect(page.getByTestId('quest-nav-banner')).toHaveCount(0);
+  await page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-global-accepted.png') });
 });

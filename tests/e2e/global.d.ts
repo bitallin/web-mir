@@ -100,7 +100,10 @@ declare global {
         status: 'locked' | 'available' | 'active' | 'completed' | 'claimed';
         progress: number;
       }[];
-      questNavigationState: () => { questId: string; purpose: 'hunt' | 'return' } | null;
+      questNavigationState: () => {
+        questId: string;
+        purpose: 'hunt' | 'return' | 'accept';
+      } | null;
       lastMoveIntentAt?: number;
       lastAckAt?: number;
       lastSnapshotAt?: number;

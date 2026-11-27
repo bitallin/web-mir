@@ -43,8 +43,8 @@ describe('quest navigation', () => {
     purpose: 'hunt',
   };
 
-  it('accepts hunt, return and stop intents', () => {
-    for (const purpose of ['hunt', 'return', 'stop'] as const) {
+  it('accepts hunt, return, accept and stop intents', () => {
+    for (const purpose of ['hunt', 'return', 'accept', 'stop'] as const) {
       expect(questNavigateSchema.safeParse({ ...command, purpose }).success).toBe(true);
     }
   });
@@ -70,6 +70,14 @@ describe('quest navigation', () => {
         purpose: 'return',
         status: 'stopped',
         reason: 'player_dead',
+        serverTime: 1,
+      }).success,
+    ).toBe(true);
+    expect(
+      questNavigationSchema.safeParse({
+        questId: command.questId,
+        purpose: 'accept',
+        status: 'arrived',
         serverTime: 1,
       }).success,
     ).toBe(true);

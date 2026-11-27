@@ -120,7 +120,7 @@ export type QuestClaim = z.infer<typeof questClaimSchema>;
  * One-click quest guidance (ADR-039). The client only states the intent; the
  * server owns the route, the target choice and the actual movement.
  */
-export const QUEST_NAVIGATION_PURPOSES = ['hunt', 'return', 'stop'] as const;
+export const QUEST_NAVIGATION_PURPOSES = ['hunt', 'return', 'accept', 'stop'] as const;
 export const questNavigationPurposeSchema = z.enum(QUEST_NAVIGATION_PURPOSES);
 export type QuestNavigationPurpose = z.infer<typeof questNavigationPurposeSchema>;
 
@@ -163,7 +163,7 @@ export type QuestNavigationReason = z.infer<typeof questNavigationReasonSchema>;
 export const questNavigationSchema = z
   .object({
     questId: contentIdSchema,
-    purpose: z.enum(['hunt', 'return']),
+    purpose: z.enum(['hunt', 'return', 'accept']),
     status: questNavigationStatusSchema,
     mapId: mapIdSchema.optional(),
     reason: questNavigationReasonSchema.optional(),

@@ -56,7 +56,10 @@ declare global {
       claimQuest: (questId: string) => boolean;
       navigateQuest: (questId: string, purpose: QuestNavigationPurpose) => boolean;
       questState: () => QuestView[];
-      questNavigationState: () => { questId: string; purpose: 'hunt' | 'return' } | null;
+      questNavigationState: () => {
+        questId: string;
+        purpose: 'hunt' | 'return' | 'accept';
+      } | null;
       inviteToParty: (playerId: string) => boolean;
       acceptPartyInvite: () => boolean;
       declinePartyInvite: () => boolean;
