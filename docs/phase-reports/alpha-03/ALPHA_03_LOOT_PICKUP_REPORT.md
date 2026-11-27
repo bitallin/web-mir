@@ -25,7 +25,8 @@
    与掉落仍是同一事务与幂等引用。
 3. **自动拾取**：Room 每 4 tick 检查归属窗口内的掉落；归属者存活、在线、
    未过图且距离小于 `rules.loot.autoPickupRangeTiles`（默认 3）时，提交一次
-   既有 `AssetService.pickup`；背包已满退避 5 秒并提示一次。
+   既有 `AssetService.pickup`；背包已满退避 5 秒并提示一次。自动拾取绕过了
+   资产命令，因此成功后额外向归属者重发任务快照，收集任务进度随自动入包刷新。
 4. **争夺掉落**：内容 `lootEntry.contested` 标记；创建时无归属、
    `pickup_locked_until = now + rules.loot.contestedDelayMs`（默认 60 秒），
    过期时间为锁定 + 120 秒；锁定期间拾取返回 `DROP_LOCKED` 与剩余毫秒，
@@ -59,7 +60,7 @@
 | 格式        | `pnpm format:check`                  | 通过                                    |
 | Lint        | `pnpm lint`                          | 通过（0 error / 0 warning）             |
 | 类型        | `pnpm typecheck`                     | 通过（根 + 15 个 workspace）            |
-| 单元/集成   | `pnpm test`                          | 82 文件、**575 测试**通过               |
+| 单元/集成   | `pnpm test`                          | 82 文件、**576 测试**通过               |
 | 构建        | `pnpm build`                         | 4 个应用成功                            |
 | 浏览器 E2E  | `PLAYWRIGHT_WORKERS=1 pnpm test:e2e` | **47/47 通过**（10.6 分钟，串行全量）   |
 | 容量 sanity | 50 人 × 2 分钟                       | 50/50、接受率 98.9%、175 击杀、0 失败   |

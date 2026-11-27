@@ -392,6 +392,39 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     expect(bag.some((item) => item.templateId === 'slime_gel')).toBe(true);
   });
 
+  it('refreshes collect quest views after an auto-pickup', async () => {
+    const actor = await wildsActor();
+    await insertCharacterQuest(db, {
+      characterId: actor.character.id,
+      questId: 'quest_supply_delivery',
+      periodKey: '',
+      now: new Date(),
+    });
+    const room = await createWorld(actor.ticket);
+    const snapshots: QuestSnapshot[] = [];
+    room.onMessage('quest.snapshot', (payload: unknown) => {
+      snapshots.push(questSnapshotSchema.parse(payload));
+    });
+    await waitUntil(() => snapshots.length > 0, 5_000, 'initial quest snapshot');
+    await waitUntil(() => room.state.monsters.get(SLIME) !== undefined, 5_000, 'slime visible');
+    await attackUntilDeath(room, 0);
+    await waitUntil(
+      () =>
+        snapshots.some(
+          (snapshot) =>
+            snapshot.quests.find((quest) => quest.questId === 'quest_supply_delivery')?.status ===
+            'completed',
+        ),
+      5_000,
+      'collect view after auto-pickup',
+    );
+    const view = snapshots
+      .at(-1)
+      ?.quests.find((quest) => quest.questId === 'quest_supply_delivery');
+    expect(view?.progress).toBe(1);
+    expect(view?.objective).toMatchObject({ kind: 'collect', templateId: 'small_hp_potion' });
+  });
+
   it('equips a starter weapon, raises attack and persists the slot', async () => {
     const actor = await wildsActor();
     const [sword] = await db

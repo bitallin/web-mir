@@ -2424,6 +2424,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         if (current !== undefined) {
           current.assetSnapshot = outcome.snapshot;
           this.sendAssetSnapshot(current.client, current);
+          // Quest progress for collect objectives is derived from the bag; an
+          // auto-pick bypasses asset commands, so refresh the views here too.
+          if (this.hasActiveCollectQuest(current)) {
+            this.sendQuestSnapshot(current.client, current);
+          }
         }
       })
       .catch((error: unknown) => {
