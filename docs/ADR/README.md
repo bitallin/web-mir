@@ -42,5 +42,6 @@
 | [ADR-035](ADR-035-party-membership-and-shared-kill-experience.md)              | 队伍成员、共享击杀经验与掉落归属         | Accepted              |
 | [ADR-036](ADR-036-process-wide-party-service.md)                               | 队伍提升为进程级服务，过图保留           | Accepted              |
 | [ADR-037](ADR-037-world-boss-and-enrage-phase.md)                              | 世界首领、二阶段狂暴与地图公告           | Accepted              |
+| [ADR-038](ADR-038-daily-repeatable-quests.md)                                  | 内容驱动的每日任务与周期键               | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

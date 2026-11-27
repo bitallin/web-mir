@@ -3518,3 +3518,101 @@ pnpm test:e2e
 1. 8584 真实试玩：点怪追击、连续点击地面、斜向目标，确认卡顿消失。
 2. 根据试玩决定是否评估八方向移动（需 ADR），或继续 S3 任务链扩展。
 3. 若继续移动主题，补 50 人容量回归（自动攻击重算次数下降，预期不退化）。
+
+## 2026-11-27 Alpha 0.3 S3-A：每日任务与留存循环
+
+### 目标
+
+回答“玩家为什么每天回来”：在一次性任务链之外交付可重复的每日任务。
+机制先行——内容化重置时间、周期键持久化、在线跨日刷新；日常任务与一次性
+任务共用同一套接取/交付事务与客户端面板。
+
+### 实际改动
+
+1. **契约**
+   - `QuestContent.repeat?: 'daily'`（`QUEST_REPEAT_KINDS` 封闭白名单）；
+     `QuestView.repeat` / `nextResetAt`（epoch 毫秒）。
+   - `rules.dailyReset?: { hour, utcOffsetMinutes }`；旧 Release 不含字段时
+     行为不变。
+2. **内容**
+   - 基线 `rules.dailyReset = { hour: 5, utcOffsetMinutes: 480 }`。
+   - `quest_daily_slime_cleanup`（Lv.1，5 史莱姆）、
+     `quest_daily_wolf_hunt`（Lv.3，6 森林狼）。
+   - 校验：日常必须有重置规则、不能带前置、不能作为一次性任务的前置。
+3. **领域**
+   - `dailyPeriodKey` / `nextDailyResetAt` 纯函数（固定偏移 + 重置小时）。
+   - 视图把非当前周期的日常记录视为不存在；击杀推进拒绝旧周期记录。
+4. **持久化（迁移 0009）**
+   - `character_quests.period_key` 默认 `''`；唯一索引改为
+     `(character_id, quest_id, period_key)`；旧数据自动为空周期。
+   - 仓储新增 `listCharacterQuestsForPeriod`，所有按任务查询/更新带周期键。
+5. **应用事务**
+   - 接取/交付按注入时钟计算周期键；同日重复接取 `QUEST_UNAVAILABLE`、
+     重复交付 `QUEST_ALREADY_CLAIMED`；交付奖励仍与任务状态同事务。
+   - 击杀奖励只推进一次性与当前周期日常。
+6. **服务端与客户端**
+   - Room 每 30 秒检查周期键；跨重置点重发任务快照并广播提醒；创建 Room
+     时初始化周期键，避免首个扫描周期漏发。
+   - 任务面板/追踪器显示「日常」、重置时刻与「今日已完成」。
+7. **测试**
+   - 契约 3、内容 3、领域 3、应用集成 1（同日重复、跨日重接、旧周期隔离、
+     奖励唯一）、服务端快照断言；`quests.spec.ts` 扩展为接取日常→5 次击杀→
+     交付→「今日已完成」。全量 **530 测试**、**43 E2E**。
+8. **内容发布**
+   - 保存 rules/quests 草稿，校验 0 issue，发布并激活 `2026.11.27.3`
+     （checksum `1cd1199a…`，新增 3 项）；开发栈重启到本切片代码。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm verify:invariants
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 LOAD_OUTPUT=... pnpm load:scenario
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：78 文件、**530 测试**通过（新增 11 条）。
+- 构建：4 个应用成功。
+- 全量 E2E：**43/43 通过**（5.0 分钟）。
+- 资产不变量：7 项全部 0 违例。
+- 50 人 × 2 分钟：50/50、接受率 98.9%、164 击杀、0 资产失败、tick p95
+  5.11ms / p99 6.14ms、资产事务 p95 52.74ms
+  （`alpha-03/dailies/load-50p2a-dailies.json`）。
+- 真实浏览器（宿主机 8584）：日常标签、`每日 21:00 重置`（浏览器 UTC）、
+  接取后追踪器 `野地史莱姆 0/5`；截图 `alpha-03/dailies/dev-daily-*.png`。
+
+### 遇到的问题及解决方法
+
+1. **旧 Release 测试被新跨 section 约束打断**：两个无 rules 的夹具仍带日常
+   任务；改为同时移除日常（旧 Release 本来没有日常），保留一次性任务无
+   rules 仍有效的语义。
+2. **死亡代价测试重写 rules 丢字段**：改为展开旧 rules 再覆盖
+   `deathPenalty`。
+3. **Control API 旧契约**：首次保存草稿 422（未识别 `dailyReset`/`repeat`）；
+   重启开发栈后通过。
+4. **旧 Room 固定旧内容**：激活后当前 Room 仍无日常；重启 Game Server 让新
+   Room 使用 `2026.11.27.3`（既有内容版本模型）。
+5. **全量 E2E 重写历史截图**：只提交源码、迁移、测试与新增日常证据；无关
+   截图产物保持未提交。
+
+### 尚未解决
+
+- 日常只有击杀目标；主线仍为 3 步。
+- 在线重置最多延迟 30 秒；没有倒计时；每日历史行无清理（TD-DATA-12）。
+- 8584 跨日重接与完整人工试玩、远端 CI 仍待确认。
+
+### 提交
+
+- `8cfc209` `feat(alpha-03): add daily quests with content-driven resets`
+  （24 个文件：契约/内容/领域/应用/迁移/服务端/客户端、11 条测试、E2E）。
+
+### 下一步计划
+
+1. 8584 试玩两个日常与重置后的重新接取，观察追踪器与奖励。
+2. S3-B：10 步主线任务链优先；副本实例先写 ADR。
+3. 确认远端 CI；正式美术（TD-CLI-13）。
