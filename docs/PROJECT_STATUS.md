@@ -1528,6 +1528,8 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`feat(alpha-03): add parties and shared kill experience`
 - Alpha 0.3 S1 补充：队伍共享掉落归属：`ee2bac0`
   主题：`feat(alpha-03): share kill loot with party members`
+- Alpha 0.3 S1 补充：过图保留队伍：`76768f4`
+  主题：`feat(alpha-03): keep parties across map transfers`
 
 ## 11. 当前环境事实
 

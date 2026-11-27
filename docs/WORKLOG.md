@@ -3309,7 +3309,8 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 LOAD_OUTPUT=... pnpm l
 
 ### 提交
 
-- 待填写（`feat(alpha-03): keep parties across map transfers`）。
+- `76768f4` `feat(alpha-03): keep parties across map transfers`
+  （20 个文件：进程级服务、Room 接线、5 条测试、E2E、ADR-036/报告/证据）。
 
 ### 下一步计划
 
