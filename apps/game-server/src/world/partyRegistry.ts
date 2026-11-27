@@ -62,6 +62,11 @@ export class PartyRegistry {
     return this.options.maxMembers;
   }
 
+  /** Applied once the server has loaded the active content release. */
+  setMaxMembers(maxMembers: number): void {
+    this.options.maxMembers = maxMembers;
+  }
+
   partyOf(playerId: string): PartyState | undefined {
     const partyId = this.partyIdByMember.get(playerId);
     return partyId === undefined ? undefined : this.parties.get(partyId);

@@ -26,6 +26,7 @@ import { DiagnosticsRoom } from './rooms/diagnosticsRoom';
 import { WorldMapRoom } from './rooms/worldMapRoom';
 import { ContentStore, type ContentProvider } from './world/contentStore';
 import { createMapInstances } from './world/mapRegistry';
+import { PartyService } from './world/partyService';
 import { SERVICE_VERSION } from './version';
 
 export type WorldRoomTuning = {
@@ -112,6 +113,9 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
       refreshMs: options.contentRefreshMs ?? 5_000,
     });
   const adminHub = options.adminHub ?? new AdminCommandHub(logger);
+  // Parties span map rooms, so they live on the process rather than in a room
+  // (ADR-036). The content-driven size limit is applied once the store starts.
+  const partyService = new PartyService();
 
   const server = new Server({
     // index.ts owns SIGTERM/SIGINT so it can drain rooms, stop metrics and
@@ -245,6 +249,7 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
       mapInstance,
       contentStore,
       adminHub,
+      partyService,
       realmCode: env.GAME_SERVER_REALM,
       ...options.world,
     });
@@ -267,6 +272,9 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
         runtimeMetrics.stop();
         throw error;
       }
+      partyService.setMaxMembers(
+        contentStore.snapshot().bundle.rules?.party?.maxMembers ?? partyService.maxMembers,
+      );
       // Rooms only exist while a map has players, so an idle map would never
       // run its maintenance timer. Clear expired drops once at process start
       // (bounded batches, outside any tick) before accepting traffic.

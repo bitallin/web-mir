@@ -41,7 +41,6 @@ import {
   partyAcceptCommandSchema,
   partyDeclineCommandSchema,
   partyInviteCommandSchema,
-  partyInviteViewSchema,
   partyLeaveCommandSchema,
   partySnapshotSchema,
   playerRespawnPointOf,
@@ -159,8 +158,9 @@ import { createCombatRng } from '../world/combatRng';
 import { BASE_ROOM_CONTENT, type ContentProvider, type RoomContent } from '../world/contentStore';
 import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket } from '../world/rateLimiter';
+import { PartyService } from '../world/partyService';
+import { type PartyState } from '../world/partyRegistry';
 import { CommandGuard } from './commandGuard';
-import { PartyRegistry, type PartyState } from './partyRegistry';
 import { SessionRegistry, type SessionRecord } from './sessionRegistry';
 import { StateViewPublisher } from './stateViewPublisher';
 
@@ -173,6 +173,8 @@ export type WorldMapRoomOptions = {
   /** Fixed content snapshot source; omitted in unit fixtures means baseline. */
   contentStore?: ContentProvider;
   adminHub?: AdminCommandHub;
+  /** Process-wide party table shared by every map room (ADR-036). */
+  partyService?: PartyService;
   /** Realm this process serves; characters from other realms are rejected. */
   realmCode?: string;
   /** Overrides the compiled map's monster spawns; tests use an empty list. */
@@ -337,7 +339,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private readonly registry = new SessionRegistry();
   private guard!: CommandGuard;
   private views!: StateViewPublisher;
-  private parties!: PartyRegistry;
+  private parties!: PartyService;
   /** Current content snapshot's party rule; defaults keep the feature usable. */
   private partyRule: { maxMembers: number; assistSharePermille: number; assistRangeTiles: number } =
     { maxMembers: 4, assistSharePermille: 0, assistRangeTiles: 12 };
@@ -369,7 +371,21 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       assistSharePermille: 0,
       assistRangeTiles: 12,
     };
-    this.parties = new PartyRegistry({ maxMembers: this.partyRule.maxMembers });
+    this.parties =
+      options.partyService ?? new PartyService({ maxMembers: this.partyRule.maxMembers });
+    this.parties.registerRoom(this.roomId, {
+      sendInvite: (playerId, invite) => {
+        this.registry.findByPlayerId(playerId)?.client.send(SERVER_MESSAGES.partyInvite, invite);
+      },
+      refresh: (playerIds) => {
+        for (const playerId of playerIds) {
+          const session = this.registry.findByPlayerId(playerId);
+          if (session !== undefined) {
+            this.sendPartySnapshot(session.client, session);
+          }
+        }
+      },
+    });
 
     let respawnTile: TilePoint;
     try {
@@ -531,6 +547,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }, LOOT_DB_PURGE_INTERVAL_MS);
     this.clock.setInterval(() => {
       this.parties.expireInvites();
+      this.refreshPartyPresence();
     }, PARTY_INVITE_SWEEP_INTERVAL_MS);
 
     options.adminHub?.register({
@@ -709,6 +726,17 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     };
     this.registry.add(session);
     client.view = view;
+    this.parties.setPresence({
+      playerId: auth.characterId,
+      displayName: auth.displayName,
+      classId: combatPlayer.classId,
+      level: combatPlayer.level,
+      hp: combatPlayer.hp,
+      maxHp: combatPlayer.maxHp,
+      alive: combatPlayer.alive,
+      connected: true,
+      roomId: this.roomId,
+    });
 
     const affected = this.interest.add(auth.characterId, spawn.tile);
     this.views.refresh(affected);
@@ -723,6 +751,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.sendShopCatalog(session.client, session);
         this.sendQuestSnapshot(session.client, session);
         this.sendPartySnapshot(session.client, session);
+        // An invitation sent while this character was between maps is still
+        // open; deliver it once the new room has registered its listeners.
+        const pendingInvite = this.parties.pendingInviteFor(auth.characterId);
+        if (pendingInvite !== undefined) {
+          this.parties.notifyInvite(pendingInvite);
+        }
         this.broadcastSystemNotice(
           'info',
           `${auth.displayName} 来到了 ${this.map.runtime.manifest.name}`,
@@ -887,6 +921,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
   override async onDispose(): Promise<void> {
     this.options.adminHub?.unregister(this.roomId);
+    this.parties.unregisterRoom(this.roomId);
     const sessionIds = [...this.registry.sessionIds()];
     await Promise.allSettled(sessionIds.map(async (sessionId) => this.removeSession(sessionId)));
     this.options.metrics.unregister(this.roomId);
@@ -2972,21 +3007,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         if (result.kind === 'rejected') {
           return result.reason === 'party_full' ? 'PARTY_FULL' : 'PARTY_TARGET_BUSY';
         }
-        const target = this.registry.findByPlayerId(command.targetPlayerId);
-        if (target === undefined) {
-          return 'PARTY_TARGET_UNAVAILABLE';
-        }
-        target.client.send(
-          SERVER_MESSAGES.partyInvite,
-          partyInviteViewSchema.parse({
-            inviteId: result.invite.inviteId,
-            fromPlayerId: session.playerId,
-            fromDisplayName: session.displayName,
-            expiresAt: result.invite.expiresAt,
-            serverTime: Date.now(),
-          }),
-        );
-        this.sendSystemNotice(session.client, 'info', `已邀请 ${target.displayName} 组队`);
+        // Delivery is routed by the service: the invited player may be hosted
+        // by another map room than the inviter.
+        this.parties.notifyInvite(result.invite);
+        const targetName = this.parties.presenceOf(command.targetPlayerId)?.displayName ?? '玩家';
+        this.sendSystemNotice(session.client, 'info', `已邀请 ${targetName} 组队`);
         return null;
       },
     );
@@ -3012,7 +3037,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return 'PARTY_TARGET_BUSY';
     }
     const selfParty = this.parties.partyOf(session.playerId);
-    if (selfParty !== undefined && selfParty.memberIds.length >= this.partyRule.maxMembers) {
+    if (selfParty !== undefined && selfParty.memberIds.length >= this.parties.maxMembers) {
       return 'PARTY_FULL';
     }
     const distance = Math.hypot(self.x - other.x, self.y - other.y) / TILE_UNITS;
@@ -3063,7 +3088,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
               return 'PARTY_INVITE_EXPIRED';
           }
         }
-        this.broadcastPartySnapshots(result.party.memberIds);
+        // The service refreshes every member's room, including across maps.
         for (const memberId of result.party.memberIds) {
           if (memberId === session.playerId) {
             continue;
@@ -3090,10 +3115,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       command,
       (session) => (this.parties.isMember(session.playerId) ? null : 'PARTY_NOT_IN_PARTY'),
       (session) => {
-        const before = this.parties.partyOf(session.playerId);
         const result = this.parties.leave(session.playerId);
-        const affected = [session.playerId, ...(before?.memberIds ?? [])];
-        this.broadcastPartySnapshots(affected);
+        // The service drops the leaver's presence, so their own room sends the
+        // empty snapshot explicitly; remaining members are refreshed by it.
+        this.sendPartySnapshot(client, session);
         if (result.party !== null) {
           for (const memberId of result.party.memberIds) {
             const member = this.registry.findByPlayerId(memberId);
@@ -3150,10 +3175,30 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.metrics.recordAcceptedCommand();
   }
 
-  private broadcastPartySnapshots(playerIds: Iterable<string>): void {
-    for (const playerId of new Set(playerIds)) {
-      const session = this.registry.findByPlayerId(playerId);
-      if (session !== undefined) {
+  /**
+   * The roster is built from the process-wide presence table, so it includes
+   * members hosted by other maps (ADR-036). Presence is refreshed once a second
+   * from each host room and immediately on join/leave.
+   */
+  private refreshPartyPresence(): void {
+    for (const session of this.registry.all()) {
+      const player = this.combat.getPlayer(session.playerId);
+      const statePlayer = this.state.players.get(session.playerId);
+      if (player === undefined || statePlayer === undefined) {
+        continue;
+      }
+      this.parties.setPresence({
+        playerId: session.playerId,
+        displayName: session.displayName,
+        classId: player.classId,
+        level: player.level,
+        hp: player.hp,
+        maxHp: player.maxHp,
+        alive: player.alive,
+        connected: statePlayer.connected,
+        roomId: this.roomId,
+      });
+      if (this.parties.isMember(session.playerId)) {
         this.sendPartySnapshot(session.client, session);
       }
     }
@@ -3179,20 +3224,19 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private partyView(party: PartyState): PartyView | null {
     const members: PartyMemberView[] = [];
     for (const memberId of party.memberIds) {
-      const combatPlayer = this.combat.getPlayer(memberId);
-      const statePlayer = this.state.players.get(memberId);
-      if (combatPlayer === undefined || statePlayer === undefined) {
+      const presence = this.parties.presenceOf(memberId);
+      if (presence === undefined) {
         continue;
       }
       members.push({
         playerId: memberId,
-        displayName: combatPlayer.displayName,
-        classId: combatPlayer.classId,
-        level: combatPlayer.level,
-        hp: combatPlayer.hp,
-        maxHp: combatPlayer.maxHp,
-        alive: combatPlayer.alive,
-        connected: statePlayer.connected,
+        displayName: presence.displayName,
+        classId: presence.classId,
+        level: presence.level,
+        hp: presence.hp,
+        maxHp: presence.maxHp,
+        alive: presence.alive,
+        connected: presence.connected,
         leader: memberId === party.leaderId,
       });
     }
@@ -3202,7 +3246,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     return {
       partyId: party.partyId,
       leaderId: party.leaderId,
-      maxMembers: this.partyRule.maxMembers,
+      maxMembers: this.parties.maxMembers,
       members,
     };
   }
@@ -3353,20 +3397,26 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const displayName = session.displayName;
     this.registry.remove(sessionId);
 
-    // Parties are bound to this room/map; a transfer or final leave drops the
-    // member and tells the rest of the roster. The removed session is already
-    // gone from the registry, so it cannot receive its own departure.
+    // A map transfer keeps the party (ADR-036): the member is marked offline
+    // until the destination room reports presence. A final leave removes the
+    // member, and the service refreshes every remaining member's room. The
+    // removed session is already gone from the registry, so it cannot receive
+    // its own departure.
     const formerParty = this.parties.partyOf(session.playerId);
     if (formerParty !== undefined) {
-      this.parties.leave(session.playerId);
-      this.broadcastPartySnapshots(formerParty.memberIds);
-      for (const memberId of formerParty.memberIds) {
-        if (memberId === session.playerId) {
-          continue;
-        }
-        const member = this.registry.findByPlayerId(memberId);
-        if (member !== undefined) {
-          this.sendSystemNotice(member.client, 'info', `${displayName} 离开了队伍`);
+      if (session.transferring) {
+        this.parties.markOffline(session.playerId);
+        this.parties.refreshMembers(formerParty.memberIds);
+      } else {
+        this.parties.removePlayer(session.playerId);
+        for (const memberId of formerParty.memberIds) {
+          if (memberId === session.playerId) {
+            continue;
+          }
+          const member = this.registry.findByPlayerId(memberId);
+          if (member !== undefined) {
+            this.sendSystemNotice(member.client, 'info', `${displayName} 离开了队伍`);
+          }
         }
       }
     }

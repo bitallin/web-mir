@@ -5,12 +5,14 @@ import { Client, type Room as SdkRoom } from '@colyseus/sdk';
 import {
   MONSTER_STATE_CODES,
   PROTOCOL_VERSION,
+  STARTER_TOWN_MAP_ID,
   STARTER_WILDS_MAP_ID,
   TILE_UNITS,
   commandRejectedSchema,
   lootClaimedSchema,
   partyInviteViewSchema,
   partySnapshotSchema,
+  sessionTransferSchema,
   worldRoomNameFor,
   type CommandRejected,
   type PartyInviteView,
@@ -34,6 +36,7 @@ import type { GameServerEnv } from '../src/env';
 import { createGameServer, type GameServerRuntime } from '../src/server';
 import {
   createActor,
+  issueTicket,
   tileUnits,
   type CreateActorOptions,
   type TestActor,
@@ -192,9 +195,9 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
     return instance;
   }
 
-  async function createWorld(ticket: string): Promise<WorldRoom> {
+  async function createMapRoom(mapId: string, ticket: string): Promise<WorldRoom> {
     const room = (await client().create(
-      worldRoomNameFor(STARTER_WILDS_MAP_ID),
+      worldRoomNameFor(mapId),
       joinOptions(ticket),
       WorldState,
     )) as WorldRoom;
@@ -202,6 +205,10 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
       await room.leave();
     });
     return room;
+  }
+
+  function createWorld(ticket: string): Promise<WorldRoom> {
+    return createMapRoom(STARTER_WILDS_MAP_ID, ticket);
   }
 
   async function joinWorld(roomId: string, ticket: string): Promise<WorldRoom> {
@@ -564,6 +571,89 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
     expect(
       memberItems.some((item) => item.container === 'inventory' && item.templateId === 'slime_gel'),
     ).toBe(true);
+  });
+
+  it('keeps the party when a member transfers to another map', async () => {
+    const alice = await createActor(db, 'Party', {
+      mapId: STARTER_TOWN_MAP_ID,
+      position: tileUnits({ x: 17, y: 10 }),
+      level: 3,
+    });
+    const bob = await createActor(db, 'Party', {
+      mapId: STARTER_TOWN_MAP_ID,
+      position: tileUnits({ x: 18, y: 10 }),
+      level: 3,
+    });
+    const town = await createMapRoom(STARTER_TOWN_MAP_ID, alice.ticket);
+    await waitUntil(
+      () => town.state.players.has(alice.character.id),
+      10_000,
+      'alice joined the town',
+    );
+    const bobRoom = await joinWorld(town.roomId, bob.ticket);
+    await waitUntil(
+      () => bobRoom.state.players.has(bob.character.id),
+      10_000,
+      'bob joined the town',
+    );
+    await formParty(town, bobRoom, alice, bob);
+
+    // Walk onto the town portal; the room leaves the session and asks the
+    // client to rejoin on the destination map.
+    const transfer = waitForMessage(
+      town,
+      'session.transfer',
+      (payload) => sessionTransferSchema.parse(payload),
+      20_000,
+    );
+    town.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetTileX: 38,
+      targetTileY: 15,
+    });
+    const transferred = await transfer;
+    expect(transferred.mapId).toBe(STARTER_WILDS_MAP_ID);
+    // The browser leaves the old room on this message; the raw client must do
+    // the same or the room never releases the session for the destination.
+    await town.leave();
+
+    // The party survives the gap: Bob still sees both members, with Alice
+    // marked disconnected while she is between rooms.
+    const offline = await waitForParty(
+      bobRoom,
+      (snapshot) =>
+        snapshot.party?.members.some(
+          (member) => member.playerId === alice.character.id && !member.connected,
+        ) === true,
+      10_000,
+    );
+    expect(offline.party?.members).toHaveLength(2);
+
+    const aliceTicket = await issueTicket(db, alice);
+    const wilds = await createMapRoom(STARTER_WILDS_MAP_ID, aliceTicket);
+    await waitUntil(
+      () => wilds.state.players.has(alice.character.id),
+      10_000,
+      'alice joined the wilds',
+    );
+    const restored = await waitForParty(
+      wilds,
+      (snapshot) => snapshot.party?.members.length === 2,
+      10_000,
+    );
+    expect(restored.party?.leaderId).toBe(alice.character.id);
+
+    const online = await waitForParty(
+      bobRoom,
+      (snapshot) =>
+        snapshot.party?.members.some(
+          (member) => member.playerId === alice.character.id && member.connected,
+        ) === true,
+      10_000,
+    );
+    expect(online.party?.members).toHaveLength(2);
   });
 
   it('rejects an invite from outside the visible range', async () => {

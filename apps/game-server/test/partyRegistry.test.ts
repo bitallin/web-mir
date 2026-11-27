@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PartyRegistry } from '../src/rooms/partyRegistry';
+import { PartyRegistry } from '../src/world/partyRegistry';
 
 function registry(options: { maxMembers?: number; inviteTtlMs?: number } = {}) {
   let now = 1_000;

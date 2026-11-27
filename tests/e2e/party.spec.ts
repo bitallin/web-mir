@@ -78,7 +78,7 @@ test.afterEach(async () => {
   }
 });
 
-test('players form a party, leave it, and lose it on a map transfer', async ({ browser }) => {
+test('players form a party, leave it, and keep it across a map transfer', async ({ browser }) => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   // The first player creates an isolated room; the second joins that exact
   // room, which is what makes the two characters visible to each other.
@@ -134,8 +134,14 @@ test('players form a party, leave it, and lose it on a map transfer', async ({ b
       timeout: 20_000,
     },
   );
-  await expect(alice.page.getByTestId('party-member')).toHaveCount(1, { timeout: 15_000 });
-  await expect(alice.page.getByTestId('party-size')).toHaveText('1/4');
-  await expect(bob.page.getByTestId('party-panel')).toHaveCount(0);
+  // The party survives the map change: both rosters keep both members, and the
+  // transferred member becomes online again from the destination room.
+  await expect(bob.page.getByTestId('party-panel')).toBeVisible({ timeout: 20_000 });
+  await expect(bob.page.getByTestId('party-member')).toHaveCount(2);
+  await expect(alice.page.getByTestId('party-member')).toHaveCount(2, { timeout: 15_000 });
+  await expect(alice.page.getByTestId('party-size')).toHaveText('2/4');
+  await expect(
+    alice.page.locator(`[data-testid="party-member"][data-name="${bob.name}"]`),
+  ).toHaveAttribute('data-connected', 'true', { timeout: 15_000 });
   await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'party-after-transfer.png') });
 });
