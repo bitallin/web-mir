@@ -45,5 +45,6 @@
 | [ADR-038](ADR-038-daily-repeatable-quests.md)                                  | 内容驱动的每日任务与周期键               | Accepted              |
 | [ADR-039](ADR-039-one-click-quest-guidance.md)                                 | 一键任务导航、自动战斗与自动返回         | Accepted              |
 | [ADR-040](ADR-040-collect-quest-objectives.md)                                 | 收集类任务目标、背包进度与交物交付       | Accepted              |
+| [ADR-041](ADR-041-monster-claims-and-smart-loot-pickup.md)                     | 怪物归属、自动拾取、争夺掉落与一键走近   | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

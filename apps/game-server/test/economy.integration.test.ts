@@ -311,7 +311,7 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     await database?.close();
   });
 
-  it('grants experience, gold and loot once, then commits a pickup', async () => {
+  it('grants experience, gold and auto-picks owned loot into the bag', async () => {
     const actor = await wildsActor();
     const room = await createWorld(actor.ticket);
     const progressMessages: CharacterProgress[] = [];
@@ -334,7 +334,7 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     await waitUntil(() => room.state.monsters.get(SLIME) !== undefined, 5_000, 'slime visible');
     await waitUntil(() => inventoryMessages.length > 0, 5_000, 'inventory snapshot');
 
-    const sequence = await attackUntilDeath(room, 0);
+    await attackUntilDeath(room, 0);
     await waitUntil(
       () => room.state.monsters.get(SLIME)?.state === MONSTER_STATE_CODES.dead,
       5_000,
@@ -345,51 +345,28 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     expect(progress?.exp).toBe(12);
     expect(progress?.gold).toBe(2);
 
-    // The shared development database can still hold unexpired drops from
-    // earlier tests; this kill's rewards are exactly the ones it owns.
+    // Owned drops fly into the owner's bag without a pickup command (ADR-041).
     await waitUntil(
       () =>
-        [...room.state.loot.values()].some(
-          (drop) => drop.ownerId === actor.character.id && drop.templateId === 'slime_gel',
+        inventoryMessages.some(
+          (snapshot) =>
+            snapshot.items.some((item) => item.templateId === 'slime_gel') &&
+            snapshot.items.some((item) => item.templateId === 'small_hp_potion'),
         ),
       5_000,
-      'ground loot',
+      'auto pickup into the bag',
     );
-    const drops = [...room.state.loot.values()].filter(
-      (drop) => drop.ownerId === actor.character.id,
-    );
-    const gel = drops.find((drop) => drop.templateId === 'slime_gel');
-    expect(gel).toBeDefined();
-    expect(drops.map((drop) => drop.templateId).sort()).toEqual(['slime_gel', 'small_hp_potion']);
-
-    const commandId = randomUUID();
-    const pickupCommand = {
-      protocolVersion: PROTOCOL_VERSION,
-      commandId,
-      clientSequence: sequence,
-      dropId: gel!.dropId,
-    };
-    room.send('loot.pickup', pickupCommand);
-    await waitUntil(() => assetResults.length > 0, 5_000, 'pickup result');
-    const pickup = assetResults.at(-1);
-    expect(pickup?.kind).toBe('loot_pickup');
-    expect(pickup?.snapshot.items.some((item) => item.templateId === 'slime_gel')).toBe(true);
     await waitUntil(
-      () => claimedMessages.some((message) => message.dropId === gel!.dropId),
+      () => claimedMessages.some((message) => message.templateId === 'slime_gel'),
       5_000,
-      'claimed broadcast',
+      'auto pickup claimed broadcast',
     );
-    await waitUntil(() => !room.state.loot.has(gel!.dropId), 5_000, 'drop removed from state');
-
-    // Retrying the exact command returns the committed snapshot instead of
-    // moving a second instance.
-    room.send('loot.pickup', pickupCommand);
-    await waitUntil(() => assetResults.length > 1, 5_000, 'duplicate pickup result');
-    const replay = assetResults.at(-1);
-    expect(replay?.deduplicated).toBe(true);
-    expect(replay?.snapshot.items.filter((item) => item.templateId === 'slime_gel')).toHaveLength(
-      1,
+    await waitUntil(
+      () => [...room.state.loot.values()].every((drop) => drop.ownerId !== actor.character.id),
+      5_000,
+      'owned drops removed from the ground',
     );
+    expect(assetResults.some((result) => result.kind === 'loot_pickup')).toBe(false);
 
     const [stored] = await db
       .select()

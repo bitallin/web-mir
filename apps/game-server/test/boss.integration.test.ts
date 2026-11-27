@@ -6,9 +6,11 @@ import {
   MONSTER_STATE_CODES,
   PROTOCOL_VERSION,
   combatEventSchema,
+  commandRejectedSchema,
   systemNoticeSchema,
   worldRoomNameFor,
   type CombatEvent,
+  type CommandRejected,
   type SystemNotice,
 } from '@web-legend/contracts';
 import { RUINED_FIELDS_MAP_ID } from '@web-legend/contracts/maps';
@@ -232,7 +234,9 @@ describe.runIf(databaseUrl !== undefined)('world_map boss encounter', () => {
         event.kind === 'death' && event.entityType === 'monster' && event.entityId === BOSS,
     );
     const killerId = death?.kind === 'death' ? death.killerId : undefined;
+    const ownerId = death?.kind === 'death' ? death.ownerId : undefined;
     expect(killerId).toBeTruthy();
+    expect(ownerId).toBeTruthy();
     expect(notices.some((notice) => notice.message.includes('击败'))).toBe(true);
     await waitUntil(
       () => leader.state.monsters.get(BOSS)?.state === MONSTER_STATE_CODES.dead,
@@ -240,20 +244,57 @@ describe.runIf(databaseUrl !== undefined)('world_map boss encounter', () => {
       'boss dead state',
     );
 
-    await waitUntil(() => leader.state.loot.size > 0, 10_000, 'boss loot drop');
-    const templates = [...leader.state.loot].map((entry) => entry[1].templateId);
-    expect(templates).toContain('colossus_heart');
+    // The shared test database can restore drops from earlier runs, so wait
+    // for this kill's own heart instead of the first non-empty loot map.
+    await waitUntil(
+      () =>
+        [...leader.state.loot.values()].some(
+          (entry) =>
+            entry.templateId === 'colossus_heart' &&
+            entry.ownerId === '' &&
+            entry.pickupLockedUntil > Date.now(),
+        ),
+      10_000,
+      'contested boss heart',
+    );
+    const heart = [...leader.state.loot.values()].find(
+      (entry) =>
+        entry.templateId === 'colossus_heart' &&
+        entry.ownerId === '' &&
+        entry.pickupLockedUntil > Date.now(),
+    );
 
-    const killer = actors.find((actor) => actor.character.id === killerId);
-    if (killer === undefined) {
-      throw new Error('killer is not one of the test actors');
+    // Boss-exclusive drops are contested: unowned, locked and hand-picked only.
+    expect(heart?.ownerId).toBe('');
+    expect(heart?.pickupLockedUntil).toBeGreaterThan(Date.now());
+    const rejections: CommandRejected[] = [];
+    leader.onMessage('command.rejected', (payload: unknown) => {
+      rejections.push(commandRejectedSchema.parse(payload));
+    });
+    leader.send('loot.pickup', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 10,
+      dropId: heart!.dropId,
+    });
+    await waitUntil(
+      () => rejections.some((rejection) => rejection.code === 'DROP_LOCKED'),
+      5_000,
+      'contested lock rejection',
+    );
+    expect(
+      rejections.find((rejection) => rejection.code === 'DROP_LOCKED')?.retryAfterMs,
+    ).toBeGreaterThan(0);
+
+    // Rewards follow the monster claim owner, which may differ from the last
+    // hitter (ADR-041).
+    const owner = actors.find((actor) => actor.character.id === ownerId);
+    if (owner === undefined) {
+      throw new Error('owner is not one of the test actors');
     }
     let exp = 0;
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const [row] = await db
-        .select()
-        .from(characters)
-        .where(eq(characters.id, killer.character.id));
+      const [row] = await db.select().from(characters).where(eq(characters.id, owner.character.id));
       exp = row?.exp ?? 0;
       if (exp > 0) {
         break;

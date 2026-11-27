@@ -47,6 +47,8 @@ export type WorldRoomTuning = {
   playerRespawnMs?: number;
   /** Overrides compiled monster spawns; tests disable them to isolate combat. */
   monsterSpawns?: readonly MapMonsterSpawn[];
+  /** Test seam: disable owner auto-pickup when a test exercises manual loot. */
+  autoPickup?: boolean;
 };
 
 export type CreateGameServerOptions = {

@@ -16,7 +16,12 @@ export type LootTables = Readonly<Record<string, LootTableContent>>;
 
 export const MONSTER_LOOT_TABLES: LootTables = BASE_CONTENT_BUNDLE.lootTables;
 
-export type RolledLootItem = { templateId: string; quantity: number };
+export type RolledLootItem = {
+  templateId: string;
+  quantity: number;
+  /** Unowned, locked and hand-picked only (ADR-041). */
+  contested?: boolean;
+};
 
 export type LootRoll = {
   exp: number;
@@ -49,7 +54,11 @@ export function rollLoot(table: LootTable, rng: Rng): LootRoll {
     const span = entry.maxQuantity - entry.minQuantity;
     const quantity = entry.minQuantity + Math.floor(quantityRoll * (span + 1));
     if (quantity > 0) {
-      items.push({ templateId: entry.templateId, quantity });
+      items.push({
+        templateId: entry.templateId,
+        quantity,
+        ...(entry.contested === true ? { contested: true } : {}),
+      });
     }
   }
 

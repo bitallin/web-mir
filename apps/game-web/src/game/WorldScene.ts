@@ -6,9 +6,11 @@ import {
   type CombatEvent,
   type CombatTargetChanged,
   type CommandAck,
+  type LootClaimed,
   type TilePoint,
 } from '@web-legend/contracts';
 
+import { itemIconFrame } from '../lib/itemIcons';
 import type { PlayerView } from '../net/worldClient';
 import { createProjection, TILE_HEIGHT, TILE_WIDTH, type ScreenPoint } from './projection';
 import {
@@ -337,9 +339,12 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private readonly visuals = new Map<string, PlayerVisual>();
   private readonly monsterVisuals = new Map<string, MonsterVisual>();
   private readonly lootVisuals = new Map<string, LootVisual>();
+  /** Last screen positions of removed drops, so the claim flight still has a start. */
+  private readonly recentLootPositions = new Map<string, { x: number; y: number; at: number }>();
   private readonly telegraphs = new Map<string, TelegraphVisual>();
   private readonly npcLabels = new Map<string, Phaser.GameObjects.Text>();
   private labelClock = 0;
+  private lootClock = 0;
   private pathGraphics!: Phaser.GameObjects.Graphics;
   private targetRing!: Phaser.GameObjects.Graphics;
   private selfId: string | null = null;
@@ -440,6 +445,20 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       this.labelClock = 0;
       this.updateLabelVisibility();
     }
+
+    this.lootClock += delta;
+    if (this.lootClock >= 500) {
+      this.lootClock = 0;
+      const now = Date.now();
+      for (const visual of this.lootVisuals.values()) {
+        visual.updateLock(now);
+      }
+      for (const [dropId, position] of this.recentLootPositions) {
+        if (now - position.at > 5_000) {
+          this.recentLootPositions.delete(dropId);
+        }
+      }
+    }
   }
 
   applySnapshot(data: SceneSnapshot): void {
@@ -509,14 +528,64 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         visual = new LootVisual(this, drop);
         this.lootVisuals.set(drop.dropId, visual);
       }
+      visual.setLockedUntil(drop.pickupLockedUntil);
       visual.setPosition(this.projection.toScreen(drop.x, drop.y));
     }
     for (const [dropId, visual] of this.lootVisuals) {
       if (!seenLoot.has(dropId)) {
+        // Keep the last position briefly: the claim message usually arrives
+        // before the state patch, but a reordered patch must not kill the flight.
+        this.recentLootPositions.set(dropId, {
+          x: visual.current.x,
+          y: visual.current.y,
+          at: Date.now(),
+        });
         visual.destroy();
         this.lootVisuals.delete(dropId);
       }
     }
+  }
+
+  /** A claimed item flies from the ground to its picker (ADR-041). */
+  playLootClaim(claimed: LootClaimed): void {
+    const visual = this.lootVisuals.get(claimed.dropId);
+    const recent = this.recentLootPositions.get(claimed.dropId);
+    const start = visual?.current ?? recent ?? null;
+    const picker = this.visuals.get(claimed.claimerId)?.current ?? null;
+    if (start === null && picker === null) {
+      return;
+    }
+    const from = start ?? picker;
+    const to = picker ?? start;
+    if (from === null || to === null) {
+      return;
+    }
+    const frame = itemIconFrame(assetManifest.itemIcons, claimed.templateId);
+    const icon = this.add
+      .sprite(from.x, from.y - 14, ITEM_ICON_TEXTURE_KEY, frame)
+      .setDisplaySize(22, 22)
+      .setDepth(100_000);
+    const curve = new Phaser.Curves.QuadraticBezier(
+      new Phaser.Math.Vector2(from.x, from.y - 14),
+      new Phaser.Math.Vector2((from.x + to.x) / 2, Math.min(from.y, to.y) - 56),
+      new Phaser.Math.Vector2(to.x, to.y - 18),
+    );
+    this.tweens.addCounter({
+      from: 0,
+      to: 1,
+      duration: 420,
+      ease: 'Sine.easeIn',
+      onUpdate: (tween) => {
+        const progress = tween.getValue() ?? 0;
+        const point = curve.getPoint(progress);
+        icon.setPosition(point.x, point.y);
+        icon.setScale(1 - 0.35 * progress);
+        icon.setAlpha(progress > 0.75 ? 1 - (progress - 0.75) / 0.25 : 1);
+      },
+      onComplete: () => {
+        icon.destroy();
+      },
+    });
   }
 
   applyAck(ack: CommandAck): void {

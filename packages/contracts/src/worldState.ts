@@ -77,6 +77,10 @@ export const LootState = schema(
     y: t.number().default(0),
     /** Character id allowed to claim first; empty string means free for all. */
     ownerId: t.string().default(''),
+    /** Epoch ms when the owner window ends; 0 for contested (unowned) drops. */
+    ownerExpiresAt: t.number().default(0),
+    /** Epoch ms before which nobody may pick a contested drop; 0 when unlocked. */
+    pickupLockedUntil: t.number().default(0),
     /** Epoch milliseconds; the room removes the drop when it passes. */
     expiresAt: t.number().default(0),
   },

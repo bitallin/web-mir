@@ -286,6 +286,11 @@ const deathEventSchema = z
     entityId: z.string().min(1).max(64),
     entityType: combatEntityTypeSchema,
     killerId: z.string().min(1).max(64).optional(),
+    /**
+     * Monster deaths only: the character that owns the kill rewards, which may
+     * differ from the last hitter (ADR-041).
+     */
+    ownerId: z.string().min(1).max(64).optional(),
     /** Present for player deaths: the client renders this revive countdown. */
     reviveInMs: z.number().int().nonnegative().optional(),
   })

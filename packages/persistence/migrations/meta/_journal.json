@@ -71,6 +71,13 @@
       "when": 1795761157224,
       "tag": "0009_soft_living_mummy",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795777949121,
+      "tag": "0010_majestic_anita_blake",
+      "breakpoints": true
     }
   ]
 }

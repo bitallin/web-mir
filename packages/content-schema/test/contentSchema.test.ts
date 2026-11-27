@@ -276,6 +276,32 @@ describe('content validation', () => {
     expect(BASE_CONTENT_BUNDLE.rules?.dailyReset).toEqual({ hour: 5, utcOffsetMinutes: 480 });
   });
 
+  it('ships loot pickup tuning and contested boss drops', () => {
+    expect(BASE_CONTENT_BUNDLE.rules?.loot).toEqual({
+      autoPickupRangeTiles: 3,
+      contestedDelayMs: 60_000,
+    });
+    const boss = BASE_CONTENT_BUNDLE.lootTables['ashen_colossus'];
+    expect(boss?.entries.find((entry) => entry.templateId === 'colossus_heart')?.contested).toBe(
+      true,
+    );
+    expect(
+      boss?.entries.find((entry) => entry.templateId === 'large_hp_potion')?.contested,
+    ).toBeUndefined();
+  });
+
+  it('rejects an out-of-range auto pickup radius', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        if (bundle.rules !== undefined) {
+          bundle.rules.loot = { autoPickupRangeTiles: 50, contestedDelayMs: 60_000 };
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.path.startsWith('rules.loot'))).toBe(true);
+  });
+
   it('keeps releases without a rules section death-free (EL-004)', () => {
     const legacy = clone(BASE_CONTENT_BUNDLE);
     delete legacy.rules;

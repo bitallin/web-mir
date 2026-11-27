@@ -541,7 +541,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             <div className="player-actions">
               <button
                 type="button"
-                className="bag-toggle"
+                className={`bag-toggle${state.bagPulse ? ' bag-pulse' : ''}`}
                 data-testid="inventory-toggle"
                 aria-expanded={bagOpen}
                 onClick={() => {
@@ -1158,26 +1158,34 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               <span data-testid="loot-count">{state.loot.length}</span>
             </div>
             <ul data-testid="loot-list">
-              {state.loot.map((drop) => (
-                <li key={drop.dropId}>
-                  <button
-                    type="button"
-                    className="loot-row"
-                    data-testid="loot-row"
-                    data-drop-id={drop.dropId}
-                    data-template-id={drop.templateId}
-                    data-owner-id={drop.ownerId}
-                    onClick={() => {
-                      pickup(drop.dropId);
-                    }}
-                  >
-                    <ItemIcon templateId={drop.templateId} />
-                    <span>{drop.displayName}</span>
-                    <span className="loot-qty">×{drop.quantity}</span>
-                    <span className="loot-action">拾取</span>
-                  </button>
-                </li>
-              ))}
+              {state.loot.map((drop) => {
+                const lockRemaining = drop.pickupLockedUntil - Date.now();
+                const locked = lockRemaining > 0;
+                return (
+                  <li key={drop.dropId}>
+                    <button
+                      type="button"
+                      className={`loot-row${locked ? ' locked' : ''}`}
+                      data-testid="loot-row"
+                      data-drop-id={drop.dropId}
+                      data-template-id={drop.templateId}
+                      data-owner-id={drop.ownerId}
+                      data-pickup-locked={locked ? 'true' : 'false'}
+                      disabled={locked}
+                      onClick={() => {
+                        pickup(drop.dropId);
+                      }}
+                    >
+                      <ItemIcon templateId={drop.templateId} />
+                      <span>{drop.displayName}</span>
+                      <span className="loot-qty">×{drop.quantity}</span>
+                      <span className={locked ? 'loot-lock' : 'loot-action'}>
+                        {locked ? `争夺 ${String(Math.ceil(lockRemaining / 1_000))}s` : '拾取'}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
               {state.loot.length === 0 ? <li className="empty">击败怪物后会掉落物品</li> : null}
             </ul>
           </section>

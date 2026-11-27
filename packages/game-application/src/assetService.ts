@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CONTESTED_DELAY_MS,
   INVENTORY_CAPACITY,
   LOOT_EXPIRY_MS,
   LOOT_OWNER_WINDOW_MS,
@@ -96,7 +97,12 @@ export type LootDropView = {
   quantity: number;
   x: number;
   y: number;
+  /** Empty for contested drops, which have no owner (ADR-041). */
   ownerId: string;
+  /** Epoch ms when the owner window ends; 0 when there is no owner. */
+  ownerExpiresAt?: number;
+  /** Epoch ms before which a contested drop cannot be picked; 0 when unlocked. */
+  pickupLockedUntil?: number;
   expiresAt: number;
 };
 
@@ -355,6 +361,8 @@ export class AssetService {
         x: drop.x,
         y: drop.y,
         ownerId: ownerActive && drop.ownerCharacterId !== null ? drop.ownerCharacterId : '',
+        ownerExpiresAt: drop.ownerExpiresAt?.getTime() ?? 0,
+        pickupLockedUntil: drop.pickupLockedUntil?.getTime() ?? 0,
         expiresAt: drop.expiresAt.getTime(),
       });
     }
@@ -474,6 +482,8 @@ export class AssetService {
         });
       }
 
+      const contestedDelayMs =
+        this.content.rules?.loot?.contestedDelayMs ?? DEFAULT_CONTESTED_DELAY_MS;
       const drops: LootDropView[] = [];
       for (const [index, entry] of roll.items.entries()) {
         const definition = requireItem(entry.templateId, this.content.items);
@@ -491,6 +501,14 @@ export class AssetService {
           throw new AssetError('SERVICE_UNAVAILABLE');
         }
         const offset = DROP_OFFSETS[index % DROP_OFFSETS.length] ?? DROP_OFFSETS[0];
+        // Contested drops are unowned, locked for a while and hand-picked only;
+        // they also live long enough to contest after the lock (ADR-041).
+        const contested = entry.contested === true;
+        const ownerExpiresAt = contested ? null : new Date(now.getTime() + LOOT_OWNER_WINDOW_MS);
+        const pickupLockedUntil = contested ? new Date(now.getTime() + contestedDelayMs) : null;
+        const expiresAt = new Date(
+          now.getTime() + (contested ? contestedDelayMs : 0) + LOOT_EXPIRY_MS,
+        );
         const [drop] = await tx
           .insert(worldDrops)
           .values({
@@ -498,9 +516,10 @@ export class AssetService {
             x: input.x + offset.x,
             y: input.y + offset.y,
             itemInstanceId: item.id,
-            ownerCharacterId: character.id,
-            ownerExpiresAt: new Date(now.getTime() + LOOT_OWNER_WINDOW_MS),
-            expiresAt: new Date(now.getTime() + LOOT_EXPIRY_MS),
+            ownerCharacterId: contested ? null : character.id,
+            ownerExpiresAt,
+            pickupLockedUntil,
+            expiresAt,
             createdAt: now,
           })
           .returning();
@@ -515,7 +534,9 @@ export class AssetService {
           quantity: item.quantity,
           x: drop.x,
           y: drop.y,
-          ownerId: character.id,
+          ownerId: contested ? '' : character.id,
+          ownerExpiresAt: ownerExpiresAt?.getTime() ?? 0,
+          pickupLockedUntil: pickupLockedUntil?.getTime() ?? 0,
           expiresAt: drop.expiresAt.getTime(),
         });
       }
@@ -721,6 +742,9 @@ export class AssetService {
       }
       if (drop.expiresAt.getTime() <= now.getTime()) {
         throw new AssetError('DROP_EXPIRED');
+      }
+      if (drop.pickupLockedUntil !== null && drop.pickupLockedUntil.getTime() > now.getTime()) {
+        throw new AssetError('DROP_LOCKED');
       }
       if (
         drop.ownerCharacterId !== null &&

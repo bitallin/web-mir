@@ -1,22 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'phase-05');
-const SCENE_ARTIFACT_DIR = join(
-  process.cwd(),
-  'docs',
-  'phase-reports',
-  'alpha-02',
-  'scene-readable',
-);
-type IconManifest = { itemIcons: { templates: Record<string, number> } };
-const assetManifest = JSON.parse(
-  readFileSync(join(process.cwd(), 'content/assets/manifest.json'), 'utf8'),
-) as IconManifest;
-const SLIME_GEL_ICON_FRAME = assetManifest.itemIcons.templates.slime_gel ?? Number.NaN;
 const PASSWORD = 'phase-five-password';
 // Owns this spawn: autoAttack.spec kills wilds_slime_1 in parallel, and a
 // shared target lets one spec's reward steal the other's drop (EL-019).
@@ -116,16 +104,6 @@ async function attackUntilDead(page: Page, attempts = 20): Promise<void> {
   }
 }
 
-async function characterIdOf(page: Page): Promise<string> {
-  const id = await page.evaluate(
-    () => window.__webLegendDebug?.inventoryState()?.characterId ?? null,
-  );
-  if (id === null) {
-    throw new Error('inventory snapshot is not available yet');
-  }
-  return id;
-}
-
 test.afterEach(async () => {
   for (const entry of opened.splice(0)) {
     try {
@@ -137,7 +115,9 @@ test.afterEach(async () => {
   }
 });
 
-test('kill, loot, equip and relogin keep the committed economy state', async ({ browser }) => {
+test('kill auto-picks loot, then equip and relogin keep the committed economy state', async ({
+  browser,
+}) => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
 
   const alice = await registerWorld(browser, 'LootA');
@@ -149,53 +129,40 @@ test('kill, loot, equip and relogin keep the committed economy state', async ({ 
   ]);
 
   await expect(monsterRow(alice.page)).toHaveCount(1, { timeout: 10_000 });
-  const aliceId = await characterIdOf(alice.page);
-
   const expBefore = Number(await alice.page.getByTestId('exp-bar').getAttribute('data-exp'));
 
   await attackUntilDead(alice.page);
   await expect(monsterRow(alice.page)).toHaveAttribute('data-state', 'dead', { timeout: 10_000 });
 
-  // Both browsers see the public drop; only the killer owns it for 30 seconds.
-  const aliceLoot = alice.page.locator(
-    `[data-testid="loot-row"][data-template-id="slime_gel"][data-owner-id="${aliceId}"]`,
-  );
-  const bobLoot = bob.page.locator('[data-testid="loot-row"][data-template-id="slime_gel"]');
-  await expect(aliceLoot.first()).toBeVisible({ timeout: 10_000 });
-  await expect(bobLoot.first()).toBeVisible({ timeout: 10_000 });
-  // Ground drops render the same atlas icon as the bag.
-  await expect(aliceLoot.first().getByTestId('item-icon')).toHaveCount(1);
-  const dropId = await aliceLoot.first().getAttribute('data-drop-id');
-  expect(dropId).not.toBeNull();
-  if (dropId !== null) {
-    // The scene marker resolves the same manifest frame as the HUD row.
-    await expect
-      .poll(
-        async () =>
-          alice.page.evaluate((id) => window.__webLegendDebug?.lootIconFrame(id) ?? null, dropId),
-        { timeout: 10_000 },
-      )
-      .toBe(SLIME_GEL_ICON_FRAME);
-    mkdirSync(SCENE_ARTIFACT_DIR, { recursive: true });
-    await alice.page.evaluate(() => {
-      const style = document.createElement('style');
-      style.id = 'e2e-hide-hud';
-      style.textContent = '.shell > *:not(.canvas-layer) { visibility: hidden !important; }';
-      document.head.append(style);
-    });
-    await alice.page.locator('.canvas-layer').screenshot({
-      path: join(SCENE_ARTIFACT_DIR, 'loot-ground-icon.png'),
-    });
-    await alice.page.evaluate(() => document.getElementById('e2e-hide-hud')?.remove());
-  }
-  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'loot-visible.png') });
-
-  await aliceLoot.first().click();
+  // Owned drops fly into the killer's bag without a click (ADR-041).
+  await expect
+    .poll(
+      async () =>
+        alice.page.evaluate(
+          () =>
+            window.__webLegendDebug
+              ?.inventoryState()
+              ?.items.some((item) => item.templateId === 'slime_gel') ?? false,
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
   await expect(
-    alice.page.locator(
-      `[data-testid="loot-row"][data-template-id="slime_gel"][data-owner-id="${aliceId}"]`,
-    ),
+    alice.page.locator('[data-testid="loot-row"][data-template-id="slime_gel"]'),
   ).toHaveCount(0, { timeout: 10_000 });
+  // The other player never receives the owner's loot.
+  await expect
+    .poll(
+      async () =>
+        bob.page.evaluate(
+          () =>
+            window.__webLegendDebug
+              ?.inventoryState()
+              ?.items.some((item) => item.templateId === 'slime_gel') ?? false,
+        ),
+      { timeout: 2_000 },
+    )
+    .toBe(false);
 
   // Experience and gold were committed with the kill reward.
   await expect

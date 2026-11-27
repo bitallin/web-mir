@@ -202,6 +202,10 @@ type MonsterRuntime = {
   windup: MonsterWindup | null;
   /** Set once when HP first crosses the content enrage threshold. */
   enraged: boolean;
+  /** First player to damage this monster; rewards go here (ADR-041). */
+  claimedBy: string | null;
+  /** Simulation time of the latest damage that refreshed the claim. */
+  claimAt: number;
 };
 
 type MonsterWindup = {
@@ -213,6 +217,8 @@ type MonsterWindup = {
 };
 
 const DEFAULT_PLAYER_RESPAWN_MS = 3_000;
+/** A claim survives this long without any damage before another hit can claim. */
+const MONSTER_CLAIM_TIMEOUT_MS = 10_000;
 const MONSTER_REPATH_INTERVAL_MS = 400;
 const MONSTER_IDLE_THINK_MIN_MS = 1_800;
 const MONSTER_IDLE_THINK_VARIANCE_MS = 2_200;
@@ -333,6 +339,8 @@ export class CombatWorld {
         dots: new Map(),
         windup: null,
         enraged: false,
+        claimedBy: null,
+        claimAt: 0,
       });
     }
   }
@@ -382,7 +390,26 @@ export class CombatWorld {
   }
 
   removePlayer(playerId: string): boolean {
+    // A claim belongs to a player present in this room; leaving or transferring
+    // releases it so the next hitter can claim the monster (ADR-041).
+    for (const monster of this.monsters.values()) {
+      if (monster.claimedBy === playerId) {
+        monster.claimedBy = null;
+        monster.claimAt = 0;
+      }
+    }
     return this.players.delete(playerId);
+  }
+
+  /**
+   * First damage claims the monster; later damage refreshes the claim timer
+   * without changing the owner, so the last hit never steals the rewards.
+   */
+  private claimMonster(monster: MonsterRuntime, playerId: string): void {
+    if (monster.claimedBy === null || this.now - monster.claimAt > MONSTER_CLAIM_TIMEOUT_MS) {
+      monster.claimedBy = playerId;
+    }
+    monster.claimAt = this.now;
   }
 
   setPlayerTargetable(playerId: string, targetable: boolean): void {
@@ -839,6 +866,7 @@ export class CombatWorld {
       for (const [skillId, dot] of monster.dots) {
         while (this.now >= dot.nextTickAt && dot.nextTickAt <= dot.expiresAt) {
           dot.nextTickAt += dot.tickIntervalMs;
+          this.claimMonster(monster, dot.sourceId);
           monster.hp = Math.max(0, monster.hp - dot.damagePerTick);
           events.push({
             kind: 'hit',
@@ -1012,11 +1040,15 @@ export class CombatWorld {
     monster.windup = null;
     monster.enraged = false;
     monster.respawnAt = this.now + (this.monsterRespawnMs ?? monster.definition.respawnMs);
+    const ownerId = monster.claimedBy ?? killerId;
+    monster.claimedBy = null;
+    monster.claimAt = 0;
     events.push({
       kind: 'death',
       entityId: monster.id,
       entityType: 'monster',
       killerId,
+      ownerId,
     });
   }
 
@@ -1072,6 +1104,8 @@ export class CombatWorld {
       monster.dots.clear();
       monster.windup = null;
       monster.enraged = false;
+      monster.claimedBy = null;
+      monster.claimAt = 0;
       events.push({
         kind: 'spawn',
         entityId: monster.id,
@@ -1386,6 +1420,7 @@ export class CombatWorld {
       return;
     }
 
+    this.claimMonster(monster, player.id);
     monster.hp = Math.max(0, monster.hp - roll.damage);
     events.push({
       kind: 'hit',

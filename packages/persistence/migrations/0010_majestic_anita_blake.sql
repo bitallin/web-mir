@@ -1,0 +1,1 @@
+ALTER TABLE "world_drops" ADD COLUMN "pickup_locked_until" timestamp with time zone;

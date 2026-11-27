@@ -29,6 +29,7 @@ import { mapBundleFor } from '../game/mapCatalog';
 import { isSfxMuted, SfxPlayer } from '../game/sfx';
 import { WorldBridge } from '../game/worldBridge';
 import { loadFreshTransfers, loadRoomPreference } from '../lib/identity';
+import { lootIsLocked, lootLockLabel, lootTile, withinPickupRange } from '../lib/lootInteraction';
 import {
   WorldClient,
   type ConnectionStatus,
@@ -104,6 +105,8 @@ export type SessionState = {
   reviveAt: number | null;
   kicked: SessionKicked | null;
   sfxMuted: boolean;
+  /** True for a short moment after the local player's loot enters the bag. */
+  bagPulse: boolean;
 };
 
 export type WorldSessionOptions = {
@@ -114,6 +117,8 @@ export type WorldSessionOptions = {
 const MAX_CHAT_MESSAGES = 120;
 const MAX_SYSTEM_MESSAGES = 60;
 const MAX_COMBAT_LOG = 12;
+/** Give up a far-loot approach after this long without reaching the drop. */
+const LOOT_APPROACH_TIMEOUT_MS = 15_000;
 
 function questNavigationStopMessage(reason: QuestNavigationReason): string {
   switch (reason) {
@@ -168,6 +173,7 @@ function initialState(character: CharacterView): SessionState {
     reviveAt: null,
     kicked: null,
     sfxMuted: isSfxMuted(),
+    bagPulse: false,
   };
 }
 
@@ -356,6 +362,9 @@ class WorldSession {
   private autoQuest: { questId: string; purpose: 'hunt' | 'return' | 'accept' } | null = null;
   private autoQuestSentMapId: string | null = null;
   private autoQuestPending: string | null = null;
+  /** A drop the player clicked from out of range; walk there, then pick up. */
+  private lootApproach: { dropId: string; expiresAt: number } | null = null;
+  private bagPulseTimer: number | null = null;
   private autoClaimSent = false;
   private autoAcceptSent = false;
   private pendingNavCommandId: string | null = null;
@@ -432,6 +441,7 @@ class WorldSession {
           }
           this.latestLoot = snapshot.loot;
           this.latestSnapshot = snapshot;
+          this.advanceLootApproach();
           this.updateState((previous) => ({
             ...previous,
             mapId: snapshot.mapId,
@@ -473,6 +483,15 @@ class WorldSession {
           }
         },
         onRejected: (rejected) => {
+          if (
+            this.lootApproach !== null &&
+            (rejected.code === 'UNREACHABLE' ||
+              rejected.code === 'INVALID_TARGET' ||
+              rejected.code === 'PLAYER_DEAD' ||
+              rejected.code === 'INVALID_SESSION')
+          ) {
+            this.lootApproach = null;
+          }
           if (this.autoQuestPending !== null) {
             this.autoQuestPending = null;
           }
@@ -785,6 +804,10 @@ class WorldSession {
         },
         onLootClaimed: (claimed) => {
           this.sfx.play('loot');
+          this.bridge.playLootClaim(claimed);
+          if (claimed.claimerId === characterId) {
+            this.pulseBag();
+          }
           this.updateState((previous) => ({
             ...previous,
             combatLog: [...previous.combatLog, lootLogEntry(claimed, characterId)].slice(
@@ -831,6 +854,8 @@ class WorldSession {
   }
 
   moveTo(tile: TilePoint): void {
+    // A manual move wins over a pending far-loot approach.
+    this.lootApproach = null;
     if (import.meta.env.DEV) {
       const debug = window.__webLegendDebug;
       if (debug !== undefined) {
@@ -846,6 +871,7 @@ class WorldSession {
 
   /** Locks the target; the server keeps swinging until told to stop. */
   attack(targetId: string): boolean {
+    this.lootApproach = null;
     const sent = this.client?.sendEngage(targetId) ?? false;
     if (sent) {
       this.commandCount += 1;
@@ -885,6 +911,7 @@ class WorldSession {
   }
 
   castSkill(skillId: string, targetId: string): boolean {
+    this.lootApproach = null;
     const sent = this.client?.sendSkill(skillId, targetId) ?? false;
     if (sent) {
       this.commandCount += 1;
@@ -893,13 +920,81 @@ class WorldSession {
     return sent;
   }
 
+  /**
+   * Picking a drop from out of range walks there first (ADR-041). The lock and
+   * the final distance are still enforced by the server.
+   */
   pickup(dropId: string): boolean {
+    const drop = this.latestLoot.find((entry) => entry.dropId === dropId);
+    if (drop === undefined) {
+      return false;
+    }
+    const now = Date.now();
+    if (lootIsLocked(drop, now)) {
+      this.pushNotice('info', lootLockLabel(drop, now) ?? '物品仍在争夺保护中');
+      return false;
+    }
+    const self = this.latestSnapshot?.players.find(
+      (player) => player.playerId === this.options.character.id,
+    );
+    if (self !== undefined && !withinPickupRange(self, drop)) {
+      this.moveTo(lootTile(drop));
+      this.lootApproach = { dropId, expiresAt: now + LOOT_APPROACH_TIMEOUT_MS };
+      this.pushNotice('info', `正在走向${drop.displayName}…`);
+      return true;
+    }
+    return this.sendPickup(dropId);
+  }
+
+  private sendPickup(dropId: string): boolean {
     const sent = this.client?.sendPickup(dropId) ?? false;
     if (sent) {
       this.commandCount += 1;
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
     return sent;
+  }
+
+  /** Brief bag glow after the local player receives a drop (ADR-041). */
+  private pulseBag(): void {
+    if (this.bagPulseTimer !== null) {
+      window.clearTimeout(this.bagPulseTimer);
+    }
+    this.updateState((previous) => ({ ...previous, bagPulse: true }));
+    this.bagPulseTimer = window.setTimeout(() => {
+      this.bagPulseTimer = null;
+      this.updateState((previous) => ({ ...previous, bagPulse: false }));
+    }, 650);
+  }
+
+  /** Completes a far-click pickup once the snapshot shows the player in range. */
+  private advanceLootApproach(): void {
+    const approach = this.lootApproach;
+    if (approach === null) {
+      return;
+    }
+    const now = Date.now();
+    if (now > approach.expiresAt) {
+      this.lootApproach = null;
+      return;
+    }
+    const self = this.latestSnapshot?.players.find(
+      (player) => player.playerId === this.options.character.id,
+    );
+    const drop = this.latestLoot.find((entry) => entry.dropId === approach.dropId);
+    if (self === undefined || !self.alive || drop === undefined) {
+      this.lootApproach = null;
+      return;
+    }
+    if (lootIsLocked(drop, now)) {
+      this.pushNotice('info', lootLockLabel(drop, now) ?? '物品仍在争夺保护中');
+      this.lootApproach = null;
+      return;
+    }
+    if (withinPickupRange(self, drop)) {
+      this.lootApproach = null;
+      this.sendPickup(drop.dropId);
+    }
   }
 
   equip(itemId: string): boolean {
@@ -1194,6 +1289,10 @@ class WorldSession {
     if (this.levelBannerTimer !== null) {
       window.clearTimeout(this.levelBannerTimer);
       this.levelBannerTimer = null;
+    }
+    if (this.bagPulseTimer !== null) {
+      window.clearTimeout(this.bagPulseTimer);
+      this.bagPulseTimer = null;
     }
     if (this.partyInviteTimer !== null) {
       window.clearTimeout(this.partyInviteTimer);

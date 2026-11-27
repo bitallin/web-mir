@@ -314,6 +314,9 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
         economyRng: () => 0,
         monsterRespawnMs: 2_000,
         playerRespawnMs: 400,
+        // These tests exercise manual party loot sharing; auto-pickup has its
+        // own room test in economy.integration.test.ts.
+        autoPickup: false,
       },
     });
 

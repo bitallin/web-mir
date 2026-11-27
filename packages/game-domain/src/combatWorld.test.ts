@@ -47,6 +47,31 @@ function killSlime(world: ReturnType<typeof createTestWorld>): CombatEventPayloa
   return events;
 }
 
+/** Keeps one player attacking until the slime dies, collecting all events. */
+function killSlimeWith(
+  world: ReturnType<typeof createTestWorld>,
+  playerId: string,
+): CombatEventPayload[] {
+  const events: CombatEventPayload[] = [];
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (world.getMonster(DEFAULT_SLIME_SPAWN.id)?.state === 'dead') {
+      break;
+    }
+    const result = world.basicAttack(playerId, DEFAULT_SLIME_SPAWN.id);
+    events.push(...result.events);
+    advance(world, 900);
+  }
+  return events;
+}
+
+function deathEvent(events: readonly CombatEventPayload[]) {
+  const death = events.find((event) => event.kind === 'death');
+  if (death?.kind !== 'death') {
+    throw new Error('missing death event');
+  }
+  return death;
+}
+
 describe('CombatWorld basic attacks', () => {
   it('deals authoritative damage and enforces the attack interval', () => {
     const world = createTestWorld();
@@ -108,6 +133,70 @@ describe('CombatWorld basic attacks', () => {
 
     const afterDeath = world.basicAttack('player-1', DEFAULT_SLIME_SPAWN.id);
     expect(afterDeath.rejection?.code).toBe('TARGET_DEAD');
+  });
+});
+
+describe('CombatWorld monster claims', () => {
+  function twoAttackers() {
+    const world = createTestWorld({ monsterRespawnMs: 60_000 });
+    world.addPlayer(warrior());
+    world.addPlayer({
+      id: 'player-2',
+      displayName: 'Bob',
+      classId: 'warrior',
+      level: 1,
+      hp: 120,
+      mp: 30,
+      ...center({ x: 6, y: 5 }),
+    });
+    return world;
+  }
+
+  it('awards the kill to the first attacker even when someone else lands the last hit', () => {
+    const world = twoAttackers();
+    const first = world.basicAttack('player-1', DEFAULT_SLIME_SPAWN.id);
+    expect(first.accepted).toBe(true);
+
+    const events = killSlimeWith(world, 'player-2');
+    const death = deathEvent(events);
+    expect(death).toMatchObject({
+      entityType: 'monster',
+      killerId: 'player-2',
+      ownerId: 'player-1',
+    });
+  });
+
+  it('re-claims after ten seconds without damage', () => {
+    const world = twoAttackers();
+    expect(world.basicAttack('player-1', DEFAULT_SLIME_SPAWN.id).accepted).toBe(true);
+    advance(world, 10_500);
+
+    expect(world.basicAttack('player-2', DEFAULT_SLIME_SPAWN.id).accepted).toBe(true);
+    const death = deathEvent(killSlimeWith(world, 'player-2'));
+    expect(death.ownerId).toBe('player-2');
+    expect(death.killerId).toBe('player-2');
+  });
+
+  it('releases the claim when the owner leaves the room', () => {
+    const world = twoAttackers();
+    expect(world.basicAttack('player-1', DEFAULT_SLIME_SPAWN.id).accepted).toBe(true);
+    expect(world.removePlayer('player-1')).toBe(true);
+
+    expect(world.basicAttack('player-2', DEFAULT_SLIME_SPAWN.id).accepted).toBe(true);
+    const death = deathEvent(killSlimeWith(world, 'player-2'));
+    expect(death.ownerId).toBe('player-2');
+  });
+
+  it('clears the claim on respawn', () => {
+    const world = twoAttackers();
+    const firstDeath = deathEvent(killSlimeWith(world, 'player-1'));
+    expect(firstDeath.ownerId).toBe('player-1');
+
+    advance(world, 60_000);
+    expect(world.getMonster(DEFAULT_SLIME_SPAWN.id)?.state).not.toBe('dead');
+    expect(world.basicAttack('player-2', DEFAULT_SLIME_SPAWN.id).accepted).toBe(true);
+    const secondDeath = deathEvent(killSlimeWith(world, 'player-2'));
+    expect(secondDeath.ownerId).toBe('player-2');
   });
 });
 

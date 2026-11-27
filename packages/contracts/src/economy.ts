@@ -13,10 +13,13 @@ export const ECONOMY_CONTENT_VERSION = 'phase5.1' as const;
 
 export const INVENTORY_CAPACITY = 24 as const;
 export const PICKUP_RANGE_TILES = 1.5 as const;
-/** Drops are reserved for the killer for this long, then become free for all. */
+/** Drops are reserved for the owner for this long, then become free for all. */
 export const LOOT_OWNER_WINDOW_MS = 30_000 as const;
 /** Unclaimed drops disappear this long after they were created. */
 export const LOOT_EXPIRY_MS = 120_000 as const;
+/** Code defaults when the content release has no `rules.loot` (ADR-041). */
+export const DEFAULT_AUTO_PICKUP_RANGE_TILES = 3 as const;
+export const DEFAULT_CONTESTED_DELAY_MS = 60_000 as const;
 /** A merchant can be used from this many tiles away. */
 export const SHOP_RANGE_TILES = 3 as const;
 /** One shop command may move at most this many units. */

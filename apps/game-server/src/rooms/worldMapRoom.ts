@@ -28,6 +28,7 @@ import {
   combatTargetChangedSchema,
   commandAckSchema,
   commandRejectedSchema,
+  DEFAULT_AUTO_PICKUP_RANGE_TILES,
   sessionKickedSchema,
   inventoryEquipSchema,
   inventorySnapshotSchema,
@@ -212,6 +213,8 @@ export type WorldMapRoomOptions = {
   economyRng?: () => number;
   monsterRespawnMs?: number;
   playerRespawnMs?: number;
+  /** Test seam: disable owner auto-pickup when a test exercises manual loot. */
+  autoPickup?: boolean;
 };
 
 const DEFAULT_RECONNECT_GRACE_SECONDS = 15;
@@ -224,6 +227,10 @@ const RECENT_COMMAND_WINDOW = 32;
 const RECENT_CHAT_WINDOW = 32;
 const COLOR_COUNT = 6;
 const LOOT_EXPIRY_CHECK_TICKS = 20;
+/** Owner auto-pickup is cheap but needs no per-tick cadence (ADR-041). */
+const AUTO_PICKUP_INTERVAL_TICKS = 4;
+const AUTO_PICKUP_FULL_BACKOFF_MS = 5_000;
+const AUTO_PICKUP_RETRY_BACKOFF_MS = 2_000;
 /** Database-side loot cleanup; the in-memory view expires every second. */
 const LOOT_DB_PURGE_INTERVAL_MS = 30_000;
 /** Repath towards a moving auto-attack target at most this often. */
@@ -372,6 +379,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private questPeriodKey: string | null = null;
   /** Quest giver display names from every compiled map. */
   private readonly npcNames = new Map<string, string>();
+  /** Owner drops inside this radius fly into the bag on their own (ADR-041). */
+  private autoPickupRangeTiles: number = DEFAULT_AUTO_PICKUP_RANGE_TILES;
+  private autoPickupEnabled = true;
+  private readonly autoPickupInFlight = new Set<string>();
+  private readonly autoPickupBackoffUntil = new Map<string, number>();
+  private readonly autoPickupNotified = new Set<string>();
 
   override onCreate(options: WorldMapRoomOptions): void {
     this.options = options;
@@ -394,6 +407,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       assistSharePermille: 0,
       assistRangeTiles: 12,
     };
+    this.autoPickupRangeTiles =
+      this.content.bundle.rules?.loot?.autoPickupRangeTiles ?? DEFAULT_AUTO_PICKUP_RANGE_TILES;
+    this.autoPickupEnabled = options.autoPickup ?? true;
     this.parties =
       options.partyService ?? new PartyService({ maxMembers: this.partyRule.maxMembers });
     this.parties.registerRoom(this.roomId, {
@@ -1158,6 +1174,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     this.syncPlayers(players);
     this.syncMonsters();
+    if (this.tick % AUTO_PICKUP_INTERVAL_TICKS === 0) {
+      this.autoPickupTick();
+    }
     if (this.tick % LOOT_EXPIRY_CHECK_TICKS === 0) {
       this.expireLoot();
     }
@@ -1987,15 +2006,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.scheduleKillReward(event);
         const monster = this.combat.getMonster(event.entityId);
         if (monster?.boss === true) {
-          const killerName =
-            event.killerId === undefined
-              ? undefined
-              : this.state.players.get(event.killerId)?.displayName;
+          const creditedId = event.ownerId ?? event.killerId;
+          const creditedName =
+            creditedId === undefined ? undefined : this.state.players.get(creditedId)?.displayName;
           this.broadcastSystemNotice(
             'info',
-            killerName === undefined
+            creditedName === undefined
               ? `${monster.displayName}被击败了`
-              : `${monster.displayName}被 ${killerName} 击败了`,
+              : `${monster.displayName}被 ${creditedName} 击败了`,
           );
         }
         continue;
@@ -2302,6 +2320,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     loot.x = drop.x;
     loot.y = drop.y;
     loot.ownerId = drop.ownerId;
+    loot.ownerExpiresAt = drop.ownerExpiresAt ?? 0;
+    loot.pickupLockedUntil = drop.pickupLockedUntil ?? 0;
     loot.expiresAt = drop.expiresAt;
     this.state.loot.set(drop.dropId, loot);
 
@@ -2315,6 +2335,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (!this.state.loot.has(dropId)) {
       return;
     }
+    this.autoPickupBackoffUntil.delete(dropId);
+    this.autoPickupNotified.delete(dropId);
     const affected = this.interest.remove(dropId);
     this.state.loot.delete(dropId);
     if (affected.length > 0) {
@@ -2335,6 +2357,106 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
   }
 
+  /**
+   * Owned drops inside the owner's auto-pickup radius fly into the bag on
+   * their own (ADR-041). The pickup still goes through the asset transaction,
+   * so bag capacity, ownership and the owner window are re-checked there.
+   */
+  private autoPickupTick(): void {
+    if (!this.autoPickupEnabled) {
+      return;
+    }
+    const now = Date.now();
+    for (const [dropId, loot] of this.state.loot) {
+      if (loot.ownerId === '' || loot.pickupLockedUntil !== 0) {
+        continue;
+      }
+      if (loot.ownerExpiresAt <= now || loot.expiresAt <= now) {
+        continue;
+      }
+      if (this.autoPickupInFlight.has(dropId)) {
+        continue;
+      }
+      if ((this.autoPickupBackoffUntil.get(dropId) ?? 0) > now) {
+        continue;
+      }
+      const session = this.registry.findByPlayerId(loot.ownerId);
+      const player = this.combat.getPlayer(loot.ownerId);
+      if (session === undefined || player === undefined) {
+        continue;
+      }
+      if (!player.alive || session.transferring) {
+        continue;
+      }
+      if (this.state.players.get(loot.ownerId)?.connected !== true) {
+        continue;
+      }
+      const distance = Math.hypot(player.x - loot.x, player.y - loot.y) / TILE_UNITS;
+      if (distance > this.autoPickupRangeTiles) {
+        continue;
+      }
+      this.startAutoPickup(session, dropId);
+    }
+  }
+
+  private startAutoPickup(session: SessionRecord, dropId: string): void {
+    const ownerId = session.playerId;
+    this.autoPickupInFlight.add(dropId);
+    void this.enqueueAsset(() =>
+      this.assets.pickup({
+        characterId: ownerId,
+        commandId: randomUUID(),
+        dropId,
+        mapId: this.map.mapId,
+        partyMemberIds: [],
+      }),
+    )
+      .then((outcome) => {
+        if (outcome.claimed === null) {
+          return;
+        }
+        this.removeLootState(dropId);
+        this.autoPickupBackoffUntil.delete(dropId);
+        this.autoPickupNotified.delete(dropId);
+        this.broadcast(SERVER_MESSAGES.lootClaimed, lootClaimedSchema.parse(outcome.claimed));
+        this.metrics.recordLootPickedUp();
+        const current = this.registry.findByPlayerId(ownerId);
+        if (current !== undefined) {
+          current.assetSnapshot = outcome.snapshot;
+          this.sendAssetSnapshot(current.client, current);
+        }
+      })
+      .catch((error: unknown) => {
+        const now = Date.now();
+        if (error instanceof AssetError) {
+          if (
+            error.code === 'ALREADY_CLAIMED' ||
+            error.code === 'DROP_EXPIRED' ||
+            error.code === 'ITEM_NOT_FOUND'
+          ) {
+            this.removeLootState(dropId);
+            return;
+          }
+          if (error.code === 'INVENTORY_FULL') {
+            this.autoPickupBackoffUntil.set(dropId, now + AUTO_PICKUP_FULL_BACKOFF_MS);
+            if (!this.autoPickupNotified.has(dropId)) {
+              this.autoPickupNotified.add(dropId);
+              this.sendSystemNotice(session.client, 'warning', '背包已满，战利品留在原地');
+            }
+            return;
+          }
+        }
+        this.autoPickupBackoffUntil.set(dropId, now + AUTO_PICKUP_RETRY_BACKOFF_MS);
+        this.options.logger.warn(
+          { err: error, roomId: this.roomId, dropId, characterId: ownerId },
+          'auto pickup failed',
+        );
+      })
+      .finally(() => {
+        this.autoPickupInFlight.delete(dropId);
+      });
+  }
+
   private enqueueAsset<T>(task: () => Promise<T>): Promise<T> {
     const startedAt = performance.now();
     const run = this.assetQueue.then(task, task);
@@ -2349,9 +2471,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     return run;
   }
 
-  private scheduleKillReward(event: { entityId: string; killerId?: string | undefined }): void {
-    const killerId = event.killerId;
-    if (killerId === undefined || !this.state.players.has(killerId)) {
+  private scheduleKillReward(event: {
+    entityId: string;
+    killerId?: string | undefined;
+    ownerId?: string | undefined;
+  }): void {
+    // Rewards follow the monster's claim owner, not the last hitter (ADR-041).
+    const ownerId = event.ownerId ?? event.killerId;
+    if (ownerId === undefined || !this.state.players.has(ownerId)) {
       return;
     }
     const monster = this.combat.getMonster(event.entityId);
@@ -2362,7 +2489,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       ++this.killSequence,
     )}`;
     const input: KillRewardInput = {
-      characterId: killerId,
+      characterId: ownerId,
       mapId: this.map.mapId,
       reference,
       monsterTemplateId: monster.templateId,
@@ -2372,11 +2499,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     void this.enqueueAsset(() => this.grantRewardWithRetry(input)).catch((error: unknown) => {
       this.metrics.recordAssetFailure();
       this.options.logger.error(
-        { err: error, roomId: this.roomId, reference, characterId: killerId },
+        { err: error, roomId: this.roomId, reference, characterId: ownerId },
         'failed to grant kill reward',
       );
     });
-    this.schedulePartyAssists(killerId, reference, monster);
+    this.schedulePartyAssists(ownerId, reference, monster);
   }
 
   /**
@@ -2386,19 +2513,19 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
    * behind the killer's reward.
    */
   private schedulePartyAssists(
-    killerId: string,
+    ownerId: string,
     reference: string,
     monster: { templateId: string; x: number; y: number },
   ): void {
     if (this.partyRule.assistSharePermille <= 0) {
       return;
     }
-    const party = this.parties.partyOf(killerId);
+    const party = this.parties.partyOf(ownerId);
     if (party === undefined) {
       return;
     }
     for (const memberId of party.memberIds) {
-      if (memberId === killerId) {
+      if (memberId === ownerId) {
         continue;
       }
       const session = this.registry.findByPlayerId(memberId);
@@ -2664,6 +2791,16 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
     const command = parsed.data;
+    const loot = this.state.loot.get(command.dropId);
+    if (loot !== undefined && loot.pickupLockedUntil > Date.now()) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'DROP_LOCKED',
+        { retryAfterMs: loot.pickupLockedUntil - Date.now() },
+      );
+      return;
+    }
     void this.runAssetCommand(
       client,
       command,

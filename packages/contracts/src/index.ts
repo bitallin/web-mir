@@ -157,6 +157,8 @@ export type {
 } from './assets';
 
 export {
+  DEFAULT_AUTO_PICKUP_RANGE_TILES,
+  DEFAULT_CONTESTED_DELAY_MS,
   ECONOMY_CONTENT_VERSION,
   EQUIPMENT_SLOTS,
   INVENTORY_CAPACITY,
@@ -231,6 +233,7 @@ export {
   healEffectSchema,
   itemContentSchema,
   lootEntrySchema,
+  lootRuleSchema,
   lootTableSchema,
   monsterContentSchema,
   partyRuleSchema,
@@ -258,6 +261,7 @@ export type {
   DeathPenaltyRule,
   ItemContent,
   LootEntryContent,
+  LootRuleContent,
   LootTableContent,
   MonsterContent,
   PartyRule,

@@ -423,6 +423,7 @@ async function main(): Promise<void> {
       'shop.catalog',
       'combat.event',
       'loot.claimed',
+      'inventory.snapshot',
       'character.progress',
       'character.levelUp',
       'asset.result',

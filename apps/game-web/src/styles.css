@@ -1669,6 +1669,34 @@ body {
   background: rgba(168, 207, 127, 0.1);
 }
 
+.loot-row.locked {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.loot-row.locked:hover {
+  background: transparent;
+}
+
+.loot-lock {
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+@keyframes bag-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(201, 162, 39, 0.85);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgba(201, 162, 39, 0);
+  }
+}
+
+.bag-toggle.bag-pulse {
+  animation: bag-pulse 0.65s ease-out;
+}
+
 .loot-qty {
   color: var(--muted);
   font-family: var(--mono);

@@ -29,11 +29,16 @@ export class LootVisual {
   readonly container: Phaser.GameObjects.Container;
   readonly current: ScreenPoint;
   readonly frame: number;
+  private readonly baseLabel: string;
+  private readonly label: Phaser.GameObjects.Text;
+  private lockedUntil: number;
 
   constructor(scene: Phaser.Scene, view: LootView) {
     this.current = { x: 0, y: 0 };
     const color = LOOT_COLORS[view.templateId] ?? 0xc9b27a;
     this.frame = itemIconFrame(assetManifest.itemIcons, view.templateId);
+    this.baseLabel = `${view.displayName}${view.quantity > 1 ? ` ×${String(view.quantity)}` : ''}`;
+    this.lockedUntil = view.pickupLockedUntil;
 
     const shadow = scene.add.graphics();
     shadow.fillStyle(0x000000, 0.35);
@@ -49,8 +54,8 @@ export class LootVisual {
       .sprite(0, -14, ITEM_ICON_TEXTURE_KEY, this.frame)
       .setDisplaySize(ICON_SIZE, ICON_SIZE);
 
-    const label = scene.add
-      .text(0, -30, `${view.displayName}${view.quantity > 1 ? ` ×${String(view.quantity)}` : ''}`, {
+    this.label = scene.add
+      .text(0, -30, this.baseLabel, {
         fontFamily: DISPLAY_FONT,
         fontSize: '11px',
         color: '#e8e0cd',
@@ -59,7 +64,7 @@ export class LootVisual {
       })
       .setOrigin(0.5, 1);
 
-    this.container = scene.add.container(0, 0, [shadow, plate, icon, label]);
+    this.container = scene.add.container(0, 0, [shadow, plate, icon, this.label]);
     const pulse = scene.tweens.add({
       targets: plate,
       alpha: { from: 0.7, to: 1 },
@@ -78,6 +83,20 @@ export class LootVisual {
     this.current.y = screen.y;
     this.container.setPosition(screen.x, screen.y);
     this.container.setDepth(screen.y);
+  }
+
+  setLockedUntil(value: number): void {
+    this.lockedUntil = value;
+  }
+
+  /** Contested drops carry a countdown until anyone may pick them (ADR-041). */
+  updateLock(now: number): void {
+    const remaining = this.lockedUntil - now;
+    this.label.setText(
+      remaining > 0
+        ? `${this.baseLabel} · 争夺 ${String(Math.ceil(remaining / 1_000))}s`
+        : this.baseLabel,
+    );
   }
 
   destroy(): void {

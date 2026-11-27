@@ -248,6 +248,11 @@ export const lootEntrySchema = z
     chance: z.number().min(0).max(1),
     minQuantity: z.number().int().min(1).max(1_000),
     maxQuantity: z.number().int().min(1).max(1_000),
+    /**
+     * Contested loot has no owner, stays locked for a while and must be picked
+     * up by hand; whoever reaches it after the lock wins it (ADR-041).
+     */
+    contested: z.boolean().optional(),
   })
   .strict();
 
@@ -314,11 +319,28 @@ export const dailyResetRuleSchema = z
 
 export type DailyResetRule = z.infer<typeof dailyResetRuleSchema>;
 
+/**
+ * Loot tuning for owner auto-pickup and contested drops (ADR-041). Absent
+ * fields fall back to code defaults, so historical releases keep their
+ * checksums (EL-004).
+ */
+export const lootRuleSchema = z
+  .object({
+    /** Owner auto-pickup radius in tiles; defaults to 3. */
+    autoPickupRangeTiles: z.number().min(1).max(10).optional(),
+    /** How long contested drops stay unpickable; defaults to 60 seconds. */
+    contestedDelayMs: z.number().int().min(0).max(600_000).optional(),
+  })
+  .strict();
+
+export type LootRuleContent = z.infer<typeof lootRuleSchema>;
+
 export const rulesContentSchema = z
   .object({
     deathPenalty: deathPenaltyRuleSchema.optional(),
     party: partyRuleSchema.optional(),
     dailyReset: dailyResetRuleSchema.optional(),
+    loot: lootRuleSchema.optional(),
   })
   .strict();
 

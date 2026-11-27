@@ -190,6 +190,48 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     expect(ledger[0]?.idempotencyKey).toBe(`kill:${reference}:gold`);
   });
 
+  it('creates contested boss drops without an owner and locks them for a minute', async () => {
+    const character = await createCharacter(db, 'warrior', { level: 12, gold: 0 });
+    const killedAt = new Date(clock);
+    const outcome = await service.grantKillReward({
+      characterId: character.id,
+      mapId: 'ruined_fields',
+      reference: `contested-${randomUUID()}`,
+      monsterTemplateId: 'ashen_colossus',
+      x: 30_500,
+      y: 33_500,
+    });
+    expect(outcome).not.toBeNull();
+    const heart = outcome?.drops.find((drop) => drop.templateId === 'colossus_heart');
+    expect(heart).toMatchObject({
+      ownerId: '',
+      ownerExpiresAt: 0,
+      pickupLockedUntil: killedAt.getTime() + 60_000,
+    });
+    const potion = outcome?.drops.find((drop) => drop.templateId === 'large_hp_potion');
+    expect(potion?.ownerId).toBe(character.id);
+    expect(potion?.pickupLockedUntil).toBe(0);
+
+    await expect(
+      service.pickup({
+        characterId: character.id,
+        commandId: randomUUID(),
+        dropId: heart!.dropId,
+        mapId: 'ruined_fields',
+      }),
+    ).rejects.toMatchObject({ code: 'DROP_LOCKED' });
+
+    clock = new Date(clock.getTime() + 60_001);
+    const picked = await service.pickup({
+      characterId: character.id,
+      commandId: randomUUID(),
+      dropId: heart!.dropId,
+      mapId: 'ruined_fields',
+    });
+    expect(picked.claimed?.templateId).toBe('colossus_heart');
+    expect(picked.snapshot.items.some((item) => item.templateId === 'colossus_heart')).toBe(true);
+  });
+
   it('levels up, refills vitals and recomputes max hp from the level', async () => {
     const character = await createCharacter(db, 'warrior', { exp: 25, hp: 40, mp: 10 });
 

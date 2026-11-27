@@ -107,6 +107,8 @@ export type LootView = {
   x: number;
   y: number;
   ownerId: string;
+  ownerExpiresAt: number;
+  pickupLockedUntil: number;
   expiresAt: number;
 };
 
@@ -938,6 +940,8 @@ export class WorldClient {
         x: drop.x,
         y: drop.y,
         ownerId: drop.ownerId,
+        ownerExpiresAt: drop.ownerExpiresAt,
+        pickupLockedUntil: drop.pickupLockedUntil,
         expiresAt: drop.expiresAt,
       });
     });

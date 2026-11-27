@@ -93,6 +93,11 @@ export const worldDrops = pgTable(
       onDelete: 'set null',
     }),
     ownerExpiresAt: timestamp('owner_expires_at', { withTimezone: true }),
+    /**
+     * Contested (ownerless) drops cannot be picked up before this instant
+     * (ADR-041). Null for normal owned drops.
+     */
+    pickupLockedUntil: timestamp('pickup_locked_until', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     claimedAt: timestamp('claimed_at', { withTimezone: true }),
     claimedByCharacterId: uuid('claimed_by_character_id').references(() => characters.id, {

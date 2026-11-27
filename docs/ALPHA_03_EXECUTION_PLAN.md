@@ -19,6 +19,7 @@
 | S3-C  | 10 步主线任务链：野外发布者、面板分组、引导优先主线        | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_CHAIN_REPORT.md`             |
 | S3-D1 | 收集类任务目标：背包进度、交物事务、每日材料消耗           | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_COLLECT_QUESTS_REPORT.md`、ADR-040 |
 | S3-D2 | 到达类任务目标：地点、半径与探索进度                       | 待定 | —                                                                        |
+| S3-E  | 怪物归属、自动拾取、争夺掉落与远处自动走近                 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_LOOT_PICKUP_REPORT.md`、ADR-041    |
 | S4    | 待定：社交深化（队伍聊天/移交/踢人/地图标识）              | 待定 | —                                                                        |
 | S5    | 待定：交易或排行榜最小版                                   | 待定 | —                                                                        |
 

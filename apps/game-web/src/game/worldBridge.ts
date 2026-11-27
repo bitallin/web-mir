@@ -3,6 +3,7 @@ import type {
   CombatEvent,
   CombatTargetChanged,
   CommandAck,
+  LootClaimed,
   TilePoint,
 } from '@web-legend/contracts';
 
@@ -46,6 +47,7 @@ export type WorldSceneHandle = {
   applyAutoAttackState: (state: CombatTargetChanged) => void;
   selfUnitPosition: () => { x: number; y: number } | null;
   applyCombatEvent: (event: CombatEvent) => void;
+  playLootClaim: (claimed: LootClaimed) => void;
   screenPointForTile: (tile: TilePoint) => ScreenPoint;
   monsterScreenPoint: (monsterId: string) => ScreenPoint | null;
   playerScreenPoint: (playerId: string) => ScreenPoint | null;
@@ -113,6 +115,10 @@ export class WorldBridge {
 
   pushCombatEvent(event: CombatEvent): void {
     this.scene?.applyCombatEvent(event);
+  }
+
+  playLootClaim(claimed: LootClaimed): void {
+    this.scene?.playLootClaim(claimed);
   }
 
   requestMove(tile: TilePoint): void {
