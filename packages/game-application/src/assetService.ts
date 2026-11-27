@@ -172,6 +172,12 @@ export type PickupInput = {
   commandId: string;
   dropId: string;
   mapId: string;
+  /**
+   * The picker's current party members, including the picker. The room is the
+   * authority for transient party state; a drop's owner window also admits the
+   * owner's party (ADR-035).
+   */
+  partyMemberIds?: readonly string[];
 };
 
 export type EquipInput = { characterId: string; commandId: string; itemId: string };
@@ -696,7 +702,8 @@ export class AssetService {
         drop.ownerCharacterId !== null &&
         drop.ownerCharacterId !== input.characterId &&
         drop.ownerExpiresAt !== null &&
-        drop.ownerExpiresAt.getTime() > now.getTime()
+        drop.ownerExpiresAt.getTime() > now.getTime() &&
+        !(input.partyMemberIds ?? []).includes(drop.ownerCharacterId)
       ) {
         throw new AssetError('NOT_OWNER');
       }

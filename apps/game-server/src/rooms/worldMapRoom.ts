@@ -2542,6 +2542,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           commandId: command.commandId,
           dropId: command.dropId,
           mapId: this.map.mapId,
+          // Parties share the owner's loot window; membership is transient and
+          // owned by this room, so the room supplies it (ADR-035).
+          partyMemberIds: this.parties.partyOf(session.playerId)?.memberIds ?? [],
         }),
       (_session, outcome) => {
         if (outcome.claimed !== null) {

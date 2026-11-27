@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 
-import { INVENTORY_CAPACITY, LOOT_EXPIRY_MS, type ContentBundle } from '@web-legend/contracts';
+import {
+  INVENTORY_CAPACITY,
+  LOOT_EXPIRY_MS,
+  LOOT_OWNER_WINDOW_MS,
+  type ContentBundle,
+} from '@web-legend/contracts';
 import {
   DEFAULT_CONTENT_BUNDLE,
   STARTER_KIT,
@@ -1402,5 +1407,72 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     expect(
       await db.select().from(assetCommands).where(eq(assetCommands.characterId, mate.id)),
     ).toHaveLength(0);
+  });
+
+  it('lets a party member loot a kill inside the owner window', async () => {
+    const killer = await createCharacter(db, 'warrior', { level: 3 });
+    const member = await createCharacter(db, 'mage', { level: 3 });
+    const stranger = await createCharacter(db, 'taoist', { level: 3 });
+    const reward = await service.grantKillReward({
+      characterId: killer.id,
+      mapId: 'starter_wilds',
+      reference: `test-party-loot-${randomUUID()}`,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    const drop = reward?.drops[0];
+    expect(drop).toBeDefined();
+    if (drop === undefined) {
+      return;
+    }
+
+    await expect(
+      service.pickup({
+        characterId: stranger.id,
+        commandId: randomUUID(),
+        dropId: drop.dropId,
+        mapId: 'starter_wilds',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_OWNER' });
+
+    const claimed = await service.pickup({
+      characterId: member.id,
+      commandId: randomUUID(),
+      dropId: drop.dropId,
+      mapId: 'starter_wilds',
+      partyMemberIds: [killer.id, member.id],
+    });
+    expect(claimed.deduplicated).toBe(false);
+    expect(claimed.claimed?.claimerId).toBe(member.id);
+
+    const assets = await service.loadAssets(member.id);
+    expect(assets.snapshot.items.some((item) => item.templateId === 'slime_gel')).toBe(true);
+  });
+
+  it('releases the owner window to everyone after it expires', async () => {
+    const killer = await createCharacter(db, 'warrior', { level: 3 });
+    const stranger = await createCharacter(db, 'mage', { level: 3 });
+    const reward = await service.grantKillReward({
+      characterId: killer.id,
+      mapId: 'starter_wilds',
+      reference: `test-owner-window-${randomUUID()}`,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    const drop = reward?.drops[0];
+    if (drop === undefined) {
+      throw new Error('kill reward produced no drop');
+    }
+
+    clock = new Date(clock.getTime() + LOOT_OWNER_WINDOW_MS + 1_000);
+    const claimed = await service.pickup({
+      characterId: stranger.id,
+      commandId: randomUUID(),
+      dropId: drop.dropId,
+      mapId: 'starter_wilds',
+    });
+    expect(claimed.claimed?.claimerId).toBe(stranger.id);
   });
 });

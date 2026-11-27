@@ -6,7 +6,9 @@ import {
   MONSTER_STATE_CODES,
   PROTOCOL_VERSION,
   STARTER_WILDS_MAP_ID,
+  TILE_UNITS,
   commandRejectedSchema,
+  lootClaimedSchema,
   partyInviteViewSchema,
   partySnapshotSchema,
   worldRoomNameFor,
@@ -20,6 +22,7 @@ import {
   assetCommands,
   characters,
   createDatabase,
+  itemInstances,
   worldDrops,
   type Database,
   type DatabaseHandle,
@@ -403,7 +406,7 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
 
   it('shares kill experience with nearby members only', async () => {
     const killer = await actorAt({ x: 6, y: 15 });
-    const nearby = await actorAt({ x: 6, y: 16 });
+    const nearby = await actorAt({ x: 7, y: 16 });
     // 14 tiles from the killer (inside the 15-tile invite range) but 13 tiles
     // from the monster (outside the 12-tile assist range).
     const faraway = await actorAt({ x: 20, y: 15 });
@@ -492,6 +495,75 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
         ),
       );
     expect(killerDrops.length).toBeGreaterThan(0);
+
+    // Party members share the owner window: the nearby member can loot a drop
+    // that belongs to the killer, through the real room and pickup transaction.
+    // The shared test database can still hold unclaimed drops from other test
+    // files, and a new room restores them onto its map. Select this kill's drop
+    // by its owner instead of taking whatever appears first (TD-QA-10 family).
+    await waitUntil(
+      () =>
+        [...roomNearby.state.loot.values()].some((entry) => entry.ownerId === killer.character.id),
+      5_000,
+      'killer drop visible to the party',
+    );
+    const lootEntry = [...roomNearby.state.loot.values()].find(
+      (entry) => entry.ownerId === killer.character.id,
+    );
+    if (lootEntry === undefined) {
+      throw new Error('no ground drop to loot');
+    }
+    const dropId = lootEntry.dropId;
+    // Walk onto the drop: the monster died while chasing, so the owner window
+    // is shared but the pickup range still applies.
+    roomNearby.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetTileX: Math.floor(lootEntry.x / TILE_UNITS),
+      targetTileY: Math.floor(lootEntry.y / TILE_UNITS),
+    });
+    await waitUntil(
+      () => {
+        const player = roomNearby.state.players.get(nearby.character.id);
+        return (
+          player !== undefined &&
+          Math.abs(player.x - lootEntry.x) <= TILE_UNITS &&
+          Math.abs(player.y - lootEntry.y) <= TILE_UNITS
+        );
+      },
+      5_000,
+      'member within pickup range',
+    );
+
+    const claimed = waitForMessage(roomNearby, 'loot.claimed', (payload) =>
+      lootClaimedSchema.parse(payload),
+    );
+    const rejected = waitForMessage(roomNearby, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    roomNearby.send('loot.pickup', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      dropId,
+    });
+    const outcome = await Promise.race([
+      claimed.then((claim) => ({ kind: 'claimed' as const, claim })),
+      rejected.then((rejection) => ({ kind: 'rejected' as const, rejection })),
+    ]);
+    if (outcome.kind === 'rejected') {
+      throw new Error(`party loot rejected: ${outcome.rejection.code}`);
+    }
+    const claim = outcome.claim;
+    expect(claim.claimerId).toBe(nearby.character.id);
+    const memberItems = await db
+      .select()
+      .from(itemInstances)
+      .where(eq(itemInstances.characterId, nearby.character.id));
+    expect(
+      memberItems.some((item) => item.container === 'inventory' && item.templateId === 'slime_gel'),
+    ).toBe(true);
   });
 
   it('rejects an invite from outside the visible range', async () => {
