@@ -161,6 +161,7 @@ function dailyResetLabel(quest: QuestView): string | null {
 export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatDraft, setChatDraft] = useState('');
+  const [chatChannel, setChatChannel] = useState<'map' | 'party'>('map');
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
   const [bagSorted, setBagSorted] = useState(false);
@@ -198,6 +199,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     acceptPartyInvite,
     declinePartyInvite,
     leaveParty,
+    transferPartyLeader,
+    kickPartyMember,
     toggleSfx,
   } = useWorldSession(containerRef, {
     character,
@@ -214,6 +217,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   }, []);
 
   const classDefinition = CHARACTER_CLASS_CATALOG[character.classId];
+  const partyLeaderId = state.party?.leaderId ?? null;
   const self = state.players.find((player) => player.playerId === state.selfId);
   const selfName = self?.displayName;
   const mapName = mapNameFor(state.mapId);
@@ -446,10 +450,17 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     if (draft.trim().length === 0) {
       return;
     }
-    if (sendChat(draft)) {
+    if (sendChat(draft, chatChannel)) {
       setChatDraft('');
     }
-  }, [chatDraft, sendChat]);
+  }, [chatChannel, chatDraft, sendChat]);
+
+  // Leaving or losing the party must not leave the composer on a dead channel.
+  useEffect(() => {
+    if (state.party === null && chatChannel === 'party') {
+      setChatChannel('map');
+    }
+  }, [state.party, chatChannel]);
 
   useEffect(() => {
     if (nearbyMerchant === null) {
@@ -808,6 +819,31 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                     <span className={`party-member-state ${member.alive ? '' : 'offline'}`}>
                       {!member.connected ? '断线' : member.alive ? '在线' : '倒下'}
                     </span>
+                    {partyLeaderId === state.selfId && member.playerId !== state.selfId ? (
+                      <span className="party-member-actions">
+                        <button
+                          type="button"
+                          data-testid="party-transfer"
+                          title={`把队长交给 ${member.displayName}`}
+                          onClick={() => {
+                            transferPartyLeader(member.playerId);
+                          }}
+                        >
+                          移交
+                        </button>
+                        <button
+                          type="button"
+                          className="party-kick"
+                          data-testid="party-kick"
+                          title={`把 ${member.displayName} 移出队伍`}
+                          onClick={() => {
+                            kickPartyMember(member.playerId);
+                          }}
+                        >
+                          踢出
+                        </button>
+                      </span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -1258,8 +1294,37 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         data-testid="chat-panel"
       >
         <div className="panel-heading">
-          <h2>地图频道</h2>
-          <span>{mapName}</span>
+          <div className="chat-channel-tabs" role="tablist" aria-label="聊天频道">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={chatChannel === 'map'}
+              className={chatChannel === 'map' ? 'active' : ''}
+              data-testid="chat-channel-map"
+              onClick={() => {
+                setChatChannel('map');
+              }}
+            >
+              附近
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={chatChannel === 'party'}
+              className={chatChannel === 'party' ? 'active' : ''}
+              data-testid="chat-channel-party"
+              disabled={state.party === null}
+              title={state.party === null ? '加入队伍后可发送队伍消息' : undefined}
+              onClick={() => {
+                setChatChannel('party');
+              }}
+            >
+              队伍
+            </button>
+          </div>
+          <span>
+            {chatChannel === 'party' ? `${state.party?.members.length ?? 0} 人` : mapName}
+          </span>
           <button
             type="button"
             className="chat-toggle"
@@ -1284,14 +1349,20 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         ) : null}
         <ul data-testid="chat-log">
           {state.messages.length === 0 ? (
-            <li className="empty">同地图的玩家都能看到这里的消息</li>
+            <li className="empty">
+              {chatChannel === 'party'
+                ? '队伍消息只有队伍成员能看到'
+                : '同地图的玩家都能看到这里的消息'}
+            </li>
           ) : null}
           {state.messages.map((message) => (
             <li
               key={message.messageId}
               data-testid="chat-message"
               data-player-id={message.playerId}
+              data-channel={message.channel}
             >
+              {message.channel === 'party' ? <span className="chat-channel-tag">队伍</span> : null}
               <span className="chat-author">{message.displayName}</span>
               <span className="chat-text">{message.message}</span>
             </li>
@@ -1307,7 +1378,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <input
             type="text"
             data-testid="chat-input"
-            placeholder="说点什么…"
+            placeholder={chatChannel === 'party' ? '发送到队伍…' : '说点什么…'}
             maxLength={CHAT_MESSAGE_MAX_LENGTH}
             value={chatDraft}
             onChange={(event) => {

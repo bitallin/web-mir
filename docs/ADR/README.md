@@ -46,5 +46,8 @@
 | [ADR-039](ADR-039-one-click-quest-guidance.md)                                 | 一键任务导航、自动战斗与自动返回         | Accepted              |
 | [ADR-040](ADR-040-collect-quest-objectives.md)                                 | 收集类任务目标、背包进度与交物交付       | Accepted              |
 | [ADR-041](ADR-041-monster-claims-and-smart-loot-pickup.md)                     | 怪物归属、自动拾取、争夺掉落与一键走近   | Accepted              |
+| [ADR-042](ADR-042-arrival-quest-objectives.md)                                 | 到达类任务目标与权威位置判定             | Accepted              |
+| [ADR-043](ADR-043-eight-way-movement-and-keyboard-controls.md)                 | 八方向移动、斜向不切角与键盘操作         | Accepted              |
+| [ADR-044](ADR-044-party-management-and-chat.md)                                | 队伍移交/踢人、队伍聊天与跨图投递        | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

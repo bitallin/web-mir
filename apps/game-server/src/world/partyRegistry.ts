@@ -37,6 +37,17 @@ export type PartyLeaveResult = {
   formerPartyId: string | null;
 };
 
+export type PartyManagementRejection =
+  'not_in_party' | 'not_leader' | 'target_not_member' | 'target_self';
+
+export type PartyLeaderChangeResult =
+  | { kind: 'transferred'; party: PartyState }
+  | { kind: 'rejected'; reason: PartyManagementRejection };
+
+export type PartyKickResult =
+  | { kind: 'kicked'; party: PartyState; kickedId: string }
+  | { kind: 'rejected'; reason: PartyManagementRejection };
+
 export type PartyRegistryOptions = {
   maxMembers: number;
   now?: () => number;
@@ -170,6 +181,56 @@ export class PartyRegistry {
       }
     }
     return { party, formerPartyId };
+  }
+
+  /**
+   * Hands leadership to another member. The party stays intact, so only the
+   * roster's leader flag changes. Permission is checked here rather than in the
+   * room so every caller obeys the same rule.
+   */
+  transferLeader(actorId: string, targetId: string): PartyLeaderChangeResult {
+    const party = this.partyOf(actorId);
+    if (party === undefined) {
+      return { kind: 'rejected', reason: 'not_in_party' };
+    }
+    if (party.leaderId !== actorId) {
+      return { kind: 'rejected', reason: 'not_leader' };
+    }
+    if (targetId === actorId) {
+      return { kind: 'rejected', reason: 'target_self' };
+    }
+    if (!party.memberIds.includes(targetId)) {
+      return { kind: 'rejected', reason: 'target_not_member' };
+    }
+    party.leaderId = targetId;
+    return { kind: 'transferred', party };
+  }
+
+  /**
+   * Removes a member on the leader's order. A leader cannot kick themselves
+   * (they leave instead), so the party always keeps at least the leader. Any
+   * invitation the kicked player sent is dropped for the same reason as on
+   * leave: it must not pull strangers into a party they no longer belong to.
+   */
+  kick(actorId: string, targetId: string): PartyKickResult {
+    const party = this.partyOf(actorId);
+    if (party === undefined) {
+      return { kind: 'rejected', reason: 'not_in_party' };
+    }
+    if (party.leaderId !== actorId) {
+      return { kind: 'rejected', reason: 'not_leader' };
+    }
+    if (targetId === actorId) {
+      return { kind: 'rejected', reason: 'target_self' };
+    }
+    if (!party.memberIds.includes(targetId)) {
+      return { kind: 'rejected', reason: 'target_not_member' };
+    }
+    party.memberIds = party.memberIds.filter((memberId) => memberId !== targetId);
+    this.partyIdByMember.delete(targetId);
+    this.dropInvitesSentBy(targetId);
+    this.dropInvitesTo(targetId);
+    return { kind: 'kicked', party, kickedId: targetId };
   }
 
   /** Drops expired invitations; called from the room's maintenance interval. */

@@ -101,6 +101,7 @@ export type {
 } from './combat';
 
 export {
+  CHAT_CHANNELS,
   CHAT_MESSAGE_MAX_LENGTH,
   CLIENT_MESSAGES,
   COMMAND_REJECTION_CODES,
@@ -111,6 +112,7 @@ export {
   PLAYER_SPEED_UNITS_PER_SECOND,
   SERVER_MESSAGES,
   TILE_UNITS,
+  chatChannelSchema,
   chatMessageSchema,
   chatSendSchema,
   commandAckSchema,
@@ -125,6 +127,7 @@ export {
   worldJoinOptionsSchema,
 } from './realtime';
 export type {
+  ChatChannel,
   ChatMessage,
   ChatSend,
   CommandAck,
@@ -335,9 +338,11 @@ export {
   partyDeclineCommandSchema,
   partyInviteCommandSchema,
   partyInviteViewSchema,
+  partyKickCommandSchema,
   partyLeaveCommandSchema,
   partyMemberViewSchema,
   partySnapshotSchema,
+  partyTransferLeaderCommandSchema,
   partyViewSchema,
 } from './party';
 export type {
@@ -345,9 +350,11 @@ export type {
   PartyDeclineCommand,
   PartyInviteCommand,
   PartyInviteView,
+  PartyKickCommand,
   PartyLeaveCommand,
   PartyMemberView,
   PartySnapshot,
+  PartyTransferLeaderCommand,
   PartyView,
 } from './party';
 

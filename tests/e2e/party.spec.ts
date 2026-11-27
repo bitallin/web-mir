@@ -115,7 +115,7 @@ test('players form a party, leave it, and keep it across a map transfer', async 
   await expect(alice.page.getByTestId('party-member')).toHaveCount(1);
   await expect(alice.page.getByTestId('party-size')).toHaveText('1/4');
 
-  // Re-form, then leave the map: parties are bound to the room hosting them.
+  // Re-form, then leave the map: the party survives the transfer (ADR-036).
   await invite(alice.page, bob.name);
   await acceptInvite(bob.page, alice.name);
   await expect(alice.page.getByTestId('party-member')).toHaveCount(2);
@@ -144,4 +144,64 @@ test('players form a party, leave it, and keep it across a map transfer', async 
     alice.page.locator(`[data-testid="party-member"][data-name="${bob.name}"]`),
   ).toHaveAttribute('data-connected', 'true', { timeout: 15_000 });
   await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'party-after-transfer.png') });
+});
+
+test('party leaders hand over command, kick, and chat privately', async ({ browser }) => {
+  const socialDir = join(process.cwd(), 'docs', 'phase-reports', 'alpha-03', 'party-social');
+  mkdirSync(socialDir, { recursive: true });
+  const alice = await registerWorld(browser, '?fresh=1');
+  const roomId = (await alice.page.getByTestId('room-id').textContent())?.trim() ?? '';
+  expect(roomId).not.toBe('');
+  expect(roomId).not.toBe('—');
+  const bob = await registerWorld(browser, `?join=${roomId}`);
+
+  await expect(playerRow(alice.page, bob.name)).toHaveCount(1, { timeout: 20_000 });
+  await invite(alice.page, bob.name);
+  await acceptInvite(bob.page, alice.name);
+  await expect(alice.page.getByTestId('party-member')).toHaveCount(2, { timeout: 10_000 });
+  await expect(bob.page.getByTestId('party-member')).toHaveCount(2, { timeout: 10_000 });
+
+  // The party channel is private to members and shows a channel tag.
+  await expect(bob.page.getByTestId('chat-channel-party')).toBeEnabled({ timeout: 10_000 });
+  await alice.page.getByTestId('chat-channel-party').click();
+  await expect(alice.page.getByTestId('chat-channel-party')).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await alice.page.getByTestId('chat-input').fill('follow me to the east gate');
+  await alice.page.getByTestId('chat-send').click();
+
+  const partyMessages = (page: Page) =>
+    page.locator('[data-testid="chat-message"][data-channel="party"]');
+  await expect(
+    partyMessages(alice.page).filter({ hasText: 'follow me to the east gate' }),
+  ).toHaveCount(1, { timeout: 10_000 });
+  const bobPartyMessage = partyMessages(bob.page).filter({
+    hasText: 'follow me to the east gate',
+  });
+  await expect(bobPartyMessage).toHaveCount(1, { timeout: 10_000 });
+  await expect(bobPartyMessage).toContainText(alice.name);
+  await bob.page.screenshot({ path: join(socialDir, 'e2e-party-chat.png') });
+
+  // The leader hands command over; management controls move with the badge.
+  await memberRow(alice.page, bob.name).getByTestId('party-transfer').click();
+  await expect(memberRow(alice.page, bob.name)).toHaveAttribute('data-leader', 'true', {
+    timeout: 10_000,
+  });
+  await expect(memberRow(bob.page, bob.name)).toHaveAttribute('data-leader', 'true', {
+    timeout: 10_000,
+  });
+  await expect(memberRow(alice.page, bob.name).getByTestId('party-kick')).toHaveCount(0);
+  await expect(memberRow(bob.page, alice.name).getByTestId('party-kick')).toBeVisible();
+  await alice.page.screenshot({ path: join(socialDir, 'e2e-leader-transferred.png') });
+
+  // The new leader kicks the old one; only the leader remains in the roster.
+  await memberRow(bob.page, alice.name).getByTestId('party-kick').click();
+  await expect(alice.page.getByTestId('party-panel')).toHaveCount(0, { timeout: 10_000 });
+  await expect(bob.page.getByTestId('party-member')).toHaveCount(1);
+  await expect(bob.page.getByTestId('party-size')).toHaveText('1/4');
+  // The kicked player's composer falls back to map chat.
+  await expect(alice.page.getByTestId('chat-channel-party')).toBeDisabled();
+  await expect(alice.page.getByTestId('chat-channel-map')).toHaveAttribute('aria-selected', 'true');
+  await bob.page.screenshot({ path: join(socialDir, 'e2e-member-kicked.png') });
 });

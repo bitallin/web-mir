@@ -43,8 +43,10 @@ import {
   partyAcceptCommandSchema,
   partyDeclineCommandSchema,
   partyInviteCommandSchema,
+  partyKickCommandSchema,
   partyLeaveCommandSchema,
   partySnapshotSchema,
+  partyTransferLeaderCommandSchema,
   playerRespawnPointOf,
   questAcceptSchema,
   questClaimSchema,
@@ -170,7 +172,7 @@ import { BASE_ROOM_CONTENT, type ContentProvider, type RoomContent } from '../wo
 import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket } from '../world/rateLimiter';
 import { PartyService } from '../world/partyService';
-import { type PartyState } from '../world/partyRegistry';
+import { type PartyManagementRejection, type PartyState } from '../world/partyRegistry';
 import { CommandGuard } from './commandGuard';
 import { SessionRegistry, type QuestNavigationState, type SessionRecord } from './sessionRegistry';
 import {
@@ -435,6 +437,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       sendInvite: (playerId, invite) => {
         this.registry.findByPlayerId(playerId)?.client.send(SERVER_MESSAGES.partyInvite, invite);
       },
+      sendChat: (playerId, message) => {
+        this.registry
+          .findByPlayerId(playerId)
+          ?.client.send(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(message));
+      },
       refresh: (playerIds) => {
         for (const playerId of playerIds) {
           const session = this.registry.findByPlayerId(playerId);
@@ -608,6 +615,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     });
     this.onMessage<unknown>(CLIENT_MESSAGES.partyLeave, (client, message) => {
       this.handlePartyLeave(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.partyTransferLeader, (client, message) => {
+      this.handlePartyTransferLeader(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.partyKick, (client, message) => {
+      this.handlePartyKick(client, message);
     });
 
     this.clock.setInterval(() => {
@@ -2232,15 +2245,31 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
 
+    const channel = parsed.data.channel;
+    let partyMemberIds: readonly string[] | null = null;
+    if (channel === 'party') {
+      const party = this.parties.partyOf(session.playerId);
+      if (party === undefined) {
+        this.sendRejection(client, {}, 'PARTY_NOT_IN_PARTY');
+        return;
+      }
+      partyMemberIds = party.memberIds;
+    }
+
     const message: ChatMessage = {
       messageId: randomUUID(),
       playerId: session.playerId,
       displayName,
       message: filtered.text.slice(0, CHAT_MESSAGE_MAX_LENGTH),
-      channel: 'map',
+      channel,
       serverTime: Date.now(),
     };
-    this.broadcast(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(message));
+    if (partyMemberIds === null) {
+      this.broadcast(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(message));
+    } else {
+      // Party chat follows membership across maps, not the room broadcast.
+      this.parties.deliverChat(partyMemberIds, chatMessageSchema.parse(message));
+    }
     this.metrics.recordChatMessage();
   }
 
@@ -4174,6 +4203,105 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         return null;
       },
     );
+  }
+
+  private handlePartyTransferLeader(client: Client, raw: unknown): void {
+    const parsed = partyTransferLeaderCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    this.runPartyCommand(
+      client,
+      command,
+      (session) => this.validatePartyManagement(session, command.targetPlayerId),
+      (session) => {
+        const result = this.parties.transferLeader(session.playerId, command.targetPlayerId);
+        if (result.kind === 'rejected') {
+          return this.partyManagementRejectionCode(result.reason);
+        }
+        const targetName = this.parties.presenceOf(command.targetPlayerId)?.displayName ?? '队友';
+        this.sendSystemNotice(session.client, 'info', `已把队长交给 ${targetName}`);
+        for (const memberId of result.party.memberIds) {
+          if (memberId === session.playerId) {
+            continue;
+          }
+          const member = this.registry.findByPlayerId(memberId);
+          if (member !== undefined) {
+            this.sendSystemNotice(
+              member.client,
+              'info',
+              `${session.displayName} 把队长交给了 ${targetName}`,
+            );
+          }
+        }
+        return null;
+      },
+    );
+  }
+
+  private handlePartyKick(client: Client, raw: unknown): void {
+    const parsed = partyKickCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    this.runPartyCommand(
+      client,
+      command,
+      (session) => this.validatePartyManagement(session, command.targetPlayerId),
+      (session) => {
+        const result = this.parties.kick(session.playerId, command.targetPlayerId);
+        if (result.kind === 'rejected') {
+          return this.partyManagementRejectionCode(result.reason);
+        }
+        // Presence outlives membership, so the kicked player's name is still
+        // readable here even though their roster has been cleared.
+        const kickedName = this.parties.presenceOf(result.kickedId)?.displayName ?? '队友';
+        // The kicked player's roster is cleared by the service refresh, which
+        // is routed to whichever room hosts them (it may not be this one).
+        for (const memberId of result.party.memberIds) {
+          const member = this.registry.findByPlayerId(memberId);
+          if (member !== undefined) {
+            this.sendSystemNotice(member.client, 'info', `${kickedName} 已被队长移出队伍`);
+          }
+        }
+        return null;
+      },
+    );
+  }
+
+  /** Shared permission rule for leader-only roster changes. */
+  private validatePartyManagement(
+    session: SessionRecord,
+    targetPlayerId: string,
+  ): CommandRejectionCode | null {
+    const party = this.parties.partyOf(session.playerId);
+    if (party === undefined) {
+      return 'PARTY_NOT_IN_PARTY';
+    }
+    if (party.leaderId !== session.playerId) {
+      return 'PARTY_NOT_LEADER';
+    }
+    if (targetPlayerId === session.playerId) {
+      return 'PARTY_TARGET_SELF';
+    }
+    return party.memberIds.includes(targetPlayerId) ? null : 'PARTY_TARGET_NOT_MEMBER';
+  }
+
+  private partyManagementRejectionCode(reason: PartyManagementRejection): CommandRejectionCode {
+    switch (reason) {
+      case 'not_in_party':
+        return 'PARTY_NOT_IN_PARTY';
+      case 'not_leader':
+        return 'PARTY_NOT_LEADER';
+      case 'target_self':
+        return 'PARTY_TARGET_SELF';
+      case 'target_not_member':
+        return 'PARTY_TARGET_NOT_MEMBER';
+    }
   }
 
   /**

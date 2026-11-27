@@ -2,6 +2,7 @@ import { QUEST_NPC_RANGE_TILES, SHOP_RANGE_TILES, TILE_UNITS } from '@web-legend
 import type {
   CharacterView,
   CharacterProgress,
+  ChatChannel,
   ChatMessage,
   CombatEvent,
   CombatProfile,
@@ -1227,6 +1228,32 @@ class WorldSession {
     return sent;
   }
 
+  /** Leader-only; the server re-checks leadership and membership. */
+  transferPartyLeader(targetPlayerId: string): boolean {
+    if (this.party === null) {
+      return false;
+    }
+    const sent = this.client?.sendPartyTransferLeader(targetPlayerId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  /** Leader-only; the server re-checks leadership and membership. */
+  kickPartyMember(targetPlayerId: string): boolean {
+    if (this.party === null) {
+      return false;
+    }
+    const sent = this.client?.sendPartyKick(targetPlayerId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
   private clearPartyInvite(): void {
     if (this.partyInviteTimer !== null) {
       window.clearTimeout(this.partyInviteTimer);
@@ -1254,8 +1281,8 @@ class WorldSession {
     return sent;
   }
 
-  sendChat(text: string): boolean {
-    return this.client?.sendChat(text) ?? false;
+  sendChat(text: string, channel: ChatChannel = 'map'): boolean {
+    return this.client?.sendChat(text, channel) ?? false;
   }
 
   rejoin(): void {
@@ -1523,7 +1550,7 @@ class WorldSession {
       activeTelegraphs: () => this.bridge.activeTelegraphs(),
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),
       interactNpc: (npcId) => this.interactNpc(npcId),
-      sendChat: (text) => this.sendChat(text),
+      sendChat: (text, channel) => this.sendChat(text, channel),
       pickupDrop: (dropId) => this.pickup(dropId),
       equipItem: (itemId) => this.equip(itemId),
       unequipSlot: (slot) => this.unequip(slot),
@@ -1541,6 +1568,8 @@ class WorldSession {
       acceptPartyInvite: () => this.acceptPartyInvite(),
       declinePartyInvite: () => this.declinePartyInvite(),
       leaveParty: () => this.leaveParty(),
+      transferPartyLeader: (playerId) => this.transferPartyLeader(playerId),
+      kickPartyMember: (playerId) => this.kickPartyMember(playerId),
       partyState: () => this.party,
       partyInviteState: () => this.partyInvite,
       lootDrops: () => this.latestLoot,
@@ -1563,7 +1592,7 @@ class WorldSession {
 export type WorldSessionControls = {
   state: SessionState;
   rejoin: () => void;
-  sendChat: (text: string) => boolean;
+  sendChat: (text: string, channel?: ChatChannel) => boolean;
   castSkill: (skillId: string, targetId: string) => boolean;
   selectTarget: (monsterId: string) => void;
   attack: (targetId: string) => boolean;
@@ -1584,6 +1613,8 @@ export type WorldSessionControls = {
   acceptPartyInvite: () => boolean;
   declinePartyInvite: () => boolean;
   leaveParty: () => boolean;
+  transferPartyLeader: (targetPlayerId: string) => boolean;
+  kickPartyMember: (targetPlayerId: string) => boolean;
   toggleSfx: () => void;
 };
 
@@ -1630,7 +1661,11 @@ export function useWorldSession(
     sessionRef.current?.rejoin();
   }, []);
 
-  const sendChat = useCallback((text: string) => sessionRef.current?.sendChat(text) ?? false, []);
+  const sendChat = useCallback(
+    (text: string, channel: ChatChannel = 'map') =>
+      sessionRef.current?.sendChat(text, channel) ?? false,
+    [],
+  );
   const castSkill = useCallback(
     (skillId: string, targetId: string) =>
       sessionRef.current?.castSkill(skillId, targetId) ?? false,
@@ -1696,6 +1731,14 @@ export function useWorldSession(
     [],
   );
   const leaveParty = useCallback(() => sessionRef.current?.leaveParty() ?? false, []);
+  const transferPartyLeader = useCallback(
+    (targetPlayerId: string) => sessionRef.current?.transferPartyLeader(targetPlayerId) ?? false,
+    [],
+  );
+  const kickPartyMember = useCallback(
+    (targetPlayerId: string) => sessionRef.current?.kickPartyMember(targetPlayerId) ?? false,
+    [],
+  );
   const toggleSfx = useCallback(() => {
     sessionRef.current?.toggleSfx();
   }, []);
@@ -1724,6 +1767,8 @@ export function useWorldSession(
     acceptPartyInvite,
     declinePartyInvite,
     leaveParty,
+    transferPartyLeader,
+    kickPartyMember,
     toggleSfx,
   };
 }

@@ -1,10 +1,12 @@
-import type { CharacterClass, PartyInviteView } from '@web-legend/contracts';
+import type { CharacterClass, ChatMessage, PartyInviteView } from '@web-legend/contracts';
 
 import {
   PartyRegistry,
   type PartyAcceptResult,
   type PartyInviteRecord,
   type PartyInviteResult,
+  type PartyKickResult,
+  type PartyLeaderChangeResult,
   type PartyLeaveResult,
   type PartyState,
 } from './partyRegistry';
@@ -32,6 +34,8 @@ export type PartyMemberPresence = {
 /** What a room lets the service do to its players. */
 export type PartyRoomPort = {
   sendInvite: (playerId: string, invite: PartyInviteView) => void;
+  /** Delivers a party-channel message to one member hosted by this room. */
+  sendChat: (playerId: string, message: ChatMessage) => void;
   /** Re-send each listed player's roster snapshot when they are hosted here. */
   refresh: (playerIds: readonly string[]) => void;
 };
@@ -142,6 +146,37 @@ export class PartyService {
       this.refreshMembers(result.party.memberIds);
     }
     return result;
+  }
+
+  transferLeader(actorId: string, targetId: string): PartyLeaderChangeResult {
+    const result = this.registry.transferLeader(actorId, targetId);
+    if (result.kind === 'transferred') {
+      this.refreshMembers(result.party.memberIds);
+    }
+    return result;
+  }
+
+  /**
+   * A kicked player is no longer a member, so the regular member refresh would
+   * skip them; they are routed by presence instead to clear their roster.
+   */
+  kick(actorId: string, targetId: string): PartyKickResult {
+    const result = this.registry.kick(actorId, targetId);
+    if (result.kind === 'kicked') {
+      this.refreshMembers([result.kickedId, ...result.party.memberIds]);
+    }
+    return result;
+  }
+
+  /**
+   * Party chat follows membership, not the map: each member is delivered by
+   * whichever room currently hosts them, so a party split across maps still
+   * talks. A member between rooms has no port and misses the message.
+   */
+  deliverChat(playerIds: readonly string[], message: ChatMessage): void {
+    for (const playerId of playerIds) {
+      this.portFor(playerId)?.sendChat(playerId, message);
+    }
   }
 
   /** The character is leaving the world for good: drop party and presence. */

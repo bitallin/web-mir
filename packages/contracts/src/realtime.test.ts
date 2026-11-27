@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  chatMessageSchema,
+  chatSendSchema,
   commandAckSchema,
   commandRejectedSchema,
   DEFAULT_PATCH_RATE_MS,
@@ -162,5 +164,35 @@ describe('moveStopCommandSchema', () => {
         x: 4_000,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('chat channels', () => {
+  const base = {
+    protocolVersion: 1,
+    clientMessageId: '0192f0a0-0000-7000-8000-000000000002',
+    message: 'hello',
+  };
+
+  it('defaults a chat send without a channel to map chat', () => {
+    expect(chatSendSchema.parse(base).channel).toBe('map');
+  });
+
+  it('accepts an explicit party channel and rejects unknown channels', () => {
+    expect(chatSendSchema.parse({ ...base, channel: 'party' }).channel).toBe('party');
+    expect(chatSendSchema.safeParse({ ...base, channel: 'world' }).success).toBe(false);
+  });
+
+  it('validates delivered messages on both channels', () => {
+    const delivered = {
+      messageId: '0192f0a0-0000-7000-8000-000000000003',
+      playerId: '0192f0a0-0000-7000-8000-000000000004',
+      displayName: 'Guardian',
+      message: 'hello',
+      serverTime: 10,
+    };
+    expect(chatMessageSchema.parse({ ...delivered, channel: 'map' }).channel).toBe('map');
+    expect(chatMessageSchema.parse({ ...delivered, channel: 'party' }).channel).toBe('party');
+    expect(chatMessageSchema.safeParse({ ...delivered, channel: 'world' }).success).toBe(false);
   });
 });

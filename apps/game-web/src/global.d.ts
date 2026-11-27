@@ -46,7 +46,7 @@ declare global {
       activeTelegraphs: () => TelegraphView[];
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
-      sendChat: (text: string) => boolean;
+      sendChat: (text: string, channel?: 'map' | 'party') => boolean;
       pickupDrop: (dropId: string) => boolean;
       equipItem: (itemId: string) => boolean;
       unequipSlot: (slot: EquipmentSlot) => boolean;
@@ -68,6 +68,8 @@ declare global {
       leaveParty: () => boolean;
       partyState: () => PartyView | null;
       partyInviteState: () => PartyInviteView | null;
+      transferPartyLeader: (playerId: string) => boolean;
+      kickPartyMember: (playerId: string) => boolean;
       lootDrops: () => LootView[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
       lootIconFrame: (dropId: string) => number | null;

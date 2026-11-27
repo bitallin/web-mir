@@ -28,6 +28,7 @@ import {
   worldRoomNameFor,
   type AssetResult,
   type CharacterProgress,
+  type ChatChannel,
   type ChatMessage,
   type CombatEvent,
   type CombatProfile,
@@ -513,6 +514,14 @@ export class WorldClient {
     return this.sendPartyCommand(CLIENT_MESSAGES.partyLeave, {});
   }
 
+  sendPartyTransferLeader(targetPlayerId: string): boolean {
+    return this.sendPartyCommand(CLIENT_MESSAGES.partyTransferLeader, { targetPlayerId });
+  }
+
+  sendPartyKick(targetPlayerId: string): boolean {
+    return this.sendPartyCommand(CLIENT_MESSAGES.partyKick, { targetPlayerId });
+  }
+
   private sendPartyCommand(kind: string, fields: Record<string, string>): boolean {
     const room = this.room;
     if (room === null || this.stopped || this.transferring) {
@@ -528,7 +537,7 @@ export class WorldClient {
     return true;
   }
 
-  sendChat(text: string): boolean {
+  sendChat(text: string, channel: ChatChannel = 'map'): boolean {
     const room = this.room;
     const message = text.trim();
     if (
@@ -544,6 +553,7 @@ export class WorldClient {
     room.send(CLIENT_MESSAGES.chatSend, {
       protocolVersion: PROTOCOL_VERSION,
       clientMessageId: createUuid(),
+      channel,
       message,
     });
     return true;

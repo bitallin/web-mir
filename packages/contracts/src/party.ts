@@ -102,3 +102,23 @@ export type PartyDeclineCommand = z.infer<typeof partyDeclineCommandSchema>;
 export const partyLeaveCommandSchema = z.object(partyCommandBase).strict();
 
 export type PartyLeaveCommand = z.infer<typeof partyLeaveCommandSchema>;
+
+/** Only the current leader may hand the party over; the target must be a member. */
+export const partyTransferLeaderCommandSchema = z
+  .object({
+    ...partyCommandBase,
+    targetPlayerId: z.uuid(),
+  })
+  .strict();
+
+export type PartyTransferLeaderCommand = z.infer<typeof partyTransferLeaderCommandSchema>;
+
+/** Only the current leader may remove another member; the leader cannot kick self. */
+export const partyKickCommandSchema = z
+  .object({
+    ...partyCommandBase,
+    targetPlayerId: z.uuid(),
+  })
+  .strict();
+
+export type PartyKickCommand = z.infer<typeof partyKickCommandSchema>;

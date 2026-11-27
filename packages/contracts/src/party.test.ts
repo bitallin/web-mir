@@ -5,8 +5,10 @@ import {
   partyAcceptCommandSchema,
   partyInviteCommandSchema,
   partyInviteViewSchema,
+  partyKickCommandSchema,
   partyLeaveCommandSchema,
   partySnapshotSchema,
+  partyTransferLeaderCommandSchema,
   partyViewSchema,
 } from './party';
 
@@ -98,5 +100,25 @@ describe('party contracts', () => {
       false,
     );
     expect(partyLeaveCommandSchema.parse(base)).toEqual(base);
+  });
+
+  it('accepts leader-only transfer and kick commands with a target member', () => {
+    const base = { protocolVersion: 1, commandId: COMMAND, clientSequence: 5 };
+    expect(
+      partyTransferLeaderCommandSchema.parse({ ...base, targetPlayerId: OTHER }),
+    ).toMatchObject({ targetPlayerId: OTHER });
+    expect(partyKickCommandSchema.parse({ ...base, targetPlayerId: OTHER })).toMatchObject({
+      targetPlayerId: OTHER,
+    });
+    expect(partyKickCommandSchema.safeParse({ ...base, targetPlayerId: 'nobody' }).success).toBe(
+      false,
+    );
+    expect(
+      partyTransferLeaderCommandSchema.safeParse({
+        ...base,
+        targetPlayerId: OTHER,
+        leaderId: PLAYER,
+      }).success,
+    ).toBe(false);
   });
 });

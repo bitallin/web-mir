@@ -22,17 +22,21 @@ function serviceWithRooms() {
   const service = new PartyService({ inviteTtlMs: 30_000 });
   const invites: { roomId: string; playerId: string; invite: PartyInviteView }[] = [];
   const refreshes: { roomId: string; playerIds: readonly string[] }[] = [];
+  const chats: { roomId: string; playerId: string; channel: string }[] = [];
   for (const roomId of ['room-a', 'room-b']) {
     service.registerRoom(roomId, {
       sendInvite: (playerId, invite) => {
         invites.push({ roomId, playerId, invite });
+      },
+      sendChat: (playerId, message) => {
+        chats.push({ roomId, playerId, channel: message.channel });
       },
       refresh: (playerIds) => {
         refreshes.push({ roomId, playerIds: [...playerIds] });
       },
     });
   }
-  return { service, invites, refreshes };
+  return { service, invites, refreshes, chats };
 }
 
 describe('PartyService', () => {
@@ -116,5 +120,80 @@ describe('PartyService', () => {
     service.removePlayer('a');
     expect(service.presenceOf('a')).toBeUndefined();
     expect(service.partyOf('a')).toBeUndefined();
+  });
+});
+
+describe('PartyService management and chat', () => {
+  function twoMemberParty() {
+    const rooms = serviceWithRooms();
+    for (const playerId of ['a', 'b']) {
+      rooms.service.setPresence(presence(playerId, playerId === 'a' ? 'room-a' : 'room-b'));
+    }
+    const invite = rooms.service.createInvite('a', 'b');
+    if (invite.kind !== 'invited') {
+      throw new Error('invite rejected');
+    }
+    rooms.service.acceptInvite(invite.invite.inviteId, 'b');
+    rooms.refreshes.length = 0;
+    return rooms;
+  }
+
+  it('refreshes both rooms after a leadership hand-over', () => {
+    const { service, refreshes } = twoMemberParty();
+    expect(service.transferLeader('a', 'b').kind).toBe('transferred');
+    expect(refreshes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ roomId: 'room-a' }),
+        expect.objectContaining({ roomId: 'room-b' }),
+      ]),
+    );
+    expect(service.partyOf('a')?.leaderId).toBe('b');
+  });
+
+  it('refreshes the kicked player’s room so their roster clears', () => {
+    const { service, refreshes } = twoMemberParty();
+    expect(service.kick('a', 'b').kind).toBe('kicked');
+    // The kicked player is routed by presence even though they are no longer
+    // a member; the room turns their snapshot into a null party.
+    expect(refreshes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ roomId: 'room-a', playerIds: ['a'] }),
+        expect.objectContaining({ roomId: 'room-b', playerIds: ['b'] }),
+      ]),
+    );
+    expect(service.partyOf('b')).toBeUndefined();
+    expect(service.presenceOf('b')).toBeDefined();
+  });
+
+  it('delivers party chat to each member through the room that hosts them', () => {
+    const { service, chats } = twoMemberParty();
+    service.deliverChat(['a', 'b'], {
+      messageId: '0192f0a0-0000-7000-8000-000000000010',
+      playerId: 'a',
+      displayName: 'Player-a',
+      message: 'regroup',
+      channel: 'party',
+      serverTime: 10,
+    });
+    expect(chats).toEqual(
+      expect.arrayContaining([
+        { roomId: 'room-a', playerId: 'a', channel: 'party' },
+        { roomId: 'room-b', playerId: 'b', channel: 'party' },
+      ]),
+    );
+  });
+
+  it('drops chat for a member who is between rooms', () => {
+    const { service, chats } = twoMemberParty();
+    service.markOffline('b');
+    service.deliverChat(['a', 'b'], {
+      messageId: '0192f0a0-0000-7000-8000-000000000011',
+      playerId: 'a',
+      displayName: 'Player-a',
+      message: 'regroup',
+      channel: 'party',
+      serverTime: 10,
+    });
+    expect(chats).toEqual([{ roomId: 'room-a', playerId: 'a', channel: 'party' }]);
   });
 });

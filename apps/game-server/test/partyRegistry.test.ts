@@ -126,3 +126,89 @@ describe('PartyRegistry', () => {
     });
   });
 });
+
+describe('PartyRegistry leadership', () => {
+  function threeMemberParty() {
+    const { instance } = registry();
+    for (const target of ['b', 'c']) {
+      const { inviteId } = inviteIds(instance, 'a', target);
+      expect(instance.acceptInvite(inviteId, target).kind).toBe('joined');
+    }
+    return instance;
+  }
+
+  it('lets only the leader hand leadership to an existing member', () => {
+    const instance = threeMemberParty();
+    expect(instance.transferLeader('b', 'c')).toEqual({
+      kind: 'rejected',
+      reason: 'not_leader',
+    });
+    expect(instance.transferLeader('a', 'stranger')).toEqual({
+      kind: 'rejected',
+      reason: 'target_not_member',
+    });
+    expect(instance.transferLeader('a', 'a')).toEqual({
+      kind: 'rejected',
+      reason: 'target_self',
+    });
+
+    const result = instance.transferLeader('a', 'c');
+    expect(result.kind).toBe('transferred');
+    if (result.kind !== 'transferred') {
+      return;
+    }
+    expect(result.party.leaderId).toBe('c');
+    expect(instance.partyOf('a')?.leaderId).toBe('c');
+    // The new leader can manage the roster; the old one no longer can.
+    expect(instance.transferLeader('a', 'b')).toEqual({
+      kind: 'rejected',
+      reason: 'not_leader',
+    });
+    expect(instance.transferLeader('c', 'a').kind).toBe('transferred');
+  });
+
+  it('lets only the leader kick a member and keeps the leader', () => {
+    const instance = threeMemberParty();
+    expect(instance.kick('b', 'c')).toEqual({ kind: 'rejected', reason: 'not_leader' });
+    expect(instance.kick('a', 'a')).toEqual({ kind: 'rejected', reason: 'target_self' });
+    expect(instance.kick('a', 'stranger')).toEqual({
+      kind: 'rejected',
+      reason: 'target_not_member',
+    });
+
+    const result = instance.kick('a', 'b');
+    expect(result.kind).toBe('kicked');
+    if (result.kind !== 'kicked') {
+      return;
+    }
+    expect(result.kickedId).toBe('b');
+    expect(result.party.memberIds).toEqual(['a', 'c']);
+    expect(result.party.leaderId).toBe('a');
+    expect(instance.partyOf('b')).toBeUndefined();
+    expect(instance.isMember('b')).toBe(false);
+  });
+
+  it('drops invitations sent by a kicked member', () => {
+    const instance = threeMemberParty();
+    const pending = inviteIds(instance, 'b', 'd');
+    expect(instance.pendingInviteFor('d')?.inviteId).toBe(pending.inviteId);
+
+    expect(instance.kick('a', 'b').kind).toBe('kicked');
+    expect(instance.pendingInviteFor('d')).toBeUndefined();
+    // Accepting the stale invite cannot pull d into the old party.
+    expect(instance.acceptInvite(pending.inviteId, 'd')).toEqual({
+      kind: 'rejected',
+      reason: 'invite_expired',
+    });
+    expect(instance.partyOf('d')).toBeUndefined();
+  });
+
+  it('rejects management commands from players outside a party', () => {
+    const instance = threeMemberParty();
+    expect(instance.transferLeader('z', 'a')).toEqual({
+      kind: 'rejected',
+      reason: 'not_in_party',
+    });
+    expect(instance.kick('z', 'a')).toEqual({ kind: 'rejected', reason: 'not_in_party' });
+  });
+});

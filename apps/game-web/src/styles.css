@@ -498,6 +498,33 @@ body {
   color: var(--bad);
 }
 
+.party-member-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.party-member-actions button {
+  padding: 1px 7px;
+  border: 1px solid #2b323a;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.party-member-actions button:hover {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
+.party-member-actions .party-kick:hover {
+  border-color: #6b2f2f;
+  color: var(--bad);
+}
+
 .party-leave {
   padding: 2px 8px;
   border: 1px solid #2b323a;
@@ -1006,6 +1033,39 @@ body {
 .chat-panel .panel-heading span {
   color: var(--muted);
   font-size: 11px;
+}
+
+.chat-channel-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.chat-channel-tabs button {
+  padding: 2px 9px;
+  border: 1px solid #2b323a;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-channel-tabs button.active {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
+.chat-channel-tabs button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.chat-channel-tag {
+  flex: none;
+  align-self: center;
+  padding: 0 4px;
+  border: 1px solid #33415c;
+  color: #8fb4ff;
+  font-size: 10px;
 }
 
 .chat-panel ul {

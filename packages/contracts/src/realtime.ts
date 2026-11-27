@@ -35,6 +35,8 @@ export const CLIENT_MESSAGES = {
   partyAccept: 'party.accept',
   partyDecline: 'party.decline',
   partyLeave: 'party.leave',
+  partyTransferLeader: 'party.transfer',
+  partyKick: 'party.kick',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -136,6 +138,11 @@ export type MoveStopCommand = z.infer<typeof moveStopCommandSchema>;
 
 export const CHAT_MESSAGE_MAX_LENGTH = 120 as const;
 
+/** Map chat reaches everyone in the room; party chat is routed to members only. */
+export const CHAT_CHANNELS = ['map', 'party'] as const;
+export const chatChannelSchema = z.enum(CHAT_CHANNELS);
+export type ChatChannel = z.infer<typeof chatChannelSchema>;
+
 /**
  * Chat is not an asset operation, but it still carries a client-generated id so
  * a duplicate delivery inside one session is dropped instead of being broadcast
@@ -145,6 +152,8 @@ export const chatSendSchema = z
   .object({
     protocolVersion: z.number().int().positive(),
     clientMessageId: z.uuid(),
+    /** Omitting the channel keeps old clients on map chat. */
+    channel: chatChannelSchema.default('map'),
     message: z
       .string()
       .min(1)
@@ -169,7 +178,7 @@ export const chatMessageSchema = z
     playerId: z.uuid(),
     displayName: z.string().min(1).max(32),
     message: z.string().min(1).max(CHAT_MESSAGE_MAX_LENGTH),
-    channel: z.literal('map'),
+    channel: chatChannelSchema,
     serverTime: z.number().nonnegative(),
   })
   .strict();
@@ -251,6 +260,9 @@ export const COMMAND_REJECTION_CODES = [
   'PARTY_FULL',
   'PARTY_INVITE_EXPIRED',
   'PARTY_NOT_IN_PARTY',
+  'PARTY_NOT_LEADER',
+  'PARTY_TARGET_NOT_MEMBER',
+  'PARTY_TARGET_SELF',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -300,6 +312,9 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   PARTY_FULL: '队伍人数已满',
   PARTY_INVITE_EXPIRED: '组队邀请已过期或不存在',
   PARTY_NOT_IN_PARTY: '你当前不在队伍中',
+  PARTY_NOT_LEADER: '只有队长可以执行该操作',
+  PARTY_TARGET_NOT_MEMBER: '对方不在你的队伍中',
+  PARTY_TARGET_SELF: '不能对自己执行该操作',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

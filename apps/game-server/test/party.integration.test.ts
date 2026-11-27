@@ -8,12 +8,14 @@ import {
   STARTER_TOWN_MAP_ID,
   STARTER_WILDS_MAP_ID,
   TILE_UNITS,
+  chatMessageSchema,
   commandRejectedSchema,
   lootClaimedSchema,
   partyInviteViewSchema,
   partySnapshotSchema,
   sessionTransferSchema,
   worldRoomNameFor,
+  type ChatMessage,
   type CommandRejected,
   type PartyInviteView,
   type PartySnapshot,
@@ -414,6 +416,116 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
     await afterLeave;
   });
 
+  it('keeps party chat private and lets the leader hand over command', async () => {
+    const actorA = await actorAt(SAFE_TILE);
+    const actorB = await actorAt({ x: 3, y: 16 });
+    const outsider = await actorAt({ x: 4, y: 16 });
+    const roomA = await createWorld(actorA.ticket);
+    const roomB = await joinWorld(roomA.roomId, actorB.ticket);
+    const roomC = await joinWorld(roomA.roomId, outsider.ticket);
+    await waitUntil(
+      () =>
+        roomA.state.players.has(actorB.character.id) &&
+        roomA.state.players.has(outsider.character.id),
+      10_000,
+      'both members visible to the leader',
+    );
+    await formParty(roomA, roomB, actorA, actorB);
+
+    // Party chat reaches the member but never the stranger sharing the map.
+    const outsiderMessages: ChatMessage[] = [];
+    const unsubscribeOutsider = roomC.onMessage('chat.message', (payload: unknown) => {
+      outsiderMessages.push(chatMessageSchema.parse(payload));
+    });
+    try {
+      const partyChat = waitForMessage<ChatMessage>(roomB, 'chat.message', (payload) =>
+        chatMessageSchema.parse(payload),
+      );
+      roomA.send('chat.send', {
+        protocolVersion: PROTOCOL_VERSION,
+        clientMessageId: randomUUID(),
+        channel: 'party',
+        message: 'regroup behind the tree',
+      });
+      const delivered = await partyChat;
+      expect(delivered).toMatchObject({
+        channel: 'party',
+        playerId: actorA.character.id,
+        message: 'regroup behind the tree',
+      });
+
+      // The stranger still receives map chat, which proves they were attached
+      // and simply excluded from the party message rather than missing both.
+      const mapChat = waitForMessage<ChatMessage>(roomC, 'chat.message', (payload) =>
+        chatMessageSchema.parse(payload),
+      );
+      roomA.send('chat.send', {
+        protocolVersion: PROTOCOL_VERSION,
+        clientMessageId: randomUUID(),
+        channel: 'map',
+        message: 'map broadcast',
+      });
+      expect((await mapChat).channel).toBe('map');
+      await waitUntil(() => outsiderMessages.length > 0, 5_000, 'stranger chat delivery');
+      expect(outsiderMessages.filter((entry) => entry.channel === 'party')).toEqual([]);
+      expect(outsiderMessages.map((entry) => entry.message)).toContain('map broadcast');
+    } finally {
+      unsubscribeOutsider();
+    }
+
+    // The leader hands leadership over; the roster updates in both rooms and
+    // the old leader loses the right to manage members.
+    const promoted = waitForParty(
+      roomB,
+      (snapshot) => snapshot.party?.leaderId === actorB.character.id,
+    );
+    roomA.send('party.transfer', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetPlayerId: actorB.character.id,
+    });
+    await promoted;
+
+    const notLeader = waitForMessage<CommandRejected>(roomA, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    roomA.send('party.kick', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetPlayerId: actorB.character.id,
+    });
+    expect((await notLeader).code).toBe('PARTY_NOT_LEADER');
+
+    // The new leader kicks the old one; the kicked player's roster clears even
+    // though their presence in the world is unchanged.
+    const cleared = waitForParty(roomA, (snapshot) => snapshot.party === null);
+    const remaining = waitForParty(roomB, (snapshot) => snapshot.party?.members.length === 1);
+    roomB.send('party.kick', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetPlayerId: actorA.character.id,
+    });
+    await cleared;
+    const remainingSnapshot = await remaining;
+    expect(remainingSnapshot.party?.leaderId).toBe(actorB.character.id);
+    expect(remainingSnapshot.party?.members[0]?.playerId).toBe(actorB.character.id);
+
+    // A kicked player cannot keep talking on the party channel.
+    const rejected = waitForMessage<CommandRejected>(roomA, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    roomA.send('chat.send', {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: randomUUID(),
+      channel: 'party',
+      message: 'still here?',
+    });
+    expect((await rejected).code).toBe('PARTY_NOT_IN_PARTY');
+  });
+
   it('shares kill experience with nearby members only', async () => {
     const killer = await actorAt({ x: 6, y: 15 });
     const nearby = await actorAt({ x: 7, y: 16 });
@@ -657,6 +769,23 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
       10_000,
     );
     expect(online.party?.members).toHaveLength(2);
+
+    // Party chat follows membership across maps: Alice speaks from the wilds
+    // room and Bob, still in the town room, receives it.
+    const crossMapChat = waitForMessage<ChatMessage>(bobRoom, 'chat.message', (payload) =>
+      chatMessageSchema.parse(payload),
+    );
+    wilds.send('chat.send', {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: randomUUID(),
+      channel: 'party',
+      message: 'meet at the ruins gate',
+    });
+    expect(await crossMapChat).toMatchObject({
+      channel: 'party',
+      playerId: alice.character.id,
+      message: 'meet at the ruins gate',
+    });
   });
 
   it('rejects an invite from outside the visible range', async () => {
