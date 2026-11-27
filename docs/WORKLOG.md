@@ -3416,6 +3416,9 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 LOAD_OUTPUT=... pnpm l
 - `cb1d3ae` `feat(alpha-03): add the ruins world boss with an enrage phase`
   （34 个文件：契约/内容/领域/服务端/客户端、9 条测试、E2E、ADR-037、执行计划、
   切片报告、截图与负载证据）。
+- `b4c45ed` `fix(alpha-03): scale the boss nameplate and keep its label visible`
+  （3 个文件：首领名字标签碰撞盒按 1.45 倍容器缩放，首领标签优先于普通怪物；
+  修复首轮截图里骷髅名字压住首领名字的问题）。
 
 ### 下一步计划
 

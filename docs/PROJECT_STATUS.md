@@ -481,7 +481,7 @@ assets:generate` 同时生成角色与图标；三张地图已按新 manifest �
   （`alpha-03/boss/load-50p2a-boss.json`）。
 - 发布：`2026.11.27.2`（checksum `d35cc25d…`，新增 7 项）已激活；Game Server
   日志确认内容刷新；开发栈 84–87 已重启到本切片代码。
-- 提交：`cb1d3ae` `feat(alpha-03): add the ruins world boss with an enrage phase`。
+- 提交：`cb1d3ae` 世界首领主提交；`b4c45ed` 首领名字标签缩放与优先级修复。
 - 未验证：8584 三人真实击杀与手感确认、远端 CI；Boss 刷新为 Room 进程内状态
   （TD-SRV-12），无多阶段/世界频道/首杀记录。
 
