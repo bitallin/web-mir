@@ -2,18 +2,28 @@ import type { TilePoint } from '@web-legend/contracts';
 
 import { isInsideGrid, isStandable, type MovementGrid } from './grid';
 
+/**
+ * Clockwise order from north. Deterministic neighbour order keeps equal-length
+ * paths identical across runs.
+ */
 const NEIGHBOURS: readonly TilePoint[] = [
   { x: 0, y: -1 },
+  { x: 1, y: -1 },
   { x: 1, y: 0 },
+  { x: 1, y: 1 },
   { x: 0, y: 1 },
+  { x: -1, y: 1 },
   { x: -1, y: 0 },
+  { x: -1, y: -1 },
 ];
 
 /**
- * Deterministic four-directional breadth-first search. Returns the tile centers
- * to walk through after `from` (excluding `from`, including `to`), or null when
- * the target is not reachable. The server is the only authority that calls
- * this; clients render the accepted path.
+ * Deterministic eight-directional breadth-first search. Returns the tile
+ * centers to walk through after `from` (excluding `from`, including `to`), or
+ * null when the target is not reachable. A diagonal step requires both
+ * orthogonal neighbours to be walkable, so paths never cut a blocked corner
+ * (ADR-043). The server is the only authority that calls this; clients render
+ * the accepted path.
  */
 export function findPath(grid: MovementGrid, from: TilePoint, to: TilePoint): TilePoint[] | null {
   if (!isStandable(grid, from) || !isStandable(grid, to)) {
@@ -48,6 +58,10 @@ export function findPath(grid: MovementGrid, from: TilePoint, to: TilePoint): Ti
     const currentX = current % width;
     const currentY = (current - currentX) / width;
 
+    // Expand the neighbour closest to the target first: BFS still returns a
+    // minimum-step path, but ties now prefer a natural straight line instead
+    // of an equally short detour one row over.
+    const candidates: { x: number; y: number; score: number }[] = [];
     for (const offset of NEIGHBOURS) {
       const nextX = currentX + offset.x;
       const nextY = currentY + offset.y;
@@ -55,7 +69,27 @@ export function findPath(grid: MovementGrid, from: TilePoint, to: TilePoint): Ti
       if (!isInsideGrid(grid, next) || !grid.isWalkable(nextX, nextY)) {
         continue;
       }
+      if (
+        offset.x !== 0 &&
+        offset.y !== 0 &&
+        (!grid.isWalkable(currentX + offset.x, currentY) ||
+          !grid.isWalkable(currentX, currentY + offset.y))
+      ) {
+        continue;
+      }
       const nextIndex = nextY * width + nextX;
+      if (visited[nextIndex] === 1) {
+        continue;
+      }
+      candidates.push({
+        x: nextX,
+        y: nextY,
+        score: Math.hypot(nextX - to.x, nextY - to.y),
+      });
+    }
+    candidates.sort((left, right) => left.score - right.score);
+    for (const candidate of candidates) {
+      const nextIndex = candidate.y * width + candidate.x;
       if (visited[nextIndex] === 1) {
         continue;
       }

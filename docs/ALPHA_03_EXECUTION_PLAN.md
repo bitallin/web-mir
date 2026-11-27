@@ -10,18 +10,19 @@
 
 ## 切片顺序与状态
 
-| 切片  | 目标                                                       | 状态 | 证据                                                                     |
-| ----- | ---------------------------------------------------------- | ---- | ------------------------------------------------------------------------ |
-| S1    | 组队：邀请/接受/离开、名单、跨图保留、共享击杀经验与掉落   | 完成 | `docs/phase-reports/alpha-02/ALPHA_02_PARTY_REPORT.md`、ADR-035/036      |
-| S2    | 世界首领：废墟「灰烬魔像」、二阶段狂暴、地图公告、首领 HUD | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_BOSS_REPORT.md`、ADR-037           |
-| S3-A  | 每日任务：内容化重置、周期键、2 个日常任务                 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_DAILY_QUESTS_REPORT.md`、ADR-038   |
-| S3-B  | 一键任务导航：全局面板、远程接取、自动寻路/战斗与到达交付  | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_GUIDANCE_REPORT.md`、ADR-039 |
-| S3-C  | 10 步主线任务链：野外发布者、面板分组、引导优先主线        | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_CHAIN_REPORT.md`             |
-| S3-D1 | 收集类任务目标：背包进度、交物事务、每日材料消耗           | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_COLLECT_QUESTS_REPORT.md`、ADR-040 |
-| S3-D2 | 到达类任务目标：地点、半径与探索进度                       | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_REACH_QUESTS_REPORT.md`、ADR-042   |
-| S3-E  | 怪物归属、自动拾取、争夺掉落与远处自动走近                 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_LOOT_PICKUP_REPORT.md`、ADR-041    |
-| S4    | 待定：社交深化（队伍聊天/移交/踢人/地图标识）              | 待定 | —                                                                        |
-| S5    | 待定：交易或排行榜最小版                                   | 待定 | —                                                                        |
+| 切片  | 目标                                                       | 状态 | 证据                                                                         |
+| ----- | ---------------------------------------------------------- | ---- | ---------------------------------------------------------------------------- |
+| S1    | 组队：邀请/接受/离开、名单、跨图保留、共享击杀经验与掉落   | 完成 | `docs/phase-reports/alpha-02/ALPHA_02_PARTY_REPORT.md`、ADR-035/036          |
+| S2    | 世界首领：废墟「灰烬魔像」、二阶段狂暴、地图公告、首领 HUD | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_BOSS_REPORT.md`、ADR-037               |
+| S3-A  | 每日任务：内容化重置、周期键、2 个日常任务                 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_DAILY_QUESTS_REPORT.md`、ADR-038       |
+| S3-B  | 一键任务导航：全局面板、远程接取、自动寻路/战斗与到达交付  | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_GUIDANCE_REPORT.md`、ADR-039     |
+| S3-C  | 10 步主线任务链：野外发布者、面板分组、引导优先主线        | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_CHAIN_REPORT.md`                 |
+| S3-D1 | 收集类任务目标：背包进度、交物事务、每日材料消耗           | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_COLLECT_QUESTS_REPORT.md`、ADR-040     |
+| S3-D2 | 到达类任务目标：地点、半径与探索进度                       | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_REACH_QUESTS_REPORT.md`、ADR-042       |
+| S3-E  | 怪物归属、自动拾取、争夺掉落与远处自动走近                 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_LOOT_PICKUP_REPORT.md`、ADR-041        |
+| S3-M  | 八方向移动：斜向寻路/阻挡、WASD 短步、空格停止             | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_EIGHT_WAY_MOVEMENT_REPORT.md`、ADR-043 |
+| S4    | 待定：社交深化（队伍聊天/移交/踢人/地图标识）              | 待定 | —                                                                            |
+| S5    | 待定：交易或排行榜最小版                                   | 待定 | —                                                                            |
 
 ## S2 验收（已完成）
 
@@ -127,6 +128,20 @@
    sanity 与资产不变量见切片报告。
 8. 文档：ADR-042、切片报告、状态、日志、债务与经验记录同步。
 
+## S3-M 验收（已完成）
+
+1. 寻路：八方向 BFS；斜向步只有在两个正交邻格都可走时合法，禁止切角；
+   同长度路径优先直线。
+2. 速度：斜向按欧氏距离（约 1.414 格）计时，斜向不快于直线；服务端与客户端
+   预测使用同一规则。
+3. 朝向：逻辑朝向扩展为八方向（旧 0–3 不变，追加 4–7），四方向贴图在表现层
+   映射；无数据库迁移。
+4. 操作：WASD/方向键按住连续走、两键组合斜走；空格发送 `move.stop`，服务端
+   清空路径并停止自动攻击，返回空路径 ack。
+5. 验证：真实 Game Server 对角 `move.to` 到达两轴目标、`move.stop` 后位置
+   稳定；真实浏览器按住 D+S 斜向移动、空格停止；全量单元/集成与 E2E 通过。
+6. 文档：ADR-043、ADR-016 补充指针、切片报告、状态、日志与债务同步。
+
 ## 下一片选择依据
 
 1. **队伍聊天/队长移交/踢人**（TD-CLI-17）：社交体验完整度，工作量小到中等，
@@ -154,6 +169,9 @@
 - S3-E 新增：怪物归属是进程内状态（TD-SRV-13，P3）；没有可见归属标识
   （TD-CLI-22，P3）；自动走近受地图与 15 秒超时限制（TD-CLI-23，P3）；
   队伍共享掉落改为归属者自动拾取后的兜底（ADR-035 §8）。
+- S3-M 关闭：TD-CLI-07（无键盘移动/停止）、TD-CLI-18（四方向 L 形路线）；
+  新增 `move.stop` 加法协议；无迁移、无内容发布；四方向贴图用最近基本方向
+  映射，八方向美术留待 TD-CLI-13。
 - S3-D2 新增：到达目标在世界内没有光柱/小地图标记（TD-CLI-24，P3）；完成事务
   不写资产命令（到达不改变资产，幂等由行锁与状态条件保证）；到达扫描是每
   4 tick 的进程内位置检查，不引入数据库读取。

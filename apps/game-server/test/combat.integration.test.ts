@@ -406,9 +406,12 @@ describe.runIf(databaseUrl !== undefined)('world_map combat', () => {
     const bobEvents = collectCombatEvents(bobRoom);
 
     await waitUntil(
-      () => aliceRoom.state.players.size === 2 && monsterState(aliceRoom, SLIME) !== undefined,
+      () =>
+        aliceRoom.state.players.size === 2 &&
+        monsterState(aliceRoom, SLIME) !== undefined &&
+        monsterState(bobRoom, SLIME) !== undefined,
       5_000,
-      'both players and slime visible',
+      'both players and slime visible to both clients',
     );
     expect(monsterState(bobRoom, SLIME)).toBeDefined();
 

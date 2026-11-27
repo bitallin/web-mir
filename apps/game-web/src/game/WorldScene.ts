@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import {
   PLAYER_SPEED_UNITS_PER_SECOND,
+  TILE_UNITS,
   type CharacterAnimations,
   type CharacterClip,
   type CombatEvent,
@@ -23,6 +24,11 @@ import {
 import { resolveVisibleLabels, type LabelCandidate, type LabelRect } from './labelLayout';
 import { LootVisual } from './LootVisual';
 import { MonsterVisual } from './MonsterVisual';
+import {
+  directionFromHeldKeys,
+  isEightWayStepAllowed,
+  movementDirectionForKey,
+} from './keyboardMovement';
 import { buildPredictionWaypoints } from './movementPrediction';
 import {
   FALLBACK_ANIMATIONS,
@@ -350,8 +356,13 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private selfId: string | null = null;
   private selectedTargetId: string | null = null;
   private predicted: UnitPoint | null = null;
+  /** Last authoritative position received for the local player. */
+  private serverSelf: UnitPoint | null = null;
   private path: UnitPoint[] = [];
   private speed: number = PLAYER_SPEED_UNITS_PER_SECOND;
+  private readonly heldMovementKeys = new Set<string>();
+  /** Non-zero while a keyboard step awaits its ack (or times out). */
+  private keyboardMovePendingAt = 0;
 
   constructor(bridge: WorldBridge, bundle: MapBundle) {
     super('world');
@@ -393,7 +404,10 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     this.selfId = null;
     this.selectedTargetId = null;
     this.predicted = null;
+    this.serverSelf = null;
     this.path = [];
+    this.heldMovementKeys.clear();
+    this.keyboardMovePendingAt = 0;
 
     this.drawMap();
     this.drawPortals();
@@ -405,19 +419,28 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
     this.input.on('pointerdown', this.handlePointerDown, this);
     this.scale.on(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+    window.addEventListener('keydown', this.handleMovementKeyDown);
+    window.addEventListener('keyup', this.handleMovementKeyUp);
+    window.addEventListener('blur', this.handleWindowBlur);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.off('pointerdown', this.handlePointerDown, this);
       this.scale.off(Phaser.Scale.Events.RESIZE, this.handleResize, this);
+      window.removeEventListener('keydown', this.handleMovementKeyDown);
+      window.removeEventListener('keyup', this.handleMovementKeyUp);
+      window.removeEventListener('blur', this.handleWindowBlur);
+      this.heldMovementKeys.clear();
+      this.keyboardMovePendingAt = 0;
       this.bridge.detach(this);
     });
 
     this.bridge.attach(this);
   }
 
-  override update(_time: number, deltaMs: number): void {
+  override update(time: number, deltaMs: number): void {
     const delta = Math.min(Math.max(deltaMs, 0), MAX_FRAME_MS);
     this.advancePrediction(delta);
+    this.updateKeyboardMovement(time);
 
     if (this.predicted !== null) {
       const selfVisual = this.selfId === null ? undefined : this.visuals.get(this.selfId);
@@ -483,6 +506,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       visual.setMotion(player.moving && player.alive, player.facing);
 
       if (isSelf) {
+        this.serverSelf = { x: player.x, y: player.y };
         this.applySelfPosition(player);
       } else {
         visual.setTarget(this.projection.toScreen(player.x, player.y), false);
@@ -593,6 +617,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     if (this.predicted === null) {
       this.predicted = { x: ack.startX, y: ack.startY };
     }
+    this.keyboardMovePendingAt = 0;
     this.path = buildPredictionWaypoints(this.predicted, ack.path);
     this.drawPath(ack.path);
   }
@@ -626,6 +651,11 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   /** Client-predicted position in unit coordinates; E2E samples smoothness. */
   selfUnitPosition(): { x: number; y: number } | null {
     return this.predicted === null ? null : { x: this.predicted.x, y: this.predicted.y };
+  }
+
+  /** Last authoritative position for the local player (snapshot mirror). */
+  selfServerPosition(): { x: number; y: number } | null {
+    return this.serverSelf === null ? null : { x: this.serverSelf.x, y: this.serverSelf.y };
   }
 
   screenPointForTile(tile: TilePoint): ScreenPoint {
@@ -1198,16 +1228,19 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       }
       const deltaX: number = target.x - position.x;
       const deltaY: number = target.y - position.y;
-      const distance = Math.abs(deltaX) + Math.abs(deltaY);
+      // Euclidean distance keeps diagonal travel at the same speed as the
+      // server's integer stepping instead of making diagonals √2 faster.
+      const distance = Math.hypot(deltaX, deltaY);
 
       if (distance <= budget) {
         position = { x: target.x, y: target.y };
         budget -= distance;
         this.path.shift();
       } else {
+        const ratio = budget / distance;
         position = {
-          x: position.x + Math.sign(deltaX) * budget,
-          y: position.y + Math.sign(deltaY) * budget,
+          x: position.x + deltaX * ratio,
+          y: position.y + deltaY * ratio,
         };
         budget = 0;
       }
@@ -1405,6 +1438,118 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       }
     }
     return null;
+  }
+
+  private readonly handleMovementKeyDown = (event: KeyboardEvent): void => {
+    if (event.ctrlKey || event.metaKey || event.altKey || this.isTextEntry(event.target)) {
+      return;
+    }
+    if (event.key === ' ' || event.code === 'Space') {
+      // Let a focused button/link keep its native Space activation.
+      if (this.isInteractiveControl(event.target)) {
+        return;
+      }
+      event.preventDefault();
+      this.stopMovement();
+      return;
+    }
+    if (movementDirectionForKey(event.key) === null) {
+      return;
+    }
+    event.preventDefault();
+    if (event.repeat) {
+      return;
+    }
+    this.heldMovementKeys.add(event.key.toLowerCase());
+    // A fresh key press is an explicit interrupt: drop any click path and
+    // submit the step now instead of waiting for it to finish.
+    this.tryKeyboardStep(this.time.now, true);
+  };
+
+  private readonly handleMovementKeyUp = (event: KeyboardEvent): void => {
+    this.heldMovementKeys.delete(event.key.toLowerCase());
+    if (directionFromHeldKeys(this.heldMovementKeys) === null) {
+      this.keyboardMovePendingAt = 0;
+    }
+  };
+
+  private readonly handleWindowBlur = (): void => {
+    this.heldMovementKeys.clear();
+    this.keyboardMovePendingAt = 0;
+  };
+
+  private isTextEntry(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    return (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable
+    );
+  }
+
+  private isInteractiveControl(target: EventTarget | null): boolean {
+    return (
+      this.isTextEntry(target) ||
+      (target instanceof HTMLElement && (target.tagName === 'BUTTON' || target.tagName === 'A'))
+    );
+  }
+
+  /** Space: stop the authoritative path and any auto-attack. */
+  private stopMovement(): void {
+    this.heldMovementKeys.clear();
+    this.keyboardMovePendingAt = 0;
+    this.path = [];
+    this.pathGraphics.clear();
+    this.bridge.requestStop();
+  }
+
+  /**
+   * Holding a direction key takes one tile at a time: a new step is requested
+   * only when the previous approved path is exhausted, so keyboard input stays
+   * a stream of intent and the server keeps pathing authority.
+   */
+  private updateKeyboardMovement(now: number): void {
+    if (this.heldMovementKeys.size === 0) {
+      this.keyboardMovePendingAt = 0;
+      return;
+    }
+    this.tryKeyboardStep(now);
+  }
+
+  private tryKeyboardStep(now: number, interrupt = false): void {
+    if (this.selfId === null || this.predicted === null) {
+      return;
+    }
+    const direction = directionFromHeldKeys(this.heldMovementKeys);
+    if (direction === null) {
+      return;
+    }
+    if (this.visuals.get(this.selfId)?.isAlive === false) {
+      return;
+    }
+    if (!interrupt && this.path.length > 0) {
+      return;
+    }
+    if (this.keyboardMovePendingAt !== 0 && now - this.keyboardMovePendingAt < 600) {
+      return;
+    }
+    const tile = {
+      x: Math.floor(this.predicted.x / TILE_UNITS),
+      y: Math.floor(this.predicted.y / TILE_UNITS),
+    };
+    const target = { x: tile.x + direction.x, y: tile.y + direction.y };
+    if (!isEightWayStepAllowed(tile, target, (point) => this.isTileWalkable(point))) {
+      return;
+    }
+    if (interrupt) {
+      this.path = [];
+      this.pathGraphics.clear();
+    }
+    this.keyboardMovePendingAt = now;
+    this.bridge.requestMove(target);
   }
 
   private readonly handlePointerDown = (pointer: Phaser.Input.Pointer): void => {

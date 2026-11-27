@@ -25,7 +25,7 @@ export function createFlatGrid(size = 20, blocked: readonly TilePoint[] = []): C
   };
 }
 
-/** Four-directional BFS matching the server pathfinder's contract. */
+/** Eight-directional BFS matching the server pathfinder's contract (ADR-043). */
 export function bfsPath(
   grid: CombatGrid,
   from: TilePoint,
@@ -40,9 +40,13 @@ export function bfsPath(
   const visited = new Set<string>([key(from)]);
   const offsets = [
     { x: 0, y: -1 },
+    { x: 1, y: -1 },
     { x: 1, y: 0 },
+    { x: 1, y: 1 },
     { x: 0, y: 1 },
+    { x: -1, y: 1 },
     { x: -1, y: 0 },
+    { x: -1, y: -1 },
   ];
 
   while (queue.length > 0) {
@@ -62,6 +66,14 @@ export function bfsPath(
     for (const offset of offsets) {
       const next = { x: current.x + offset.x, y: current.y + offset.y };
       if (!grid.isWalkable(next.x, next.y) || visited.has(key(next))) {
+        continue;
+      }
+      if (
+        offset.x !== 0 &&
+        offset.y !== 0 &&
+        (!grid.isWalkable(current.x + offset.x, current.y) ||
+          !grid.isWalkable(current.x, current.y + offset.y))
+      ) {
         continue;
       }
       visited.add(key(next));

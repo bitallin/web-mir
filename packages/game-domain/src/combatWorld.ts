@@ -1,6 +1,7 @@
 import {
   FACING,
   TILE_UNITS,
+  facingFromDelta,
   type CharacterClass,
   type CombatEventPayload,
   type CommandRejectionCode,
@@ -238,11 +239,6 @@ function tileOfUnits(position: UnitPoint): TilePoint {
   };
 }
 
-function isTileCenter(position: UnitPoint, tile: TilePoint): boolean {
-  const center = tileCenter(tile);
-  return position.x === center.x && position.y === center.y;
-}
-
 function facingForDelta(from: UnitPoint, to: UnitPoint): number {
   const deltaX = to.x - from.x;
   const deltaY = to.y - from.y;
@@ -253,11 +249,10 @@ function facingForDelta(from: UnitPoint, to: UnitPoint): number {
 }
 
 function buildWaypoints(start: UnitPoint, path: readonly TilePoint[]): UnitPoint[] {
+  // Walk straight to the next tile center. Returning to the current center on
+  // every repath made monsters hitch; with eight-direction movement a
+  // mid-tile diagonal segment is legal by construction (ADR-043).
   const waypoints: UnitPoint[] = [];
-  const currentTile = tileOfUnits(start);
-  if (!isTileCenter(start, currentTile)) {
-    waypoints.push(tileCenter(currentTile));
-  }
   for (const node of path) {
     waypoints.push(tileCenter(node));
   }
@@ -1260,16 +1255,17 @@ export class CombatWorld {
         monster.waypoints.shift();
         continue;
       }
-      monster.facing = facingForDelta(monster, target);
-      const distance = Math.abs(deltaX) + Math.abs(deltaY);
+      monster.facing = facingFromDelta(deltaX, deltaY);
+      const distance = Math.round(Math.hypot(deltaX, deltaY));
       if (distance <= remaining) {
         monster.x = target.x;
         monster.y = target.y;
         remaining -= distance;
         monster.waypoints.shift();
       } else {
-        monster.x += Math.sign(deltaX) * remaining;
-        monster.y += Math.sign(deltaY) * remaining;
+        const ratio = remaining / distance;
+        monster.x += Math.round(deltaX * ratio);
+        monster.y += Math.round(deltaY * ratio);
         remaining = 0;
       }
     }

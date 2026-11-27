@@ -52,14 +52,20 @@ async function samplePositions(
   page: Page,
   samples: number,
   intervalMs: number,
-): Promise<{ x: number; y: number }[]> {
+): Promise<{ x: number; y: number; t: number; serverX: number; serverY: number }[]> {
   const collected = await page.evaluate(
     async ({ count, interval }) => {
-      const out: { x: number; y: number }[] = [];
+      const out: { x: number; y: number; t: number; serverX: number; serverY: number }[] = [];
       for (let index = 0; index < count; index += 1) {
         const position = window.__webLegendDebug?.selfUnitPosition();
+        const server = window.__webLegendDebug?.selfServerPosition();
         if (position !== null && position !== undefined) {
-          out.push(position);
+          out.push({
+            ...position,
+            t: performance.now(),
+            serverX: server?.x ?? -1,
+            serverY: server?.y ?? -1,
+          });
         }
         await new Promise((resolve) => setTimeout(resolve, interval));
       }
@@ -122,6 +128,70 @@ test('retargeting mid-step keeps the player moving forward', async ({ browser })
   expect(samples[samples.length - 1]?.x ?? 0).toBeGreaterThan((samples[0]?.x ?? 0) + 2_000);
 });
 
+test('keyboard walks diagonally and space stops the character', async ({ browser }) => {
+  const page = await registerWarrior(browser);
+
+  await moveTo(page, 10, 10);
+  await page.waitForFunction(
+    () => {
+      const position = window.__webLegendDebug?.selfUnitPosition();
+      return (
+        position !== null &&
+        position !== undefined &&
+        Math.abs(position.x - 10_500) < 200 &&
+        Math.abs(position.y - 10_500) < 200
+      );
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+
+  // Hold two direction keys: the character should move on both axes.
+  await page.keyboard.down('d');
+  await page.keyboard.down('s');
+  await page.waitForFunction(
+    () => {
+      const position = window.__webLegendDebug?.selfUnitPosition();
+      return (
+        position !== null && position !== undefined && position.x > 11_500 && position.y > 11_500
+      );
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+  await page.keyboard.up('d');
+  await page.keyboard.up('s');
+
+  await page.keyboard.press('Space');
+
+  // The stop command is authoritative; the predicted position may still ease
+  // toward the last snapshot for a moment, so let that settle before sampling.
+  await page.waitForTimeout(1_200);
+  const stopped = await page.evaluate(() => window.__webLegendDebug?.selfUnitPosition());
+  await page.waitForTimeout(500);
+  const later = await page.evaluate(() => window.__webLegendDebug?.selfUnitPosition());
+
+  expect(stopped).toBeTruthy();
+  expect(later).toBeTruthy();
+  const delta = Math.hypot(
+    (later?.x ?? 0) - (stopped?.x ?? 0),
+    (later?.y ?? 0) - (stopped?.y ?? 0),
+  );
+  expect(delta).toBeLessThan(20);
+
+  // Typing in chat must not move the character.
+  await page.getByTestId('chat-input').click();
+  await page.keyboard.press('d');
+  await page.keyboard.press('s');
+  await page.waitForTimeout(400);
+  const afterTyping = await page.evaluate(() => window.__webLegendDebug?.selfUnitPosition());
+  const typedDelta = Math.hypot(
+    (afterTyping?.x ?? 0) - (later?.x ?? 0),
+    (afterTyping?.y ?? 0) - (later?.y ?? 0),
+  );
+  expect(typedDelta).toBeLessThan(20);
+});
+
 test('auto-attack approach predicts on every frame instead of following 10Hz snapshots', async ({
   browser,
 }) => {
@@ -136,43 +206,74 @@ test('auto-attack approach predicts on every frame instead of following 10Hz sna
     timeout: 20_000,
   });
 
-  // Owns this spawn: the other wilds specs use different slimes (TD-QA-11).
-  await page.evaluate(() => window.__webLegendDebug?.attackMonster('wilds_slime_14'));
-  // Wait for the server's approach path to reach the client.
+  // Walk closer first: a patrolling slime can cross a cell boundary and leave
+  // the spawn's AOI, so engaging from the gate is racy (TD-QA-11).
+  await moveTo(page, 8, 19);
   await page.waitForFunction(
-    () => window.__webLegendDebug?.selfUnitPosition() !== null,
+    () => {
+      const position = window.__webLegendDebug?.selfUnitPosition();
+      return (
+        position !== null &&
+        position !== undefined &&
+        Math.abs(position.x - 8_500) < 200 &&
+        Math.abs(position.y - 19_500) < 200
+      );
+    },
     undefined,
+    { timeout: 30_000 },
+  );
+
+  // Owns this spawn: the other wilds specs use different slimes (TD-QA-11).
+  const engaged = await page.evaluate(
+    () => window.__webLegendDebug?.attackMonster('wilds_slime_14') ?? false,
+  );
+  expect(engaged).toBe(true);
+  const start = await page.evaluate(() => window.__webLegendDebug?.selfUnitPosition());
+  expect(start).not.toBeNull();
+  // Wait until the server's approved approach path actually moves the client;
+  // sampling from spawn would otherwise measure frames before the engage RTT.
+  await page.waitForFunction(
+    (origin) => {
+      const position = window.__webLegendDebug?.selfUnitPosition();
+      return (
+        position !== null &&
+        position !== undefined &&
+        Math.hypot(position.x - origin.x, position.y - origin.y) > 300
+      );
+    },
+    start ?? { x: 0, y: 0 },
     { timeout: 10_000 },
   );
 
   const samples = await samplePositions(page, 60, 20);
-  const moved = samples.filter((sample, index) => {
-    const previous = samples[index - 1];
-    return previous === undefined || sample.x !== previous.x || sample.y !== previous.y;
-  }).length;
-  // Following 10Hz snapshots changes the position only ~12 times a second;
-  // path prediction changes it on most display frames.
-  expect(moved).toBeGreaterThan(30);
 
-  // A 10Hz chase leaves the rendered position frozen for five samples in a
-  // row; an unpredicted approach at 20ms sampling runs of one or two at most.
-  let longestStill = 0;
-  let still = 0;
+  // A client that only follows snapshots moves the predicted position exactly
+  // when the authoritative position changes. Path prediction advances the
+  // predicted position between snapshots, so these "prediction only" updates
+  // are the discriminator; unlike an update-rate threshold this does not
+  // depend on the software renderer's frame rate (TD-QA-10).
+  let predictionOnlyChanges = 0;
+  let serverChanges = 0;
   for (let index = 1; index < samples.length; index += 1) {
-    if (
-      samples[index]?.x === samples[index - 1]?.x &&
-      samples[index]?.y === samples[index - 1]?.y
-    ) {
-      still += 1;
-      longestStill = Math.max(longestStill, still);
-    } else {
-      still = 0;
+    const previous = samples[index - 1];
+    const current = samples[index];
+    if (previous === undefined || current === undefined) {
+      continue;
+    }
+    const predictedMoved = current.x !== previous.x || current.y !== previous.y;
+    const serverMoved =
+      current.serverX !== previous.serverX || current.serverY !== previous.serverY;
+    if (serverMoved) {
+      serverChanges += 1;
+    } else if (predictedMoved) {
+      predictionOnlyChanges += 1;
     }
   }
-  expect(longestStill).toBeLessThanOrEqual(3);
+  expect(serverChanges).toBeGreaterThan(4);
+  expect(predictionOnlyChanges).toBeGreaterThan(2);
 
-  const start = samples[0];
-  const end = samples[samples.length - 1];
-  const travelled = Math.hypot((end?.x ?? 0) - (start?.x ?? 0), (end?.y ?? 0) - (start?.y ?? 0));
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const travelled = Math.hypot((last?.x ?? 0) - (first?.x ?? 0), (last?.y ?? 0) - (first?.y ?? 0));
   expect(travelled).toBeGreaterThan(2_000);
 });

@@ -194,7 +194,7 @@ describe('WorldSimulation', () => {
     expect(simulation.getPlayer('p1')?.y).toBe(1 * TILE_UNITS + TILE_UNITS / 2);
   });
 
-  it('turns inside the next tile instead of stepping back to the current center', () => {
+  it('walks straight to the next tile center on a perpendicular retarget', () => {
     const grid = openGrid();
     const simulation = new WorldSimulation(grid);
     simulation.addPlayer({ id: 'p1', displayName: 'Alice', spawn: { x: 1, y: 1 }, colorIndex: 0 });
@@ -207,8 +207,11 @@ describe('WorldSimulation', () => {
     simulation.setPath('p1', findPath(grid, { x: 2, y: 1 }, { x: 2, y: 3 }) ?? []);
     advance(simulation, 1);
 
-    expect(simulation.getPlayer('p1')?.x).toBe(2_900);
-    expect(simulation.getPlayer('p1')?.y).toBe(1_700);
+    // The path heads to (2.5, 2.5); the step is diagonal (not axis-aligned)
+    // and never returns to (2.5, 1.5) first.
+    expect(simulation.getPlayer('p1')?.x).toBe(2_826);
+    expect(simulation.getPlayer('p1')?.y).toBe(1_686);
+    expect(simulation.getPlayer('p1')?.facing).toBe(6);
   });
 
   it('never retreats when the same path is re-applied every repath interval', () => {

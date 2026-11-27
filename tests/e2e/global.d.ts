@@ -22,6 +22,7 @@ declare global {
       selfAppearance: () => { textureKey: string; clip: string; frame: string };
       selfId: () => string;
       selfUnitPosition: () => { x: number; y: number } | null;
+      selfServerPosition: () => { x: number; y: number } | null;
       playerAppearance: (
         playerId: string,
       ) => { textureKey: string; clip: string; frame: string } | null;

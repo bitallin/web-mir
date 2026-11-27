@@ -12,11 +12,10 @@ function tileCenter(tile: TilePoint): PredictionPoint {
 /**
  * Builds the waypoints the client predicts along for a server-approved path.
  * The client is usually slightly ahead of the server that computed the path,
- * so leading nodes already behind the player are dropped. If the next node is
- * in the current direction of travel the player continues straight; otherwise
- * the current tile center is inserted so every turn stays axis-aligned. This
- * mirrors the server's movement rules (ADR-016) and keeps repaths from pulling
- * the character backwards (see the simulation's `setPath`).
+ * so leading nodes already behind the player are dropped. The player then
+ * walks straight to each tile center: with eight-direction movement a segment
+ * from a mid-tile offset is legal and never requires returning to the old
+ * center (ADR-043). Mirrors the simulation's `setPath`.
  */
 export function buildPredictionWaypoints(
   start: PredictionPoint,
@@ -39,37 +38,13 @@ export function buildPredictionWaypoints(
     effective = path.slice(currentIndex + 1);
   }
 
-  const center = tileCenter(currentTile);
-  const offsetX = start.x - center.x;
-  const offsetY = start.y - center.y;
-  const first = effective[0];
-
-  const waypoints: PredictionPoint[] = [];
-  if (first === undefined) {
-    if (offsetX !== 0 || offsetY !== 0) {
+  const waypoints: PredictionPoint[] = effective.map(tileCenter);
+  if (waypoints.length === 0) {
+    // Stopping: finish the current step at the tile center.
+    const center = tileCenter(currentTile);
+    if (center.x !== start.x || center.y !== start.y) {
       waypoints.push(center);
     }
-  } else if (offsetX !== 0) {
-    if (first.y === currentTile.y) {
-      // Same row: continue (or reverse) straight horizontally.
-    } else if (first.x === currentTile.x) {
-      // Perpendicular turn: turn inside the next tile instead of stepping
-      // back to this tile's center.
-      waypoints.push({ x: start.x, y: tileCenter(first).y });
-    } else {
-      waypoints.push(center);
-    }
-  } else if (offsetY !== 0) {
-    if (first.x === currentTile.x) {
-      // Same column: continue (or reverse) straight vertically.
-    } else if (first.y === currentTile.y) {
-      waypoints.push({ x: tileCenter(first).x, y: start.y });
-    } else {
-      waypoints.push(center);
-    }
-  }
-  for (const node of effective) {
-    waypoints.push(tileCenter(node));
   }
   return waypoints.filter((point) => point.x !== start.x || point.y !== start.y);
 }

@@ -4183,3 +4183,96 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
   截图与负载证据）。
 - `cef5d08` `test(alpha-03): stabilize combat and movement E2E timing`
   （技能冷却/残留攻击与移动预测用例的共享实例隔离）。
+
+## 2026-11-27 Alpha 0.3 S3-M：八方向移动与键盘操作
+
+### 目标
+
+关闭 TD-CLI-18（四方向移动、斜向目标走 L 线）与 TD-CLI-07（无键盘移动、无
+停止指令）：斜向点击直接斜走，WASD/方向键八方向短步，空格明确停止；移动仍由
+服务端寻路与位置裁定。
+
+### 实际改动
+
+1. **契约**
+   - `FACING` 保留 0–3，追加 `northEast=4`、`southEast=5`、`southWest=6`、
+     `northWest=7`；新增 `facingFromDelta`。
+   - `characterViewSchema` 与 Game Server 视图校验上限改为 7；无数据库迁移。
+   - 新增 `move.stop` 命令 schema 与 `CLIENT_MESSAGES.moveStop`。
+2. **寻路与模拟**
+   - `findPath` 改为八方向 BFS；斜向步要求两个正交邻格可走，禁止切角；展开
+     顺序优先离目标更近的方向。
+   - 新增 `isStepAllowed`；`WorldSimulation.setPath` 校验相邻与斜向阻挡，取消
+     轴对齐路点与“格内回中心”回退。
+   - `step` 使用欧氏距离与整数比例推进；朝向按位移设置八方向。
+   - `CombatWorld.advanceMonster` 与 `buildWaypoints` 同步；测试替身 BFS 同步。
+3. **服务端**
+   - `move.stop` 复用 `CommandGuard`（协议/重复 id/序号/限频），清空权威路径、
+     停止自动攻击与任务导航，返回空路径 ack。
+4. **客户端**
+   - `buildPredictionWaypoints` 与服务端同步，直接走向下一格中心；
+     `advancePrediction` 使用欧氏距离。
+   - `WorldScene` 监听 WASD/方向键，按格提交 `move.to`；新按键立即打断点击
+     路径；空格发送 `move.stop`；输入框/文本域聚焦时忽略，聚焦按钮/链接时
+     保留空格原生行为。
+   - 新增只读调试钩子 `selfServerPosition` 供 E2E 区分“逐帧预测”与“快照跟随”。
+5. **测试**
+   - 单元：八方向 BFS 直线/对角/绕墙/拒绝切角/确定性、`isStepAllowed`、欧氏
+     步进与斜向朝向、客户端预测、键盘方向合成、`FACING`/`facingFromDelta`、
+     `move.stop` 契约。
+   - 集成：对角 `move.to` 两轴到达；`move.stop` 后位置稳定。
+   - E2E：D+S 斜向移动、空格停止、聊天输入不移动；自动攻击平滑度用例先走到
+     目标附近再锁定，并用“服务端位置未变但预测前进”的采样数判断。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+NO_PROXY=127.0.0.1,localhost npx playwright test --workers=1
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
+  LOAD_OUTPUT=docs/phase-reports/alpha-03/eight-way/load-50p2a.json pnpm load:scenario
+```
+
+- 格式 / lint / 类型 / 构建：通过。
+- 单元/集成：83 文件、**600 测试**通过（新增 13 条）。
+- 全量 E2E（串行）：**49/49 通过**（10.8 分钟）。
+- 容量 sanity：50/50、接受率 98.9%、194 击杀、0 资产失败；tick p50 1.48ms /
+  p95 **3.72ms** / p99 5.06ms / max 6.57ms，资产事务 p95 62.03ms。
+- 8584 实测：D+S 后预测 (12641,11641)、权威 (12500,11500)；空格停止后权威
+  (12923,12923) 不变，预测误差 1.79 单位。
+
+### 遇到的问题及解决方法
+
+1. **平滑度 E2E 连续失败**：原用例从荒野入口锁定 `wilds_slime_14`，巡游怪物
+   越过 AOI 格边界后不可见，出现 `INVALID_TARGET`，角色原地不动；同时服务器
+   patch 已从 10Hz 提升到 20Hz，旧“最长静止采样数”判据在软件渲染 16–25 FPS
+   下无法区分快照跟随与逐帧预测。改为先走到目标附近再锁定，并统计“服务端
+   位置未变、客户端预测位置已前进”的采样数；新增只读 `selfServerPosition`
+   调试钩子。单跑 3/3、全量 49/49 通过。
+2. **空格与按钮冲突**：最初空格在所有焦点下都拦截；改为输入框/文本域忽略移动
+   键，按钮/链接聚焦时保留空格原生激活，只有场景焦点下空格才停止。
+3. **键盘打断点击路径**：按住方向键时若已有远距离点击路径，角色会先走完旧
+   路线；新按键改为立即清空本地预测并提交相邻格意图，由服务端替换路径。
+4. **E2E 覆盖历史截图**：全量 E2E 会把 `docs/phase-reports/` 下历史截图重新
+   生成；验证后已 `git restore` 恢复，不把二进制抖动带入提交。
+
+### 尚未解决
+
+- 2-worker 全量 E2E 在软件渲染下仍可能因帧率低于 20Hz 触发平滑度抖动；本轮
+  以串行全量作为权威证据。
+- 正式美术仍为四方向帧；斜向表现使用最近基本方向映射（TD-CLI-13）。
+- 键盘按键不可配置、无手柄；远端 CI 仍待确认。
+
+### 下一步计划
+
+1. 下一片优先队伍社交（聊天/移交/踢人，TD-CLI-17）；副本实例先写 ADR。
+2. 补世界内到达目标标记（TD-CLI-24）。
+3. 正式美术与八方向角色帧；确认远端 CI。
+
+### 提交
+
+- 待本次提交完成后补充哈希。

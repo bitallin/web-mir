@@ -8,6 +8,7 @@ import {
   combatTargetChangedSchema,
   worldRoomNameFor,
   type CombatTargetChanged,
+  type CommandAck,
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
 import { createLogger } from '@web-legend/observability';
@@ -244,5 +245,70 @@ describe.runIf(databaseUrl !== undefined)('world_map movement smoothness', () =>
       expect(samples[index]).toBeGreaterThanOrEqual(samples[index - 1] ?? 0);
     }
     expect(Math.max(...samples)).toBeGreaterThan(tileUnits({ x: 11, y: 16 }).x);
+  }, 30_000);
+
+  it('accepts a diagonal path and arrives on both axes', async () => {
+    const { room, characterId: selfId } = await join(START);
+    const acks: CommandAck[] = [];
+    room.onMessage('command.ack', (payload: unknown) => {
+      acks.push(payload as CommandAck);
+    });
+
+    room.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      ...nextCommand(),
+      targetTileX: 6,
+      targetTileY: 18,
+    });
+
+    await waitUntil(() => acks.length > 0, 5_000, 'diagonal ack');
+    const points = [{ x: START.x, y: START.y }, ...(acks[0]?.path ?? [])];
+    const diagonalSteps = points.filter((point, index) => {
+      const previous = points[index - 1];
+      return previous !== undefined && point.x !== previous.x && point.y !== previous.y;
+    });
+    expect(diagonalSteps.length).toBeGreaterThan(0);
+
+    await waitUntil(
+      () => {
+        const player = room.state.players.get(selfId);
+        return (
+          player?.x === tileUnits({ x: 6, y: 18 }).x && player.y === tileUnits({ x: 6, y: 18 }).y
+        );
+      },
+      10_000,
+      'diagonal arrival',
+    );
+  }, 30_000);
+
+  it('stops the path and stays put after move.stop', async () => {
+    const { room, characterId: selfId } = await join(START);
+
+    room.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      ...nextCommand(),
+      targetTileX: 20,
+      targetTileY: 16,
+    });
+    await waitUntil(
+      () => (room.state.players.get(selfId)?.x ?? 0) > tileUnits({ x: 5, y: 16 }).x,
+      5_000,
+      'moving east',
+    );
+
+    room.send('move.stop', {
+      protocolVersion: PROTOCOL_VERSION,
+      ...nextCommand(),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const stopped = {
+      x: room.state.players.get(selfId)?.x ?? 0,
+      y: room.state.players.get(selfId)?.y ?? 0,
+    };
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(room.state.players.get(selfId)?.x).toBe(stopped.x);
+    expect(room.state.players.get(selfId)?.y).toBe(stopped.y);
+    expect(stopped.x).toBeLessThan(tileUnits({ x: 20, y: 16 }).x - 2_000);
   }, 30_000);
 });

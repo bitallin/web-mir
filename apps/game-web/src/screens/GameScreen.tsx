@@ -2019,7 +2019,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       ) : null}
 
       <footer className="hud hud-bottom">
-        <p>点击怪物锁定并自动攻击（Esc 停止） · 点击地面移动 · 技能与 PK 由服务端结算</p>
+        <p>
+          点击怪物锁定并自动攻击（Esc 停止） · 点击地面移动 · WASD/方向键八方向移动 · 空格停止 ·
+          技能与 PK 由服务端结算
+        </p>
         <p data-testid="command-count">指令 {state.commandCount}</p>
         <p>tick {state.serverTick}</p>
         <p>协议 v1 · 服务端 20Hz 权威战斗 · {pvpEnabled ? '野外 PK' : '安全区'}</p>

@@ -2,11 +2,12 @@ import {
   FACING,
   PLAYER_SPEED_UNITS_PER_SECOND,
   TILE_UNITS,
+  facingFromDelta,
   type Facing,
   type TilePoint,
 } from '@web-legend/contracts';
 
-import { isStandable, type MovementGrid } from './grid';
+import { isStandable, isStepAllowed, type MovementGrid } from './grid';
 
 export type UnitPoint = {
   x: number;
@@ -143,11 +144,11 @@ export class WorldSimulation {
 
   /**
    * Replaces the current path. A path is a list of tile centers produced by the
-   * server's pathfinder. A player retargeted mid-tile normally returns to the
-   * current tile center so every segment stays axis-aligned and cannot cut a
-   * blocked corner; when the new path keeps the same direction of travel the
-   * player continues straight instead, because turning back to the center
-   * would make every repath (auto-attack, repeated clicks) a visible hitch.
+   * server's pathfinder. The player walks straight to the next tile center,
+   * even from a mid-tile offset: with eight-direction movement the segment is
+   * legal by construction, and inserting the current tile center would make
+   * every repath (auto-attack, repeated clicks) a visible backwards hitch. An
+   * empty path means "stop", finishing the current step at its tile center.
    */
   setPath(id: string, path: readonly TilePoint[]): void {
     const player = this.players.get(id);
@@ -160,48 +161,26 @@ export class WorldSimulation {
       }
     }
 
-    const waypoints: UnitPoint[] = [];
     const currentTile = tileOfUnits(player);
-    const center = tileCenter(currentTile);
-    const offsetX = player.x - center.x;
-    const offsetY = player.y - center.y;
-    const first = path[0];
-    if (first === undefined) {
-      // Stopping: finish the current step at the tile center.
-      if (offsetX !== 0 || offsetY !== 0) {
-        waypoints.push(center);
-      }
-    } else if (offsetX !== 0) {
-      if (first.y === currentTile.y) {
-        // Same row: continue (or reverse) straight horizontally.
-      } else if (first.x === currentTile.x) {
-        // Perpendicular turn: keep the current x and turn inside the next
-        // tile, so the player never steps back to the old tile center.
-        waypoints.push({ x: player.x, y: tileCenter(first).y });
-      } else {
-        waypoints.push(center);
-      }
-    } else if (offsetY !== 0) {
-      if (first.x === currentTile.x) {
-        // Same column: continue (or reverse) straight vertically.
-      } else if (first.y === currentTile.y) {
-        waypoints.push({ x: tileCenter(first).x, y: player.y });
-      } else {
-        waypoints.push(center);
-      }
-    }
+    let previousTile = currentTile;
     for (const node of path) {
-      waypoints.push(tileCenter(node));
+      if (!isStepAllowed(this.grid, previousTile, node)) {
+        throw new RangeError(
+          `path step (${previousTile.x}, ${previousTile.y}) -> (${node.x}, ${node.y}) must be adjacent and must not cut a blocked corner`,
+        );
+      }
+      previousTile = node;
     }
 
-    for (let index = 1; index < waypoints.length; index += 1) {
-      const previous = waypoints[index - 1];
-      const current = waypoints[index];
-      if (previous === undefined || current === undefined) {
-        continue;
+    const waypoints: UnitPoint[] = [];
+    if (path.length === 0) {
+      const center = tileCenter(currentTile);
+      if (center.x !== player.x || center.y !== player.y) {
+        waypoints.push(center);
       }
-      if (previous.x !== current.x && previous.y !== current.y) {
-        throw new RangeError('path waypoints must be axis-aligned');
+    } else {
+      for (const node of path) {
+        waypoints.push(tileCenter(node));
       }
     }
 
@@ -248,21 +227,11 @@ export class WorldSimulation {
           continue;
         }
 
-        if (deltaX !== 0 && deltaY !== 0) {
-          // Defensive: setPath guarantees axis-aligned segments.
-          player.x += Math.sign(deltaX) * Math.min(Math.abs(deltaX), remaining);
-          remaining = Math.max(0, remaining - Math.abs(deltaX));
-          movedThisStep = true;
-          continue;
-        }
+        player.facing = facingFromDelta(deltaX, deltaY);
 
-        if (deltaX !== 0) {
-          player.facing = deltaX > 0 ? FACING.east : FACING.west;
-        } else {
-          player.facing = deltaY > 0 ? FACING.south : FACING.north;
-        }
-
-        const distance = Math.abs(deltaX) + Math.abs(deltaY);
+        // Distance is Euclidean so a diagonal tile costs √2 tiles of travel
+        // and the character keeps a constant speed in every direction.
+        const distance = Math.round(Math.hypot(deltaX, deltaY));
         if (distance <= remaining) {
           player.x = target.x;
           player.y = target.y;
@@ -270,8 +239,9 @@ export class WorldSimulation {
           player.waypoints.shift();
           movedThisStep = true;
         } else {
-          player.x += Math.sign(deltaX) * remaining;
-          player.y += Math.sign(deltaY) * remaining;
+          const ratio = remaining / distance;
+          player.x += Math.round(deltaX * ratio);
+          player.y += Math.round(deltaY * ratio);
           remaining = 0;
           movedThisStep = true;
         }

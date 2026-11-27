@@ -5,6 +5,9 @@ import {
   commandRejectedSchema,
   DEFAULT_PATCH_RATE_MS,
   DEFAULT_TICK_HZ,
+  FACING,
+  facingFromDelta,
+  moveStopCommandSchema,
   moveToCommandSchema,
   worldJoinOptionsSchema,
 } from './realtime';
@@ -115,5 +118,49 @@ describe('simulation defaults', () => {
   it('uses 20Hz simulation and a 20Hz patch rate', () => {
     expect(DEFAULT_TICK_HZ).toBe(20);
     expect(DEFAULT_PATCH_RATE_MS).toBe(50);
+  });
+});
+
+describe('facing', () => {
+  it('keeps the four legacy values and appends diagonals', () => {
+    expect(FACING.north).toBe(0);
+    expect(FACING.east).toBe(1);
+    expect(FACING.south).toBe(2);
+    expect(FACING.west).toBe(3);
+    expect(FACING.northEast).toBe(4);
+    expect(FACING.northWest).toBe(7);
+  });
+
+  it('derives cardinal and diagonal facing from a movement delta', () => {
+    expect(facingFromDelta(5, 0)).toBe(FACING.east);
+    expect(facingFromDelta(-5, 0)).toBe(FACING.west);
+    expect(facingFromDelta(0, -5)).toBe(FACING.north);
+    expect(facingFromDelta(0, 5)).toBe(FACING.south);
+    expect(facingFromDelta(3, -3)).toBe(FACING.northEast);
+    expect(facingFromDelta(3, 3)).toBe(FACING.southEast);
+    expect(facingFromDelta(-3, 3)).toBe(FACING.southWest);
+    expect(facingFromDelta(-3, -3)).toBe(FACING.northWest);
+  });
+});
+
+describe('moveStopCommandSchema', () => {
+  it('accepts an intent-only stop command', () => {
+    const parsed = moveStopCommandSchema.parse({
+      protocolVersion: 1,
+      commandId: '0192f0a0-0000-7000-8000-000000000001',
+      clientSequence: 8,
+    });
+    expect(parsed.clientSequence).toBe(8);
+  });
+
+  it('rejects client-supplied positions', () => {
+    expect(
+      moveStopCommandSchema.safeParse({
+        protocolVersion: 1,
+        commandId: '0192f0a0-0000-7000-8000-000000000001',
+        clientSequence: 8,
+        x: 4_000,
+      }).success,
+    ).toBe(false);
   });
 });

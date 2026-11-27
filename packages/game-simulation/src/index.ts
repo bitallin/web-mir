@@ -1,7 +1,7 @@
 export { createFixedStepRunner } from './fixedStep';
 export type { FixedStepOptions, FixedStepRunner } from './fixedStep';
 
-export { isInsideGrid, isStandable } from './grid';
+export { isInsideGrid, isStandable, isStepAllowed } from './grid';
 export type { MovementGrid } from './grid';
 
 export { DEFAULT_INTEREST, InterestManager } from './interest';

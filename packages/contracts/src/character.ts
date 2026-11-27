@@ -93,7 +93,7 @@ export const characterViewSchema = z
     /** Authoritative position in integer sub-tile units. */
     x: z.number().int().nonnegative(),
     y: z.number().int().nonnegative(),
-    facing: z.number().int().min(0).max(3),
+    facing: z.number().int().min(0).max(7),
     realmId: z.uuid(),
     realmCode: z.string().min(1),
     createdAt: z.iso.datetime(),

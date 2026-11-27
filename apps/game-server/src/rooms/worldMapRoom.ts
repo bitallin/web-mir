@@ -37,6 +37,7 @@ import {
   levelUpSchema,
   lootClaimedSchema,
   lootPickupSchema,
+  moveStopCommandSchema,
   moveToCommandSchema,
   PARTY_INVITE_RANGE_TILES,
   partyAcceptCommandSchema,
@@ -266,7 +267,7 @@ const authDataSchema = z.object({
   mapId: z.string().min(1),
   x: z.number().int().nonnegative(),
   y: z.number().int().nonnegative(),
-  facing: z.number().int().min(0).max(3),
+  facing: z.number().int().min(0).max(7),
   hp: z.number().int().nonnegative(),
   maxHp: z.number().int().positive(),
   mp: z.number().int().nonnegative(),
@@ -291,8 +292,18 @@ function toFacing(value: number): Facing {
       return FACING.north;
     case FACING.east:
       return FACING.east;
+    case FACING.south:
+      return FACING.south;
     case FACING.west:
       return FACING.west;
+    case FACING.northEast:
+      return FACING.northEast;
+    case FACING.southEast:
+      return FACING.southEast;
+    case FACING.southWest:
+      return FACING.southWest;
+    case FACING.northWest:
+      return FACING.northWest;
     default:
       return FACING.south;
   }
@@ -537,6 +548,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     this.onMessage<unknown>(CLIENT_MESSAGES.moveTo, (client, message) => {
       this.handleMove(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.moveStop, (client, message) => {
+      this.handleMoveStop(client, message);
     });
     this.onMessage<unknown>(CLIENT_MESSAGES.chatSend, (client, message) => {
       this.handleChat(client, message);
@@ -1545,6 +1559,74 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     this.guard.remember(session.recentAcks, command.commandId, ack);
 
+    client.send(SERVER_MESSAGES.commandAck, commandAckSchema.parse(ack));
+    this.metrics.recordAcceptedCommand();
+  }
+
+  /** Stops the current path and any auto-attack; the character stays put. */
+  private handleMoveStop(client: Client, raw: unknown): void {
+    const session = this.registry.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, {}, 'INVALID_SESSION');
+      return;
+    }
+    if (session.transferring) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_SESSION');
+      return;
+    }
+
+    const parsed = moveStopCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+
+    const command = parsed.data;
+    const gate = this.guard.check(session, command, session.recentAcks.has(command.commandId));
+    if (gate.kind === 'reject') {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        gate.code,
+      );
+      return;
+    }
+    if (gate.kind === 'duplicate') {
+      const cached = session.recentAcks.get(command.commandId);
+      if (cached !== undefined) {
+        const replay: CommandAck = { ...cached, deduplicated: true, serverTime: Date.now() };
+        client.send(SERVER_MESSAGES.commandAck, commandAckSchema.parse(replay));
+      }
+      return;
+    }
+
+    const player = this.simulation.getPlayer(session.playerId);
+    if (player === undefined) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'INVALID_SESSION',
+      );
+      return;
+    }
+
+    this.simulation.clearPath(player.id);
+    this.stopAutoAttack(session, 'stopped', false);
+    this.stopQuestNavigation(session, { silent: true, clearPath: false });
+    session.lastSequence = command.clientSequence;
+
+    const ack: CommandAck = {
+      commandId: command.commandId,
+      clientSequence: command.clientSequence,
+      serverTime: Date.now(),
+      deduplicated: false,
+      path: [],
+      speedUnitsPerSecond: player.speedUnitsPerSecond,
+      startX: player.x,
+      startY: player.y,
+    };
+
+    this.guard.remember(session.recentAcks, command.commandId, ack);
     client.send(SERVER_MESSAGES.commandAck, commandAckSchema.parse(ack));
     this.metrics.recordAcceptedCommand();
   }

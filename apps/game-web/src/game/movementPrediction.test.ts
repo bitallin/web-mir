@@ -26,24 +26,31 @@ describe('client movement prediction', () => {
     expect(waypoints).toHaveLength(2);
   });
 
-  it('turns inside the next tile for a perpendicular retarget', () => {
+  it('walks straight to the next tile center on a perpendicular retarget', () => {
     const waypoints = buildPredictionWaypoints({ x: 2_900, y: 1_500 }, path([2, 0], [2, -1]));
 
-    // Continue north from the current x, then align to the next tile center:
-    // no backward step to this tile's center.
-    expect(waypoints[0]).toEqual({ x: 2_900, y: 500 });
-    expect(waypoints[1]).toEqual({ x: 2_500, y: 500 });
-    expect(waypoints[2]).toEqual({ x: 2_500, y: -500 });
+    // No backward step to this tile's center; the first segment is diagonal
+    // from the current position to the next center (ADR-043).
+    expect(waypoints[0]).toEqual({ x: 2_500, y: 500 });
+    expect(waypoints[1]).toEqual({ x: 2_500, y: -500 });
   });
 
-  it('turns inside the next tile when the ack path includes the current tile', () => {
+  it('predicts a diagonal step straight to the neighbouring center', () => {
+    const waypoints = buildPredictionWaypoints({ x: 2_900, y: 1_500 }, path([3, 2]));
+
+    expect(waypoints).toEqual([{ x: 3_500, y: 2_500 }]);
+  });
+
+  it('drops the current tile before a retarget when the ack includes it', () => {
     const waypoints = buildPredictionWaypoints(
       { x: 2_900, y: 1_500 },
       path([2, 1], [2, 2], [2, 3]),
     );
 
-    expect(waypoints[0]).toEqual({ x: 2_900, y: 2_500 });
-    expect(waypoints[1]).toEqual({ x: 2_500, y: 2_500 });
+    expect(waypoints).toEqual([
+      { x: 2_500, y: 2_500 },
+      { x: 2_500, y: 3_500 },
+    ]);
   });
 
   it('drops server path nodes that the client has already passed', () => {

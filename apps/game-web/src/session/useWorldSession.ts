@@ -394,6 +394,9 @@ class WorldSession {
     this.bridge.onMoveRequest = (tile) => {
       this.moveTo(tile);
     };
+    this.bridge.onStopRequest = () => {
+      this.stopMovement();
+    };
     this.bridge.onAttackRequest = (targetId) => {
       this.attack(targetId);
     };
@@ -870,6 +873,18 @@ class WorldSession {
       this.cancelAutoQuestLocally();
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
+  }
+
+  /** Stops movement and auto-attack; the server keeps the current position. */
+  stopMovement(): boolean {
+    this.lootApproach = null;
+    const sent = this.client?.sendMoveStop() ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.cancelAutoQuestLocally();
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
   }
 
   /** Locks the target; the server keeps swinging until told to stop. */
@@ -1503,6 +1518,7 @@ class WorldSession {
         },
       selfId: () => this.options.character.id,
       selfUnitPosition: () => this.bridge.selfUnitPosition(),
+      selfServerPosition: () => this.bridge.selfServerPosition(),
       playerAppearance: (playerId) => this.bridge.playerAppearance(playerId),
       activeTelegraphs: () => this.bridge.activeTelegraphs(),
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),

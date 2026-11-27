@@ -264,6 +264,21 @@ export class WorldClient {
     return true;
   }
 
+  sendMoveStop(): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+
+    room.send(CLIENT_MESSAGES.moveStop, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
   sendBasicAttack(targetId: string): boolean {
     const room = this.room;
     if (room === null || this.stopped || this.transferring) {

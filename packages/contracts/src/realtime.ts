@@ -15,6 +15,7 @@ export const PLAYER_SPEED_UNITS_PER_SECOND = 4_000 as const;
 
 export const CLIENT_MESSAGES = {
   moveTo: 'move.to',
+  moveStop: 'move.stop',
   chatSend: 'chat.send',
   combatBasicAttack: 'combat.basicAttack',
   combatEngage: 'combat.engage',
@@ -59,14 +60,38 @@ export const SERVER_MESSAGES = {
   partyInvite: 'party.invite',
 } as const;
 
+/**
+ * Logical facing. The first four values keep their pre-eight-direction
+ * meaning so persisted rows still decode; diagonals are appended (4–7) for
+ * movement, and the presentation layer maps them onto four-direction art
+ * (architecture §7.2).
+ */
 export const FACING = {
   north: 0,
   east: 1,
   south: 2,
   west: 3,
+  northEast: 4,
+  southEast: 5,
+  southWest: 6,
+  northWest: 7,
 } as const;
 
 export type Facing = (typeof FACING)[keyof typeof FACING];
+
+/** Facing for a movement delta; diagonals only when both axes change. */
+export function facingFromDelta(deltaX: number, deltaY: number): Facing {
+  if (deltaX !== 0 && deltaY !== 0) {
+    if (deltaX > 0) {
+      return deltaY < 0 ? FACING.northEast : FACING.southEast;
+    }
+    return deltaY < 0 ? FACING.northWest : FACING.southWest;
+  }
+  if (deltaX !== 0) {
+    return deltaX > 0 ? FACING.east : FACING.west;
+  }
+  return deltaY > 0 ? FACING.south : FACING.north;
+}
 
 /**
  * Realtime join carries only a one-time ticket issued by the Control API.
@@ -97,6 +122,17 @@ export const moveToCommandSchema = z
   .strict();
 
 export type MoveToCommand = z.infer<typeof moveToCommandSchema>;
+
+/** Stops the current authoritative path; the server also ends auto-attack. */
+export const moveStopCommandSchema = z
+  .object({
+    protocolVersion: z.number().int().positive(),
+    commandId: z.uuid(),
+    clientSequence: z.number().int().min(0).max(2_147_483_647),
+  })
+  .strict();
+
+export type MoveStopCommand = z.infer<typeof moveStopCommandSchema>;
 
 export const CHAT_MESSAGE_MAX_LENGTH = 120 as const;
 

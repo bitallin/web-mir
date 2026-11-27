@@ -20,7 +20,7 @@ describe('findPath', () => {
     expect(findPath(OPEN, { x: 2, y: 2 }, { x: 2, y: 2 })).toEqual([]);
   });
 
-  it('finds a straight four-directional path', () => {
+  it('finds a straight path along an open row', () => {
     const path = findPath(OPEN, { x: 1, y: 1 }, { x: 4, y: 1 });
 
     expect(path).toEqual([
@@ -28,6 +28,29 @@ describe('findPath', () => {
       { x: 3, y: 1 },
       { x: 4, y: 1 },
     ]);
+  });
+
+  it('takes diagonal steps instead of an L-shaped detour', () => {
+    const path = findPath(OPEN, { x: 1, y: 1 }, { x: 4, y: 4 });
+
+    expect(path).toEqual([
+      { x: 2, y: 2 },
+      { x: 3, y: 3 },
+      { x: 4, y: 4 },
+    ]);
+  });
+
+  it('refuses to cut a blocked corner diagonally', () => {
+    const map = grid(['...', '.#.', '...']);
+    // (1,1) is blocked, so (0,0) -> (1,1) and (1,1) -> (2,2) are illegal;
+    // the detour has to go around the corner.
+    const path = findPath(map, { x: 0, y: 0 }, { x: 2, y: 2 });
+
+    expect(path).not.toBeNull();
+    for (const node of path ?? []) {
+      expect(node).not.toEqual({ x: 1, y: 1 });
+    }
+    expect(path?.length).toBe(4);
   });
 
   it('routes around a wall without entering blocked tiles', () => {
@@ -40,7 +63,9 @@ describe('findPath', () => {
       expect(map.isWalkable(node.x, node.y)).toBe(true);
       expect(node).not.toEqual({ x: 3, y: 1 });
     }
-    expect(path?.length).toBeGreaterThan(4);
+    // Eight-direction movement steps diagonally over the wall in four steps;
+    // the old four-direction path needed six.
+    expect(path?.length).toBe(4);
   });
 
   it('returns null for a sealed area and for invalid targets', () => {

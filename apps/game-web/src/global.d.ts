@@ -40,6 +40,8 @@ declare global {
       selfId: () => string;
       /** Client-predicted position in 1000-unit tiles, sampled by movement E2E. */
       selfUnitPosition: () => { x: number; y: number } | null;
+      /** Last authoritative snapshot position for the local player. */
+      selfServerPosition: () => { x: number; y: number } | null;
       playerAppearance: (playerId: string) => PlayerAppearance | null;
       activeTelegraphs: () => TelegraphView[];
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;

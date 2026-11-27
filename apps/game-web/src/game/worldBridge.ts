@@ -46,6 +46,7 @@ export type WorldSceneHandle = {
   applyAck: (ack: CommandAck) => void;
   applyAutoAttackState: (state: CombatTargetChanged) => void;
   selfUnitPosition: () => { x: number; y: number } | null;
+  selfServerPosition: () => { x: number; y: number } | null;
   applyCombatEvent: (event: CombatEvent) => void;
   playLootClaim: (claimed: LootClaimed) => void;
   screenPointForTile: (tile: TilePoint) => ScreenPoint;
@@ -71,6 +72,7 @@ export class WorldBridge {
   private attachCount = 0;
 
   onMoveRequest: ((tile: TilePoint) => void) | null = null;
+  onStopRequest: (() => void) | null = null;
   onAttackRequest: ((targetId: string) => void) | null = null;
   onSkillRequest: ((skillId: string, targetId: string) => void) | null = null;
   onTargetChange: ((targetId: string | null) => void) | null = null;
@@ -113,6 +115,10 @@ export class WorldBridge {
     return this.scene?.selfUnitPosition() ?? null;
   }
 
+  selfServerPosition(): { x: number; y: number } | null {
+    return this.scene?.selfServerPosition() ?? null;
+  }
+
   pushCombatEvent(event: CombatEvent): void {
     this.scene?.applyCombatEvent(event);
   }
@@ -123,6 +129,10 @@ export class WorldBridge {
 
   requestMove(tile: TilePoint): void {
     this.onMoveRequest?.(tile);
+  }
+
+  requestStop(): void {
+    this.onStopRequest?.();
   }
 
   requestAttack(targetId: string): void {
