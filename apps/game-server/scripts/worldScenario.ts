@@ -635,7 +635,19 @@ async function main(): Promise<void> {
     }
   }
 
-  await Promise.allSettled(clients.map(async (client) => client.room.leave()));
+  // A mover can step onto the wilds portal and be transferred to town; the
+  // SDK's leave promise then never settles because the server already closed
+  // that room. Bound the teardown, then close anything still open so the
+  // scenario exits after writing its report instead of hanging forever.
+  await Promise.race([
+    Promise.allSettled(clients.map(async (client) => client.room.leave())),
+    wait(5_000),
+  ]);
+  for (const client of clients) {
+    if (client.room.connection.isOpen) {
+      client.room.connection.close();
+    }
+  }
 }
 
 main().catch((error: unknown) => {
