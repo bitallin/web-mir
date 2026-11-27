@@ -692,6 +692,15 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     expect(dailyQuest?.repeat).toBe('daily');
     expect(dailyQuest?.nextResetAt).toBeGreaterThan(Date.now());
 
+    // The ten-step chain ships with the baseline; the frontier giver is named
+    // from the ruins map even while the player stands in town.
+    const chain = snapshots[0]?.quests.filter((quest) => quest.repeat === undefined) ?? [];
+    expect(chain).toHaveLength(10);
+    const ruinsQuest = snapshots[0]?.quests.find((quest) => quest.questId === 'quest_ruins_bones');
+    expect(ruinsQuest?.giverNpcId).toBe('ruins_scout');
+    expect(ruinsQuest?.giverNpcName).toBe('废墟斥候');
+    expect(ruinsQuest?.status).toBe('locked');
+
     const commandId = randomUUID();
     room.send('quest.accept', {
       protocolVersion: PROTOCOL_VERSION,

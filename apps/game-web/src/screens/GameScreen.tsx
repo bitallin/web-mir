@@ -15,7 +15,7 @@ import {
   type ShopOffer,
   type SkillView,
 } from '@web-legend/contracts';
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 
 import { issueGameTicket } from '../api/client';
 import {
@@ -34,6 +34,7 @@ import {
   QUALITY_LABELS,
 } from '../lib/inventoryView';
 import { itemIconFrame, itemIconStyle } from '../lib/itemIcons';
+import { groupQuestsByStatus, nextAvailableQuest } from '../lib/questPanel';
 import type { ConnectionStatus } from '../net/worldClient';
 import { useWorldSession } from '../session/useWorldSession';
 import { Minimap } from './Minimap';
@@ -298,17 +299,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         .slice(0, 3),
     [quests],
   );
-  const availableQuest = useMemo(
-    () =>
-      quests
-        .filter((quest) => quest.status === 'available')
-        .sort(
-          (left, right) =>
-            left.levelRequirement - right.levelRequirement ||
-            left.questId.localeCompare(right.questId),
-        )[0] ?? null,
-    [quests],
-  );
+  const questSections = useMemo(() => groupQuestsByStatus(panelQuests), [panelQuests]);
+  const availableQuest = useMemo(() => nextAvailableQuest(quests), [quests]);
   const availableLocation = availableQuest === null ? null : locateNpc(availableQuest.giverNpcId);
   const questNavigation = state.questNavigation;
   const navigationQuest =
@@ -1498,204 +1490,219 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             </button>
           </div>
           <ul className="quest-list" data-testid="quest-list">
-            {panelQuests.map((quest) => {
-              const nearby = canUseQuestGiver(quest);
-              const canAccept = quest.status === 'available';
-              const canClaim = quest.status === 'completed' && nearby;
-              const navActive = questNavigation?.questId === quest.questId;
-              const canHunt = quest.status === 'active' && quest.objective.kind === 'kill';
-              const canReturn = quest.status === 'completed' && !nearby;
-              const location = locateNpc(quest.giverNpcId);
-              return (
+            {questSections.map((section) => (
+              <Fragment key={section.key}>
                 <li
-                  key={quest.questId}
-                  className={`quest-row quest-${quest.status}`}
-                  data-testid="quest-row"
-                  data-quest-id={quest.questId}
-                  data-status={quest.status}
-                  data-progress={quest.progress}
-                  data-near={nearby ? 'true' : 'false'}
-                  data-repeat={quest.repeat ?? 'once'}
+                  className="quest-section-heading"
+                  data-testid="quest-section"
+                  data-section={section.key}
                 >
-                  <div className="quest-row-heading">
-                    <strong>
-                      {quest.repeat === 'daily' ? (
-                        <span className="quest-repeat-tag" data-testid="quest-repeat">
-                          日常
-                        </span>
+                  <span data-testid="quest-section-title">{section.title}</span>
+                  <span className="quest-section-count" data-testid="quest-section-count">
+                    {section.quests.length}
+                  </span>
+                </li>
+                {section.quests.map((quest) => {
+                  const nearby = canUseQuestGiver(quest);
+                  const canAccept = quest.status === 'available';
+                  const canClaim = quest.status === 'completed' && nearby;
+                  const navActive = questNavigation?.questId === quest.questId;
+                  const canHunt = quest.status === 'active' && quest.objective.kind === 'kill';
+                  const canReturn = quest.status === 'completed' && !nearby;
+                  const location = locateNpc(quest.giverNpcId);
+                  return (
+                    <li
+                      key={quest.questId}
+                      className={`quest-row quest-${quest.status}`}
+                      data-testid="quest-row"
+                      data-quest-id={quest.questId}
+                      data-status={quest.status}
+                      data-progress={quest.progress}
+                      data-near={nearby ? 'true' : 'false'}
+                      data-repeat={quest.repeat ?? 'once'}
+                    >
+                      <div className="quest-row-heading">
+                        <strong>
+                          {quest.repeat === 'daily' ? (
+                            <span className="quest-repeat-tag" data-testid="quest-repeat">
+                              日常
+                            </span>
+                          ) : null}
+                          {quest.title}
+                        </strong>
+                        <span>Lv.{quest.levelRequirement}</span>
+                      </div>
+                      <p className="quest-description">{quest.description}</p>
+                      <p
+                        className="quest-location"
+                        data-testid="quest-location"
+                        data-giver-map={location?.mapId ?? ''}
+                      >
+                        {location === null
+                          ? quest.giverNpcName
+                          : `${location.mapName} · ${location.npcName}`}
+                      </p>
+                      <p className="quest-objective" data-testid="quest-objective">
+                        {quest.objective.monsterName} {quest.progress}/{quest.objective.count}
+                      </p>
+                      {dailyResetLabel(quest) === null ? null : (
+                        <p className="quest-repeat-note" data-testid="quest-reset">
+                          {dailyResetLabel(quest)}
+                        </p>
+                      )}
+                      <p className="quest-rewards">
+                        经验 {quest.rewards.exp} · 金币 {quest.rewards.gold}
+                        {quest.rewards.items.map((item) => (
+                          <span key={item.templateId}>
+                            {' '}
+                            · {item.name}×{item.quantity}
+                          </span>
+                        ))}
+                      </p>
+                      {quest.status === 'locked' ? (
+                        <p className="quest-locked" data-testid="quest-locked">
+                          需求等级 {quest.levelRequirement}
+                          {quest.prerequisiteTitle === undefined
+                            ? ''
+                            : `，并完成「${quest.prerequisiteTitle}」`}
+                        </p>
                       ) : null}
-                      {quest.title}
-                    </strong>
-                    <span>Lv.{quest.levelRequirement}</span>
-                  </div>
-                  <p className="quest-description">{quest.description}</p>
-                  <p
-                    className="quest-location"
-                    data-testid="quest-location"
-                    data-giver-map={location?.mapId ?? ''}
-                  >
-                    {location === null
-                      ? quest.giverNpcName
-                      : `${location.mapName} · ${location.npcName}`}
-                  </p>
-                  <p className="quest-objective" data-testid="quest-objective">
-                    {quest.objective.monsterName} {quest.progress}/{quest.objective.count}
-                  </p>
-                  {dailyResetLabel(quest) === null ? null : (
-                    <p className="quest-repeat-note" data-testid="quest-reset">
-                      {dailyResetLabel(quest)}
-                    </p>
-                  )}
-                  <p className="quest-rewards">
-                    经验 {quest.rewards.exp} · 金币 {quest.rewards.gold}
-                    {quest.rewards.items.map((item) => (
-                      <span key={item.templateId}>
-                        {' '}
-                        · {item.name}×{item.quantity}
-                      </span>
-                    ))}
-                  </p>
-                  {quest.status === 'locked' ? (
-                    <p className="quest-locked" data-testid="quest-locked">
-                      需求等级 {quest.levelRequirement}
-                      {quest.prerequisiteTitle === undefined
-                        ? ''
-                        : `，并完成「${quest.prerequisiteTitle}」`}
-                    </p>
-                  ) : null}
-                  <div className="quest-actions">
-                    {canAccept && nearby ? (
-                      <>
-                        <button
-                          type="button"
-                          data-testid="quest-accept"
-                          data-quest-id={quest.questId}
-                          onClick={() => {
-                            acceptQuest(quest.questId);
-                          }}
-                        >
-                          接取
-                        </button>
-                        {quest.objective.kind === 'kill' ? (
+                      <div className="quest-actions">
+                        {canAccept && nearby ? (
+                          <>
+                            <button
+                              type="button"
+                              data-testid="quest-accept"
+                              data-quest-id={quest.questId}
+                              onClick={() => {
+                                acceptQuest(quest.questId);
+                              }}
+                            >
+                              接取
+                            </button>
+                            {quest.objective.kind === 'kill' ? (
+                              <button
+                                type="button"
+                                data-testid="quest-accept-hunt"
+                                data-quest-id={quest.questId}
+                                onClick={() => {
+                                  acceptQuestAndHunt(quest.questId);
+                                }}
+                              >
+                                接取并前往
+                              </button>
+                            ) : null}
+                          </>
+                        ) : null}
+                        {canAccept && !nearby ? (
+                          navActive ? (
+                            <button
+                              type="button"
+                              data-testid="quest-accept-stop"
+                              data-quest-id={quest.questId}
+                              onClick={() => {
+                                stopQuestNavigation();
+                              }}
+                            >
+                              停止自动
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              data-testid="quest-accept-go"
+                              data-quest-id={quest.questId}
+                              onClick={() => {
+                                navigateQuest(quest.questId, 'accept');
+                              }}
+                            >
+                              前往接取
+                            </button>
+                          )
+                        ) : null}
+                        {canHunt ? (
+                          navActive ? (
+                            <button
+                              type="button"
+                              data-testid="quest-hunt-stop"
+                              data-quest-id={quest.questId}
+                              onClick={() => {
+                                stopQuestNavigation();
+                              }}
+                            >
+                              停止自动
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              data-testid="quest-hunt"
+                              data-quest-id={quest.questId}
+                              onClick={() => {
+                                navigateQuest(quest.questId, 'hunt');
+                              }}
+                            >
+                              前往击杀
+                            </button>
+                          )
+                        ) : null}
+                        {canReturn ? (
+                          navActive ? (
+                            <button
+                              type="button"
+                              data-testid="quest-return-stop"
+                              data-quest-id={quest.questId}
+                              onClick={() => {
+                                stopQuestNavigation();
+                              }}
+                            >
+                              停止自动
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              data-testid="quest-return"
+                              data-quest-id={quest.questId}
+                              onClick={() => {
+                                navigateQuest(quest.questId, 'return');
+                              }}
+                            >
+                              回去交付
+                            </button>
+                          )
+                        ) : null}
+                        {canClaim ? (
                           <button
                             type="button"
-                            data-testid="quest-accept-hunt"
+                            data-testid="quest-claim"
                             data-quest-id={quest.questId}
                             onClick={() => {
-                              acceptQuestAndHunt(quest.questId);
+                              claimQuest(quest.questId);
                             }}
                           >
-                            接取并前往
+                            交付
                           </button>
                         ) : null}
-                      </>
-                    ) : null}
-                    {canAccept && !nearby ? (
-                      navActive ? (
-                        <button
-                          type="button"
-                          data-testid="quest-accept-stop"
-                          data-quest-id={quest.questId}
-                          onClick={() => {
-                            stopQuestNavigation();
-                          }}
-                        >
-                          停止自动
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          data-testid="quest-accept-go"
-                          data-quest-id={quest.questId}
-                          onClick={() => {
-                            navigateQuest(quest.questId, 'accept');
-                          }}
-                        >
-                          前往接取
-                        </button>
-                      )
-                    ) : null}
-                    {canHunt ? (
-                      navActive ? (
-                        <button
-                          type="button"
-                          data-testid="quest-hunt-stop"
-                          data-quest-id={quest.questId}
-                          onClick={() => {
-                            stopQuestNavigation();
-                          }}
-                        >
-                          停止自动
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          data-testid="quest-hunt"
-                          data-quest-id={quest.questId}
-                          onClick={() => {
-                            navigateQuest(quest.questId, 'hunt');
-                          }}
-                        >
-                          前往击杀
-                        </button>
-                      )
-                    ) : null}
-                    {canReturn ? (
-                      navActive ? (
-                        <button
-                          type="button"
-                          data-testid="quest-return-stop"
-                          data-quest-id={quest.questId}
-                          onClick={() => {
-                            stopQuestNavigation();
-                          }}
-                        >
-                          停止自动
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          data-testid="quest-return"
-                          data-quest-id={quest.questId}
-                          onClick={() => {
-                            navigateQuest(quest.questId, 'return');
-                          }}
-                        >
-                          回去交付
-                        </button>
-                      )
-                    ) : null}
-                    {canClaim ? (
-                      <button
-                        type="button"
-                        data-testid="quest-claim"
-                        data-quest-id={quest.questId}
-                        onClick={() => {
-                          claimQuest(quest.questId);
-                        }}
-                      >
-                        交付
-                      </button>
-                    ) : null}
-                    {quest.status === 'active' ? (
-                      <span className="quest-progress-state">
-                        {navActive ? '自动进行中' : '进行中'}
-                      </span>
-                    ) : null}
-                    {quest.status === 'claimed' ? (
-                      <span className="quest-progress-state done">
-                        {quest.repeat === 'daily' ? '今日已完成' : '已完成'}
-                      </span>
-                    ) : null}
-                    {canAccept && !nearby ? (
-                      <span className="quest-distance-hint">
-                        可自动前往{location === null ? quest.giverNpcName : location.mapName}接取
-                      </span>
-                    ) : null}
-                  </div>
-                </li>
-              );
-            })}
+                        {quest.status === 'active' ? (
+                          <span className="quest-progress-state">
+                            {navActive ? '自动进行中' : '进行中'}
+                          </span>
+                        ) : null}
+                        {quest.status === 'claimed' ? (
+                          <span className="quest-progress-state done">
+                            {quest.repeat === 'daily' ? '今日已完成' : '已完成'}
+                          </span>
+                        ) : null}
+                        {canAccept && !nearby ? (
+                          <span className="quest-distance-hint">
+                            可自动前往{location === null ? quest.giverNpcName : location.mapName}
+                            接取
+                          </span>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </Fragment>
+            ))}
             {panelQuests.length === 0 ? <li className="empty">这里暂时没有任务</li> : null}
           </ul>
           <p className="shop-hint">

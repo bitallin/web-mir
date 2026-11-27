@@ -55,7 +55,7 @@ export const mapPortalSchema = z
 
 export type MapPortal = z.infer<typeof mapPortalSchema>;
 
-export const MAP_NPC_ROLES = ['merchant', 'guard'] as const;
+export const MAP_NPC_ROLES = ['merchant', 'guard', 'scout'] as const;
 export const mapNpcRoleSchema = z.enum(MAP_NPC_ROLES);
 export type MapNpcRole = z.infer<typeof mapNpcRoleSchema>;
 

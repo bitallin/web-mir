@@ -287,7 +287,17 @@
       }
     }
   ],
-  "npcPoints": [],
+  "npcPoints": [
+    {
+      "id": "ruins_scout",
+      "name": "废墟斥候",
+      "tile": {
+        "x": 7,
+        "y": 20
+      },
+      "role": "scout"
+    }
+  ],
   "monsterSpawns": [
     {
       "id": "ruins_skeleton_1",
@@ -531,5 +541,5 @@
     }
   ],
   "assetManifestVersion": "alpha0.2.2",
-  "checksum": "b657032755f446626019a889df2d7f0472658d6e3f1433d51dacf7c0fa627442"
+  "checksum": "3c64a6deb610ec2bd59eafd4a03d534271dbbe29e24906db92f35c55ab6bdbc9"
 }

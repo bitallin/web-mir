@@ -370,7 +370,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private readonly pendingQuests = new Map<string, QuestRecordState[]>();
   /** Last daily period this room has announced; null until the first sweep. */
   private questPeriodKey: string | null = null;
-  /** Quest giver display names from this room's compiled map. */
+  /** Quest giver display names from every compiled map. */
   private readonly npcNames = new Map<string, string>();
 
   override onCreate(options: WorldMapRoomOptions): void {

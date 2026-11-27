@@ -2401,6 +2401,31 @@ body {
   overflow-y: auto;
 }
 
+.quest-section-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 14px 5px;
+  background: rgba(12, 15, 18, 0.96);
+  border-top: 1px solid rgba(35, 42, 50, 0.7);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.quest-section-heading:first-child {
+  border-top: 0;
+}
+
+.quest-section-count {
+  color: var(--parchment);
+  opacity: 0.7;
+}
+
 .quest-row {
   display: flex;
   flex-direction: column;

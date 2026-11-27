@@ -86,6 +86,11 @@ describe('Tiled map compilation', () => {
     expect(wilds?.pvpMode).toBe('open');
     expect(ruins?.pvpMode).toBe('open');
     expect(town?.npcPoints).toHaveLength(2);
+    // The frontier quest giver keeps the late chain from sending players back
+    // to town after every step.
+    expect(ruins?.npcPoints).toEqual([
+      { id: 'ruins_scout', name: '废墟斥候', tile: { x: 7, y: 20 }, role: 'scout' },
+    ]);
     expect(town?.monsterSpawns).toHaveLength(0);
     // The Tiled sources mark the portal-adjacent spawn point as the respawn.
     expect(wilds?.respawnPoint).toEqual({ x: 2, y: 16 });
@@ -225,6 +230,20 @@ describe('Tiled map compilation', () => {
     );
 
     expect(() => compileMapSet([town], options())).toThrow(/invalid npcId/);
+  });
+
+  it('rejects an NPC role the runtime does not know', () => {
+    const town = mutableSource('starter_town');
+    const npcs = layers(town.data).find((layer) => layer.name === 'npc_points');
+    const merchant = npcs?.objects?.[0];
+    if (merchant?.properties === undefined) {
+      throw new Error('town has no NPC');
+    }
+    merchant.properties = merchant.properties.map((property) =>
+      property.name === 'role' ? { ...property, value: 'villain' } : property,
+    );
+
+    expect(() => compileMapSet([town], options())).toThrow(/unsupported role/);
   });
 
   it('rejects duplicate map ids', () => {

@@ -1265,6 +1265,97 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     expect(claimed.record.status).toBe('claimed');
   });
 
+  it('completes the ten-step main chain with every step paid once', async () => {
+    // A high-level character isolates the chain itself from levelling: every
+    // step must still accept, advance and pay out with the shipped content.
+    const character = await createCharacter(db, 'warrior', { level: 12, gold: 0 });
+    const chain = [
+      { questId: 'quest_slime_cleanup', monsterId: 'wild_slime', count: 3, mapId: 'starter_wilds' },
+      { questId: 'quest_wolf_patrol', monsterId: 'forest_wolf', count: 3, mapId: 'starter_wilds' },
+      { questId: 'quest_spider_nest', monsterId: 'venom_spider', count: 4, mapId: 'starter_wilds' },
+      { questId: 'quest_stone_guard', monsterId: 'stone_guard', count: 2, mapId: 'starter_wilds' },
+      { questId: 'quest_alpha_wolf', monsterId: 'alpha_wolf', count: 1, mapId: 'starter_wilds' },
+      {
+        questId: 'quest_ruins_bones',
+        monsterId: 'skeleton_warrior',
+        count: 5,
+        mapId: 'ruined_fields',
+      },
+      {
+        questId: 'quest_ruins_corruption',
+        monsterId: 'corrupt_warlock',
+        count: 4,
+        mapId: 'ruined_fields',
+      },
+      {
+        questId: 'quest_ruins_gargoyle',
+        monsterId: 'ruin_gargoyle',
+        count: 1,
+        mapId: 'ruined_fields',
+      },
+      {
+        questId: 'quest_ruins_purge',
+        monsterId: 'skeleton_warrior',
+        count: 8,
+        mapId: 'ruined_fields',
+      },
+      {
+        questId: 'quest_ruins_colossus',
+        monsterId: 'ashen_colossus',
+        count: 1,
+        mapId: 'ruined_fields',
+      },
+    ] as const;
+
+    for (const step of chain) {
+      const accepted = await service.acceptQuest({
+        characterId: character.id,
+        commandId: randomUUID(),
+        questId: step.questId,
+      });
+      expect(accepted.record).toMatchObject({ questId: step.questId, progress: 0 });
+
+      for (let index = 0; index < step.count; index += 1) {
+        await service.grantKillReward({
+          characterId: character.id,
+          mapId: step.mapId,
+          reference: `chain-kill-${step.questId}-${randomUUID()}`,
+          monsterTemplateId: step.monsterId,
+          x: 7_500,
+          y: 15_500,
+        });
+      }
+
+      const record = (await service.loadQuestRecords(character.id)).find(
+        (entry) => entry.questId === step.questId,
+      );
+      expect(record).toMatchObject({ status: 'completed', progress: step.count });
+
+      const claimed = await service.claimQuest({
+        characterId: character.id,
+        commandId: randomUUID(),
+        questId: step.questId,
+      });
+      expect(claimed.deduplicated).toBe(false);
+      expect(claimed.record.status).toBe('claimed');
+    }
+
+    const claimedRows = (await service.loadQuestRecords(character.id)).filter(
+      (record) => record.status === 'claimed',
+    );
+    expect(claimedRows).toHaveLength(chain.length);
+    const ledger = await db
+      .select()
+      .from(currencyLedger)
+      .where(
+        and(
+          eq(currencyLedger.characterId, character.id),
+          eq(currencyLedger.reason, 'quest_reward'),
+        ),
+      );
+    expect(ledger).toHaveLength(chain.length);
+  });
+
   it('resets a daily quest at the realm hour and keeps periods isolated', async () => {
     const character = await createCharacter(db, 'warrior', { gold: 0 });
     let dailyClock = new Date('2026-11-27T12:00:00.000Z'); // 20:00 at +08:00

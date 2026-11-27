@@ -3,7 +3,7 @@
   "height": 36,
   "infinite": false,
   "nextlayerid": 9,
-  "nextobjectid": 36,
+  "nextobjectid": 37,
   "orientation": "orthogonal",
   "properties": [
     {
@@ -7187,7 +7187,47 @@
       "id": 7,
       "name": "npc_points",
       "type": "objectgroup",
-      "objects": [],
+      "objects": [
+        {
+          "height": 0,
+          "id": 36,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 7
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 20
+            },
+            {
+              "name": "npcId",
+              "type": "string",
+              "value": "ruins_scout"
+            },
+            {
+              "name": "npcName",
+              "type": "string",
+              "value": "废墟斥候"
+            },
+            {
+              "name": "role",
+              "type": "string",
+              "value": "scout"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 240,
+          "y": 656
+        }
+      ],
       "opacity": 1,
       "visible": true,
       "x": 0,

@@ -1,8 +1,10 @@
 import {
+  MAP_NPC_ROLES,
   MAP_RUNTIME_SCHEMA_VERSION,
   mapRuntimeManifestSchema,
   type MapMonsterSpawn,
   type MapNpcPoint,
+  type MapNpcRole,
   type MapPortal,
   type MapRuntimeManifest,
   type MapTileset,
@@ -20,6 +22,10 @@ import {
   type TiledObjectLayer,
   type TiledTileLayer,
 } from './tiled';
+
+function isMapNpcRole(value: string): value is MapNpcRole {
+  return MAP_NPC_ROLES.some((role) => role === value);
+}
 
 export class MapCompileError extends Error {
   constructor(
@@ -290,7 +296,7 @@ function compileSingle(source: MapSource, options: MapCompileOptions): MapRuntim
         );
       }
       const role = tiledStringProperty(object, 'role');
-      if (role !== undefined && role !== 'merchant' && role !== 'guard') {
+      if (role !== undefined && !isMapNpcRole(role)) {
         throw new MapCompileError(
           source.name,
           `NPC ${String(object.id)} has unsupported role "${role}"`,
