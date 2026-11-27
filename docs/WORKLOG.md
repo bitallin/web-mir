@@ -3227,7 +3227,8 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 LOAD_OUTPUT=... pnpm l
 
 ### 提交
 
-- 待填写（`feat(alpha-03): share kill loot with party members`）。
+- `ee2bac0` `feat(alpha-03): share kill loot with party members`
+  （13 个文件：拾取事务、房间传递、应用/服务端测试、ADR 补充、报告与证据）。
 
 ### 下一步计划
 

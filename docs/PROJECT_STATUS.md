@@ -1514,6 +1514,8 @@ tick p50 2.39ms / p95 12.17ms / p99 18.10ms（仍高于 10ms 目标，与上一�
   主题：`fix(alpha-02): refresh the quest chain after a claim or level-up`
 - Alpha 0.3 S1 组队与共享击杀经验：`6c1c1c0`
   主题：`feat(alpha-03): add parties and shared kill experience`
+- Alpha 0.3 S1 补充：队伍共享掉落归属：`ee2bac0`
+  主题：`feat(alpha-03): share kill loot with party members`
 
 ## 11. 当前环境事实
 
