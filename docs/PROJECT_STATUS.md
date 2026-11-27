@@ -21,6 +21,8 @@
 - **正在工作**：开发栈 84–87 已重启到本切片代码（Node 26），4 个服务健康 200，
   内容 `2026.11.27.7`；8584 实测 D+S 斜向移动与空格停止，证据
   `docs/phase-reports/alpha-03/eight-way/dev-eight-way-8584.png`。
+- **最近提交**：`cc7d0f2` `feat(alpha-03): add eight-way movement and keyboard
+controls` 与 `c4cffec` 文档记录，已推送 `origin/main`。
 - **未完成/阻塞**：每日「东境巡逻」的完整人工试玩；世界内到达目标没有光柱/
   小地图标记（TD-CLI-24）；正式美术与八方向角色帧（TD-CLI-13）；远端 CI
   （本环境无 gh）。
