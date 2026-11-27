@@ -3953,3 +3953,9 @@ pnpm verify:invariants
 1. 重启开发栈，发布并激活含两条收集任务的新 Release，刷新 8584。
 2. 跑容量 sanity 与资产不变量，回填结果。
 3. 下一片 S3-D2：到达类任务目标；副本实例先写 ADR。
+
+### 提交
+
+- `c9613fd` `feat(alpha-03): add collect quest objectives with bag-derived progress`
+  （36 个文件：契约、内容、领域、应用、服务端、客户端、测试、ADR、报告、状态与
+  日志）。

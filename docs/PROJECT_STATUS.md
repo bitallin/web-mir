@@ -655,9 +655,10 @@ assets:generate` 同时生成角色与图标；三张地图已按新 manifest �
   奖励；无来源告警。
 - 测试：新增 15 条单元/集成与 1 条浏览器 E2E；**566 测试**、全量 **47/47**
   E2E（10.9 分钟）通过，最终代码任务 E2E 5/5。
+- 提交：`c9613fd` `feat(alpha-03): add collect quest objectives with bag-derived
+progress`。
 - 未完成：开发栈仍运行旧代码，需重启后发布新内容 Release（关闭旧进程被环境
-  权限拦截，待用户确认）；容量 sanity 与重启后的资产不变量待复跑；全量 E2E
-  在隔离栈运行中。
+  权限拦截，待用户确认）；容量 sanity 与重启后的资产不变量待复跑。
 
 ## 1. 当前阶段
 
