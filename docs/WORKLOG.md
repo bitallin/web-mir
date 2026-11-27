@@ -4062,3 +4062,9 @@ pnpm verify:invariants
 1. 组队试玩首领争夺掉落与远处走近，回填人工试玩记录。
 2. 下一片：S3-D2 到达类任务目标或社交深化；副本实例先写 ADR。
 3. 正式美术与远端 CI 确认。
+
+### 提交
+
+- `2439efb` `feat(alpha-03): claim monsters and auto-pick owned loot`
+  （44 个文件：契约、领域、应用、持久化迁移、服务端、客户端、测试、ADR-041、
+  切片报告、截图与负载证据、状态与日志）。
