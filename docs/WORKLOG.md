@@ -4275,4 +4275,6 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
 
 ### 提交
 
-- 待本次提交完成后补充哈希。
+- `cc7d0f2` `feat(alpha-03): add eight-way movement and keyboard controls`
+  （契约、寻路/模拟/战斗、服务端 `move.stop`、客户端键盘与预测、单元/集成/
+  E2E、ADR-043、切片报告、状态、日志、债务与经验、容量与 8584 证据）。
