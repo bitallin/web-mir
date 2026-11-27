@@ -19,7 +19,9 @@ async function registerWarrior(browser: Browser): Promise<Page> {
   const username = `move_${token()}`;
   const characterName = `Move${token()}`;
 
-  await page.goto('/?fresh=1');
+  // Isolate the wilds instance: monsters left chasing a player from an earlier
+  // spec can make the approach test sample a stationary character.
+  await page.goto('/?fresh=1&freshTransfer=1');
   await page.getByRole('tab', { name: '注册' }).click();
   await page.getByTestId('auth-username').fill(username);
   await page.getByTestId('auth-password').fill(PASSWORD);

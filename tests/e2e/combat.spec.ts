@@ -212,16 +212,29 @@ test('two players fight one wilds monster with authoritative hp, skills and resp
   await expect(alice.page.getByTestId('auto-attack-bar')).toHaveCount(0, { timeout: 5_000 });
   await expect.poll(async () => monsterHp(alice.page), { timeout: 30_000 }).toBeGreaterThan(0);
 
-  // The warrior skill spends mana and exposes a server cooldown. Mana now
-  // regenerates, so assert the dip rather than a frozen 24/30.
+  // Let any in-flight auto-attack land before testing the skill: a residual hit
+  // could kill the slime between the liveness check and the cast. If that
+  // happened, wait for the respawn so the cast targets a live monster.
+  await alice.page.waitForTimeout(1_000);
+  if ((await monsterHp(alice.page)) <= 0) {
+    await expect(aliceRow).toHaveAttribute('data-hp', String(startHp), { timeout: 20_000 });
+    await expect
+      .poll(async () => (await aliceRow.getAttribute('data-state')) !== 'dead', { timeout: 10_000 })
+      .toBe(true);
+  }
+
+  // The warrior skill spends mana and exposes a server cooldown. Check the
+  // cooldown before the mana polls: it is only 5 seconds, so waiting on mana
+  // first could let it expire and turn a correct cast into a false failure.
   await alice.page.getByTestId('skill-1').click();
+  await expect(alice.page.getByTestId('skill-1')).toHaveAttribute('data-cooldown-ms', /[1-9]\d*/u, {
+    timeout: 10_000,
+  });
+  // Mana now regenerates, so assert the dip rather than a frozen 24/30.
   await expect.poll(async () => warriorMana(alice.page), { timeout: 10_000 }).toBeLessThan(30);
   await expect
     .poll(async () => warriorMana(alice.page), { timeout: 10_000 })
     .toBeGreaterThanOrEqual(24);
-  await expect(alice.page.getByTestId('skill-1')).toHaveAttribute('data-cooldown-ms', /[1-9]\d*/u, {
-    timeout: 5_000,
-  });
   await seeSameMonsterHp(alice.page, bob.page);
 
   // Finish the monster; both clients must observe the same death.
