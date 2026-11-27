@@ -77,8 +77,9 @@ S3-A/S3-B 交付了每日任务与一键流程，但主线只有 3 步、在 5 �
   解析为「废墟斥候」，状态为 locked。
 - 新增浏览器 E2E：新角色打开全局面板，看到「可接取 2 / 尚未解锁 10」；废墟
   任务显示地点；引导提示指向「清理史莱姆」而不是每日任务。截图：
-  `quest-chain/e2e-panel-sections.png`（可接取分组）与
-  `quest-chain/e2e-panel-chain.png`（尚未解锁的十步链与斥候地点）。
+  `quest-chain/e2e-panel-sections.png`（可接取分组）、
+  `quest-chain/e2e-panel-chain.png`（尚未解锁的十步链与斥候地点）与
+  `quest-chain/dev-panel-8584.png`（开发栈实测 12 条任务）。
 
 ## 3. 验证结果
 
@@ -94,6 +95,7 @@ S3-A/S3-B 交付了每日任务与一键流程，但主线只有 3 步、在 5 �
 | tick        | 同上                                 | p50 2.71 / p95 **4.79** / p99 5.65ms  |
 | 资产事务    | 同上                                 | p95 56.79ms；内容 `2026.11.27.4`      |
 | 资产不变量  | `pnpm verify:invariants`             | 7 项全部 0 违例                       |
+| 开发栈实测  | 84 端口 + 真实 Chromium              | 12 条任务、可接取 2 / 尚未解锁 10     |
 
 内容发布：
 
