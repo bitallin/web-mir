@@ -14,6 +14,8 @@ export type {
   KillRewardOutcome,
   LoadedAssets,
   LootDropView,
+  PartyKillRewardInput,
+  PartyKillRewardOutcome,
   PickupInput,
   PickupOutcome,
   QuestCommandInput,

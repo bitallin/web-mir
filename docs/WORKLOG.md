@@ -3053,3 +3053,105 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 pnpm load:scenario
 1. 8584 试玩完整任务链（接取 → 出城 → 回城交付）。
 2. 50 人 × 10 分钟容量回归，观察任务查询对资产 p95 的影响。
 3. S4 剩余正式美术（TD-CLI-13）；Alpha 0.3 任务系统扩展在确认 0.2 验收后评估。
+
+## 2026-11-27 Alpha 0.3 S1：组队与共享击杀经验
+
+### 目标
+
+关闭“多人交互没有合作目标”的核心缺口：两名玩家可以在真实浏览器中组队、
+看到彼此等级与 HP，并在同一张地图内分享击杀经验；不做队伍聊天、跨图队伍与
+掉落分配。
+
+### 实际改动
+
+1. **契约**
+   - 新增 `packages/contracts/src/party.ts`：`PartyView`、`PartyMemberView`、
+     `party.snapshot`、`party.invite` 与 `party.invite/accept/decline/leave`
+     四条客户端命令；线缆上限 8 人、邀请距离 15 格、邀请有效期 30 秒。
+   - 拒绝码 `PARTY_SELF`、`PARTY_TARGET_UNAVAILABLE`、`PARTY_TARGET_BUSY`、
+     `PARTY_ALREADY_IN_PARTY`、`PARTY_FULL`、`PARTY_INVITE_EXPIRED`、
+     `PARTY_NOT_IN_PARTY`；`assetCommandKind` 增加 `party_kill_reward`。
+   - 内容 `rules.party = { maxMembers, assistSharePermille, assistRangeTiles }`。
+2. **内容与校验**
+   - 基线规则：4 人、12 格、50% 基础经验；分享为 0 或范围过小时给出警告。
+3. **服务端**
+   - 新增 `PartyRegistry`（内存）：接受时创建队伍、队长按加入顺序提升、最后
+     一人离开时解散、同一目标只保留一条邀请并按时清理、离队者邀请失效。
+   - `WorldMapRoom`：四条命令复用 `CommandGuard`（协议/重复 id/序号/限频），
+     同步执行；名单只发私有 `party.snapshot`；加入世界补发；传送/最终离开/
+     宽限结束时移除队员并通知。
+   - 击杀共享：击杀者完整奖励之后，为同队、存活、在线、范围内队友各排入一次
+     `grantPartyKillExperience`。
+4. **应用**
+   - `AssetService.grantPartyKillExperience`：角色行锁 + 幂等键
+     `party_kill:<reference>:<characterId>`；经验按基础经验千分比取整，不消耗
+     RNG；可升级回满；不改金币/掉落/任务进度；无新表与迁移。
+5. **客户端**
+   - 附近玩家行「邀请」、邀请提示（30 秒后消失）、左上队伍面板与「离队」；
+     面板在状态板下方，不遮挡游戏区；调试钩子用于 Playwright。
+6. **压测脚本**
+   - `worldScenario.ts` 注册 `party.snapshot` / `party.invite` 空处理器。
+7. **内容发布**
+   - 保存 `rules` 草稿（deathPenalty + party）、校验 0 issue、发布并激活
+     `2026.11.27.1`（checksum `01bcd16d…`）。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm test:e2e
+pnpm verify:invariants
+PLAYWRIGHT_SKIP_WEBSERVER=true E2E_GAME_WEB_PORT=84 E2E_GAME_SERVER_PORT=87 \
+  npx playwright test tests/e2e/party.spec.ts --workers=1
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 LOAD_OUTPUT=... pnpm load:scenario
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 LOAD_OUTPUT=... pnpm load:scenario
+```
+
+- 格式/lint/类型：通过。
+- 单元/集成：73 文件、**490 测试**通过（新增 18 条）。
+- 构建：4 个应用成功。
+- 全量 E2E：**40/40 通过**（4.3 分钟，2 worker，独立库/端口）。
+- 组队 E2E：组队 → 名单 2/4 → 离队 → 再组队 → 出生点传送后队伍结束；
+  开发栈 84 真实 Chromium 同一用例通过。
+- 资产不变量：7 项全部 0 违例。
+- 50 人 × 2 分钟 sanity：50/50、97.3%、tick p95 5.09ms / p99 6.78ms、
+  0 资产失败；Room 内容版本 `2026.11.27.1`。
+- 50 人 × 10 分钟正式回归：50/50、接受率 98.9%、741 击杀、0 资产失败；
+  tick p50 1.28ms / p95 **6.19ms** / p99 7.38ms / max 12.35ms；资产事务
+  p95 54.69ms；RSS 峰值约 330MB（`party/load-50p10a.json`）。压测机器人
+  不组队，共享经验路径由服务端集成测试覆盖。
+
+### 遇到的问题及解决方法
+
+1. **双人 E2E 各建了一个房间**：两名玩家都用 `?fresh=1`，会在同一地图上创建
+   两个隔离 Room，永远看不到彼此。改为第一名玩家 `?fresh=1`、读取 HUD 的
+   `room-id`，第二名玩家 `?join=<roomId>` 加入后通过。沉淀 EL-030。
+2. **伪造接受会取消别人的邀请**：`acceptInvite` 最初在接受者不是被邀请者时
+   也删除邀请。改为只比较、不删除，仅在过期时清理；补单元测试。
+3. **正式回归启动失败**：2 分钟 sanity 的机器人尚未完全断开时启动 10 分钟
+   回归，报“room already has 49 players”。等待 Room 清空后重跑通过，记录为
+   压测前置条件。
+4. **共享经验不能是第二次抽奖**：改为按内容基础经验固定千分比分享，不消耗
+   RNG、不发金币/掉落、不推进任务，重试不改变数值。
+
+### 尚未解决
+
+- 8584 双人完整试玩仍待用户完成；远端 CI 待确认。
+- 队伍仅内存且以 Room 为边界（TD-SRV-11）；无队伍聊天、队长移交、踢人、
+  按名字邀请与跨图队伍（TD-CLI-17）。
+- 经验仍无连续流水（TD-DATA-11）；4 人满队最多额外 150% 经验，需要试玩数据
+  决定是否调整 `assistSharePermille`。
+
+### 提交
+
+- 待填写（`feat(alpha-03): add parties and shared kill experience`）。
+
+### 下一步计划
+
+1. 8584 双人试玩组队与共享经验，观察名单、离队与传送提示。
+2. 根据反馈决定下一切片：队伍聊天/移交或任务系统深化。
+3. S4 剩余正式美术（TD-CLI-13）；确认远端 CI。

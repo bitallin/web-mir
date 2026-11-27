@@ -252,9 +252,26 @@ export const deathPenaltyRuleSchema = z
 
 export type DeathPenaltyRule = z.infer<typeof deathPenaltyRuleSchema>;
 
+/**
+ * Party size and kill-experience sharing (ADR-035). The share applies to every
+ * other living member inside the radius; the killer always keeps the full
+ * rolled reward (gold, drops and quest progress stay killer-only).
+ */
+export const partyRuleSchema = z
+  .object({
+    maxMembers: z.number().int().min(2).max(8),
+    /** Share of the monster's base experience, in per-mille; 0 disables it. */
+    assistSharePermille: z.number().int().min(0).max(1_000),
+    assistRangeTiles: z.number().min(1).max(32),
+  })
+  .strict();
+
+export type PartyRule = z.infer<typeof partyRuleSchema>;
+
 export const rulesContentSchema = z
   .object({
     deathPenalty: deathPenaltyRuleSchema.optional(),
+    party: partyRuleSchema.optional(),
   })
   .strict();
 

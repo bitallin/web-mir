@@ -163,6 +163,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     shopSell,
     acceptQuest,
     claimQuest,
+    inviteToParty,
+    acceptPartyInvite,
+    declinePartyInvite,
+    leaveParty,
     toggleSfx,
   } = useWorldSession(containerRef, {
     character,
@@ -431,168 +435,251 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       <div className="canvas-layer" ref={containerRef} aria-hidden="true" />
 
       <header className="hud hud-top">
-        <section className="player-card" data-testid="player-card" aria-label="角色状态">
-          <div className="player-card-title">
-            <span className="player-card-name">{character.name}</span>
-            <span className="player-card-class">
-              {classDefinition.name} Lv.{level}
-            </span>
-            <span
-              className="pvp-badge"
-              data-testid="pvp-mode"
-              data-pvp={pvpEnabled ? 'open' : 'safe'}
-              data-map-id={state.mapId}
-            >
-              {pvpEnabled ? '野外 · 可自由 PK' : '主城安全区 · 禁止 PK'}
-            </span>
-          </div>
-          <p className="vitals" data-testid="vitals">
-            <span className="vital-hp">
-              HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
-            </span>
-            <span className="vital-mp">
-              法力 {self?.mp ?? character.mp}/{self?.maxMp ?? character.maxMp}
-            </span>
-            {state.shield !== null ? (
-              <span className="shield-chip" data-testid="self-shield">
-                护盾 {state.shield.amount}
+        <div className="hud-left">
+          <section className="player-card" data-testid="player-card" aria-label="角色状态">
+            <div className="player-card-title">
+              <span className="player-card-name">{character.name}</span>
+              <span className="player-card-class">
+                {classDefinition.name} Lv.{level}
               </span>
-            ) : null}
-          </p>
-          <div
-            className="exp-row"
-            data-testid="exp-bar"
-            data-exp={exp}
-            data-exp-next={expToNextLevel}
-          >
-            <div className="exp-track" aria-hidden="true">
-              <span style={{ width: `${String(expPercent(exp, expToNextLevel))}%` }} />
+              <span
+                className="pvp-badge"
+                data-testid="pvp-mode"
+                data-pvp={pvpEnabled ? 'open' : 'safe'}
+                data-map-id={state.mapId}
+              >
+                {pvpEnabled ? '野外 · 可自由 PK' : '主城安全区 · 禁止 PK'}
+              </span>
             </div>
-            <span className="exp-label">
-              经验 {exp}/{expToNextLevel}
-            </span>
-            <span className="gold-label" data-testid="gold">
-              金币 {gold}
-            </span>
-          </div>
-          <div className="player-actions">
-            <button
-              type="button"
-              className="bag-toggle"
-              data-testid="inventory-toggle"
-              aria-expanded={bagOpen}
-              onClick={() => {
-                const next = !bagOpen;
-                setBagOpen(next);
-                if (next) {
-                  // Panels share the right dock with the merchant and quests,
-                  // so opening the bag replaces them instead of stacking.
-                  setShopOpen(false);
-                  setQuestOpen(false);
-                }
-              }}
+            <p className="vitals" data-testid="vitals">
+              <span className="vital-hp">
+                HP {self?.hp ?? character.hp}/{self?.maxHp ?? character.maxHp}
+              </span>
+              <span className="vital-mp">
+                法力 {self?.mp ?? character.mp}/{self?.maxMp ?? character.maxMp}
+              </span>
+              {state.shield !== null ? (
+                <span className="shield-chip" data-testid="self-shield">
+                  护盾 {state.shield.amount}
+                </span>
+              ) : null}
+            </p>
+            <div
+              className="exp-row"
+              data-testid="exp-bar"
+              data-exp={exp}
+              data-exp-next={expToNextLevel}
             >
-              背包 B
-            </button>
-            <button
-              type="button"
-              className="bag-toggle"
-              data-testid="character-toggle"
-              aria-expanded={characterOpen}
-              onClick={() => {
-                setCharacterOpen((open) => !open);
-              }}
-            >
-              角色 C
-            </button>
-            <button
-              type="button"
-              className="bag-toggle"
-              data-testid="quest-toggle"
-              aria-expanded={questOpen}
-              onClick={() => {
-                if (questOpen) {
-                  setQuestOpen(false);
-                } else {
-                  openQuestPanel(null);
-                }
-              }}
-            >
-              任务 J
-            </button>
-            {nearbyMerchant !== null ? (
+              <div className="exp-track" aria-hidden="true">
+                <span style={{ width: `${String(expPercent(exp, expToNextLevel))}%` }} />
+              </div>
+              <span className="exp-label">
+                经验 {exp}/{expToNextLevel}
+              </span>
+              <span className="gold-label" data-testid="gold">
+                金币 {gold}
+              </span>
+            </div>
+            <div className="player-actions">
               <button
                 type="button"
-                className="bag-toggle shop-toggle"
-                data-testid="shop-toggle"
-                aria-expanded={shopOpen}
+                className="bag-toggle"
+                data-testid="inventory-toggle"
+                aria-expanded={bagOpen}
                 onClick={() => {
-                  const next = !shopOpen;
-                  setShopTab('buy');
-                  setShopOpen(next);
+                  const next = !bagOpen;
+                  setBagOpen(next);
                   if (next) {
-                    setBagOpen(false);
+                    // Panels share the right dock with the merchant and quests,
+                    // so opening the bag replaces them instead of stacking.
+                    setShopOpen(false);
                     setQuestOpen(false);
                   }
                 }}
               >
-                杂货商
+                背包 B
               </button>
-            ) : null}
-            <button
-              type="button"
-              className="bag-toggle"
-              data-testid="sfx-toggle"
-              data-muted={state.sfxMuted ? 'true' : 'false'}
-              aria-pressed={!state.sfxMuted}
-              onClick={toggleSfx}
-            >
-              音效 {state.sfxMuted ? '关' : '开'}
-            </button>
-            <button type="button" className="bag-toggle" data-testid="exit-world" onClick={onExit}>
-              返回角色
-            </button>
-          </div>
-          {trackedQuests.length > 0 ? (
-            <div className="quest-tracker" data-testid="quest-tracker">
-              <div className="quest-tracker-heading">
-                <span>任务追踪</span>
+              <button
+                type="button"
+                className="bag-toggle"
+                data-testid="character-toggle"
+                aria-expanded={characterOpen}
+                onClick={() => {
+                  setCharacterOpen((open) => !open);
+                }}
+              >
+                角色 C
+              </button>
+              <button
+                type="button"
+                className="bag-toggle"
+                data-testid="quest-toggle"
+                aria-expanded={questOpen}
+                onClick={() => {
+                  if (questOpen) {
+                    setQuestOpen(false);
+                  } else {
+                    openQuestPanel(null);
+                  }
+                }}
+              >
+                任务 J
+              </button>
+              {nearbyMerchant !== null ? (
                 <button
                   type="button"
-                  className="quest-tracker-open"
-                  data-testid="quest-tracker-open"
+                  className="bag-toggle shop-toggle"
+                  data-testid="shop-toggle"
+                  aria-expanded={shopOpen}
                   onClick={() => {
-                    openQuestPanel(null);
+                    const next = !shopOpen;
+                    setShopTab('buy');
+                    setShopOpen(next);
+                    if (next) {
+                      setBagOpen(false);
+                      setQuestOpen(false);
+                    }
                   }}
                 >
-                  全部
+                  杂货商
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="bag-toggle"
+                data-testid="sfx-toggle"
+                data-muted={state.sfxMuted ? 'true' : 'false'}
+                aria-pressed={!state.sfxMuted}
+                onClick={toggleSfx}
+              >
+                音效 {state.sfxMuted ? '关' : '开'}
+              </button>
+              <button
+                type="button"
+                className="bag-toggle"
+                data-testid="exit-world"
+                onClick={onExit}
+              >
+                返回角色
+              </button>
+            </div>
+            {trackedQuests.length > 0 ? (
+              <div className="quest-tracker" data-testid="quest-tracker">
+                <div className="quest-tracker-heading">
+                  <span>任务追踪</span>
+                  <button
+                    type="button"
+                    className="quest-tracker-open"
+                    data-testid="quest-tracker-open"
+                    onClick={() => {
+                      openQuestPanel(null);
+                    }}
+                  >
+                    全部
+                  </button>
+                </div>
+                <ul>
+                  {trackedQuests.map((quest) => (
+                    <li
+                      key={quest.questId}
+                      data-testid="quest-tracker-row"
+                      data-quest-id={quest.questId}
+                      data-status={quest.status}
+                      data-progress={quest.progress}
+                    >
+                      <span className="quest-tracker-title">{quest.title}</span>
+                      <span className="quest-tracker-meta">
+                        {quest.status === 'completed'
+                          ? `可交付 · 回到${quest.giverNpcName}`
+                          : `${quest.objective.monsterName} ${String(quest.progress)}/${String(quest.objective.count)}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : availableQuest !== null ? (
+              <p className="quest-hint" data-testid="quest-hint">
+                可接任务：{availableQuest.title}（找{availableQuest.giverNpcName}）
+              </p>
+            ) : null}
+          </section>
+
+          {state.partyInvite !== null ? (
+            <section className="party-invite" data-testid="party-invite" aria-live="polite">
+              <p>
+                <strong>{state.partyInvite.fromDisplayName}</strong> 邀请你组队
+              </p>
+              <div className="party-invite-actions">
+                <button
+                  type="button"
+                  className="party-accept"
+                  data-testid="party-invite-accept"
+                  onClick={() => {
+                    acceptPartyInvite();
+                  }}
+                >
+                  接受
+                </button>
+                <button
+                  type="button"
+                  className="party-decline"
+                  data-testid="party-invite-decline"
+                  onClick={() => {
+                    declinePartyInvite();
+                  }}
+                >
+                  拒绝
                 </button>
               </div>
-              <ul>
-                {trackedQuests.map((quest) => (
+            </section>
+          ) : null}
+
+          {state.party !== null ? (
+            <section className="party-panel" data-testid="party-panel" aria-label="队伍">
+              <div className="panel-heading">
+                <h2>队伍</h2>
+                <span data-testid="party-size">
+                  {state.party.members.length}/{state.party.maxMembers}
+                </span>
+                <button
+                  type="button"
+                  className="party-leave"
+                  data-testid="party-leave"
+                  onClick={() => {
+                    leaveParty();
+                  }}
+                >
+                  离队
+                </button>
+              </div>
+              <ul data-testid="party-members">
+                {state.party.members.map((member) => (
                   <li
-                    key={quest.questId}
-                    data-testid="quest-tracker-row"
-                    data-quest-id={quest.questId}
-                    data-status={quest.status}
-                    data-progress={quest.progress}
+                    key={member.playerId}
+                    data-testid="party-member"
+                    data-player-id={member.playerId}
+                    data-name={member.displayName}
+                    data-leader={member.leader ? 'true' : 'false'}
+                    data-alive={member.alive ? 'true' : 'false'}
+                    data-connected={member.connected ? 'true' : 'false'}
                   >
-                    <span className="quest-tracker-title">{quest.title}</span>
-                    <span className="quest-tracker-meta">
-                      {quest.status === 'completed'
-                        ? `可交付 · 回到${quest.giverNpcName}`
-                        : `${quest.objective.monsterName} ${String(quest.progress)}/${String(quest.objective.count)}`}
+                    <span className="party-member-name">
+                      {member.displayName}
+                      {member.leader ? <em>队长</em> : null}
+                      {member.playerId === state.selfId ? <em>你</em> : null}
+                    </span>
+                    <span className="party-member-meta">
+                      Lv.{member.level} · {member.hp}/{member.maxHp}
+                    </span>
+                    <span className={`party-member-state ${member.alive ? '' : 'offline'}`}>
+                      {!member.connected ? '断线' : member.alive ? '在线' : '倒下'}
                     </span>
                   </li>
                 ))}
               </ul>
-            </div>
-          ) : availableQuest !== null ? (
-            <p className="quest-hint" data-testid="quest-hint">
-              可接任务：{availableQuest.title}（找{availableQuest.giverNpcName}）
-            </p>
+            </section>
           ) : null}
-        </section>
+        </div>
 
         <section className={`connection connection-${state.status}`} aria-live="polite">
           <div className="connection-heading">
@@ -679,18 +766,41 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   <span className={`player-state ${player.alive ? '' : 'offline'}`}>
                     {!player.alive ? '倒下' : player.connected ? '在线' : '断线'}
                   </span>
-                  {!isSelf && player.alive ? (
-                    <button
-                      type="button"
-                      className="player-attack"
-                      data-testid="player-attack"
-                      data-player-id={player.playerId}
-                      onClick={() => {
-                        attackEntity(player.playerId);
-                      }}
-                    >
-                      攻击
-                    </button>
+                  {!isSelf ? (
+                    <span className="player-row-actions">
+                      {player.alive ? (
+                        <button
+                          type="button"
+                          className="player-attack"
+                          data-testid="player-attack"
+                          data-player-id={player.playerId}
+                          onClick={() => {
+                            attackEntity(player.playerId);
+                          }}
+                        >
+                          攻击
+                        </button>
+                      ) : null}
+                      {player.connected &&
+                      state.party?.members.some((member) => member.playerId === player.playerId) !==
+                        true ? (
+                        <button
+                          type="button"
+                          className="player-invite"
+                          data-testid="player-invite"
+                          data-player-id={player.playerId}
+                          disabled={
+                            state.party !== null &&
+                            state.party.members.length >= state.party.maxMembers
+                          }
+                          onClick={() => {
+                            inviteToParty(player.playerId);
+                          }}
+                        >
+                          邀请
+                        </button>
+                      ) : null}
+                    </span>
                   ) : null}
                 </li>
               );

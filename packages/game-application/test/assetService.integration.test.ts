@@ -1344,4 +1344,63 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
         ),
     ).toHaveLength(2);
   });
+
+  it('shares kill experience with a party member exactly once per kill', async () => {
+    const killer = await createCharacter(db, 'warrior', { level: 3 });
+    const mate = await createCharacter(db, 'mage', { level: 3 });
+    const reference = `test-party-${randomUUID()}`;
+    const input = {
+      characterId: mate.id,
+      reference,
+      monsterTemplateId: 'wild_slime',
+      sharePermille: 500,
+    };
+
+    const first = await service.grantPartyKillExperience(input);
+    expect(first?.expGained).toBe(6);
+    expect(first?.snapshot.exp).toBe(6);
+    expect(first?.leveledUp).toBe(false);
+    expect(await service.grantPartyKillExperience(input)).toBeNull();
+
+    const [mateRow] = await db.select().from(characters).where(eq(characters.id, mate.id));
+    expect(mateRow?.exp).toBe(6);
+    const [killerRow] = await db.select().from(characters).where(eq(characters.id, killer.id));
+    expect(killerRow?.exp).toBe(0);
+    expect(
+      await db
+        .select()
+        .from(assetCommands)
+        .where(
+          and(eq(assetCommands.characterId, mate.id), eq(assetCommands.kind, 'party_kill_reward')),
+        ),
+    ).toHaveLength(1);
+  });
+
+  it('levels a member up and refills vitals when the share crosses the threshold', async () => {
+    const mate = await createCharacter(db, 'warrior', { level: 1, exp: 27, hp: 1 });
+    const outcome = await service.grantPartyKillExperience({
+      characterId: mate.id,
+      reference: `test-party-level-${randomUUID()}`,
+      monsterTemplateId: 'wild_slime',
+      sharePermille: 500,
+    });
+    expect(outcome?.leveledUp).toBe(true);
+    expect(outcome?.snapshot.level).toBe(2);
+    expect(outcome?.snapshot.exp).toBe(3);
+    expect(outcome?.snapshot.hp).toBe(outcome?.snapshot.maxHp);
+  });
+
+  it('pays nothing when the configured share rounds to zero', async () => {
+    const mate = await createCharacter(db, 'taoist', { level: 2 });
+    const outcome = await service.grantPartyKillExperience({
+      characterId: mate.id,
+      reference: `test-party-zero-${randomUUID()}`,
+      monsterTemplateId: 'wild_slime',
+      sharePermille: 0,
+    });
+    expect(outcome).toBeNull();
+    expect(
+      await db.select().from(assetCommands).where(eq(assetCommands.characterId, mate.id)),
+    ).toHaveLength(0);
+  });
 });

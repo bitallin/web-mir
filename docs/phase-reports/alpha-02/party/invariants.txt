@@ -1,0 +1,35 @@
+# database invariants, 2026-11-27T02:47:17Z
+Pager usage is off.
+counts
+{ "accounts" : 3705, "characters" : 3540, "items" : 3683, "drops" : 297, "wallets" : 413, "ledger" : 8420, "releases" : 43, "outbox" : 52, "audits" : 255, "realms" : 9 }
+containers
+{ "ground" : 204, "equipment" : 79, "inventory" : 3400 }
+wallet-ledger-mismatch
+0
+negative-wallets
+0
+dup-equip-slot
+0
+dup-inv-slot
+0
+ground-without-drop
+0
+claimed-but-ground
+0
+expired-open-ground
+21
+stale-expired-open-ground
+0
+expired-leases
+3
+active-content
+[{"code":"classic-01","version":"2026.11.27.1"}, {"code":"other-0f0485d8","version":"test-other-0f0485d8"}, {"code":"other-4ea3550f","version":"test-other-4ea3550f"}, {"code":"other-a1bb3459","version":"test-other-a1bb3459"}, {"code":"other-bdec7a0e","version":"test-other-bdec7a0e"}, {"code":"other-cb1ffcc4","version":"test-other-cb1ffcc4"}, {"code":"other-d6efe204","version":"test-other-d6efe204"}, {"code":"other-d83f8d1c","version":"test-other-d83f8d1c"}, {"code":"other-f6d2b1b9","version":"test-other-f6d2b1b9"}]
+outbox-status
+[{"status":"applied","n":52}]
+assert wallet_ledger_mismatch=0
+assert negative_wallets=0
+assert dup_equip_slot=0
+assert dup_inv_slot=0
+assert ground_without_drop=0
+assert claimed_but_ground=0
+assert stale_expired_open_ground=0

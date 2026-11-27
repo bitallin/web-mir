@@ -44,6 +44,8 @@ export type SessionRecord = {
   assetSnapshot: InventorySnapshot;
   /** Committed quest rows, keyed by content quest id (ADR-034). */
   questRecords: Map<string, QuestRecordState>;
+  /** Party command ids already applied by this session (ADR-035). */
+  recentParty: Map<string, true>;
   hp: number;
   mp: number;
   /** Set by a moderator disconnect; such a session never enters the grace window. */

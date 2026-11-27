@@ -38,6 +38,33 @@ declare global {
       equipItem: (itemId: string) => boolean;
       unequipSlot: (slot: 'weapon' | 'armor') => boolean;
       useItem: (itemId: string) => boolean;
+      inviteToParty: (playerId: string) => boolean;
+      acceptPartyInvite: () => boolean;
+      declinePartyInvite: () => boolean;
+      leaveParty: () => boolean;
+      partyState: () => {
+        partyId: string;
+        leaderId: string;
+        maxMembers: number;
+        members: {
+          playerId: string;
+          displayName: string;
+          classId: string;
+          level: number;
+          hp: number;
+          maxHp: number;
+          alive: boolean;
+          connected: boolean;
+          leader: boolean;
+        }[];
+      } | null;
+      partyInviteState: () => {
+        inviteId: string;
+        fromPlayerId: string;
+        fromDisplayName: string;
+        expiresAt: number;
+        serverTime: number;
+      } | null;
       lootDrops: () => {
         dropId: string;
         itemId: string;

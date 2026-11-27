@@ -145,6 +145,22 @@ export type DeathPenaltyInput = {
   deathId: string;
 };
 
+export type PartyKillRewardInput = {
+  characterId: string;
+  /** The killer's reward reference; one assist share per kill and member. */
+  reference: string;
+  monsterTemplateId: string;
+  /** Share of the monster's base experience, in per-mille. */
+  sharePermille: number;
+};
+
+export type PartyKillRewardOutcome = {
+  snapshot: InventorySnapshot;
+  stats: CombatStats;
+  expGained: number;
+  leveledUp: boolean;
+};
+
 export type DeathPenaltyOutcome = {
   snapshot: InventorySnapshot;
   xpLost: number;
@@ -493,6 +509,83 @@ export class AssetService {
         leveledUp,
         drops,
         questUpdates,
+      };
+    });
+  }
+
+  /**
+   * Shares one monster kill with a nearby party member (ADR-035). The killer's
+   * transaction already rolled the full reward; assists receive a fixed share
+   * of the loot table's base experience, so the amount is deterministic and a
+   * retry cannot re-roll it. Gold, drops and quest progress stay killer-only.
+   * Returns `null` when the share was already settled or the table pays none.
+   */
+  async grantPartyKillExperience(
+    input: PartyKillRewardInput,
+  ): Promise<PartyKillRewardOutcome | null> {
+    const table = requireLootTable(input.monsterTemplateId, this.content.lootTables);
+    const share = Math.floor((table.exp * input.sharePermille) / 1_000);
+    if (share <= 0) {
+      return null;
+    }
+    const now = this.now();
+
+    return this.db.transaction(async (tx) => {
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
+      const claimed = await tx
+        .insert(assetCommands)
+        .values({
+          characterId: input.characterId,
+          kind: 'party_kill_reward',
+          idempotencyKey: `party_kill:${input.reference}:${input.characterId}`,
+          createdAt: now,
+        })
+        .onConflictDoNothing({ target: assetCommands.idempotencyKey })
+        .returning({ id: assetCommands.id });
+      if (claimed.length === 0) {
+        return null;
+      }
+
+      const progression = applyExperience(character.level, character.exp, share);
+      const leveledUp = progression.levelsGained > 0;
+      const equipped = await listEquippedItems(tx, character.id);
+      const stats = statsWithEquipment(
+        combatStatsFor(character.classId, progression.level, this.content),
+        equipmentBonuses(
+          equipped.map((entry) => requireItem(entry.templateId, this.content.items)),
+        ),
+      );
+      const hp = leveledUp ? stats.maxHp : clamp(character.hp, 0, stats.maxHp);
+      const mp = leveledUp ? stats.maxMp : clamp(character.mp, 0, stats.maxMp);
+
+      await tx
+        .update(characters)
+        .set({
+          level: progression.level,
+          exp: progression.exp,
+          hp,
+          mp,
+          maxHp: stats.maxHp,
+          maxMp: stats.maxMp,
+          version: sql`${characters.version} + 1`,
+          updatedAt: now,
+        })
+        .where(eq(characters.id, character.id));
+
+      const loaded = await this.loadAssetsWithin(tx, character.id);
+      return {
+        snapshot: loaded.snapshot,
+        stats: loaded.stats,
+        expGained: share,
+        leveledUp,
       };
     });
   }

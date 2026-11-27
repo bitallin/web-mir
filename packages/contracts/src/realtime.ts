@@ -29,6 +29,10 @@ export const CLIENT_MESSAGES = {
   shopSell: 'shop.sell',
   questAccept: 'quest.accept',
   questClaim: 'quest.claim',
+  partyInvite: 'party.invite',
+  partyAccept: 'party.accept',
+  partyDecline: 'party.decline',
+  partyLeave: 'party.leave',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -49,6 +53,8 @@ export const SERVER_MESSAGES = {
   shopCatalog: 'shop.catalog',
   questSnapshot: 'quest.snapshot',
   questUpdate: 'quest.update',
+  partySnapshot: 'party.snapshot',
+  partyInvite: 'party.invite',
 } as const;
 
 export const FACING = {
@@ -198,6 +204,13 @@ export const COMMAND_REJECTION_CODES = [
   'QUEST_NOT_ACTIVE',
   'QUEST_NOT_COMPLETE',
   'QUEST_ALREADY_CLAIMED',
+  'PARTY_SELF',
+  'PARTY_TARGET_UNAVAILABLE',
+  'PARTY_TARGET_BUSY',
+  'PARTY_ALREADY_IN_PARTY',
+  'PARTY_FULL',
+  'PARTY_INVITE_EXPIRED',
+  'PARTY_NOT_IN_PARTY',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -238,6 +251,13 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   QUEST_NOT_ACTIVE: '任务尚未接取',
   QUEST_NOT_COMPLETE: '任务目标尚未完成',
   QUEST_ALREADY_CLAIMED: '任务奖励已经领取',
+  PARTY_SELF: '不能邀请自己组队',
+  PARTY_TARGET_UNAVAILABLE: '对方不在附近或已经离线',
+  PARTY_TARGET_BUSY: '对方已经在队伍中',
+  PARTY_ALREADY_IN_PARTY: '你已经在队伍中',
+  PARTY_FULL: '队伍人数已满',
+  PARTY_INVITE_EXPIRED: '组队邀请已过期或不存在',
+  PARTY_NOT_IN_PARTY: '你当前不在队伍中',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

@@ -1087,6 +1087,11 @@ const RAW_BASE_CONTENT = {
       xpLossPermille: 100,
       protectBelowLevel: 10,
     },
+    party: {
+      maxMembers: 4,
+      assistSharePermille: 500,
+      assistRangeTiles: 12,
+    },
   },
   quests: {
     quest_slime_cleanup: {

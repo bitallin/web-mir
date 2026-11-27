@@ -10,6 +10,8 @@ import type {
   InventorySnapshot,
   LevelUp,
   LootClaimed,
+  PartyInviteView,
+  PartyView,
   QuestView,
   SessionKicked,
   ShopCatalog,
@@ -84,6 +86,10 @@ export type SessionState = {
   quests: QuestView[];
   /** A nearby quest-giver click; GameScreen opens the quest panel. */
   questRequest: { npcId: string; seq: number } | null;
+  /** Server-owned party roster; null when the player is not in a party. */
+  party: PartyView | null;
+  /** An unanswered party invitation addressed to the local player. */
+  partyInvite: PartyInviteView | null;
   levelUpNotice: LevelUp | null;
   /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
   notices: SessionNotice[];
@@ -131,6 +137,8 @@ function initialState(character: CharacterView): SessionState {
     shopRequest: null,
     quests: [],
     questRequest: null,
+    party: null,
+    partyInvite: null,
     levelUpNotice: null,
     notices: [],
     autoAttack: null,
@@ -320,6 +328,9 @@ class WorldSession {
   private shopRequestSequence = 0;
   private questRequestSequence = 0;
   private quests: QuestView[] = [];
+  private party: PartyView | null = null;
+  private partyInvite: PartyInviteView | null = null;
+  private partyInviteTimer: number | null = null;
   private levelBannerTimer: number | null = null;
   private systemMessageSequence = 0;
   private noticeSequence = 0;
@@ -530,6 +541,26 @@ class WorldSession {
               )
             : [...this.quests, update.quest];
           this.updateState((previous) => ({ ...previous, quests: this.quests }));
+        },
+        onPartySnapshot: (snapshot) => {
+          this.party = snapshot.party;
+          // A roster update means the invite was accepted or withdrawn.
+          if (snapshot.party !== null) {
+            this.clearPartyInvite();
+          }
+          this.updateState((previous) => ({ ...previous, party: snapshot.party }));
+        },
+        onPartyInvite: (invite) => {
+          this.partyInvite = invite;
+          if (this.partyInviteTimer !== null) {
+            window.clearTimeout(this.partyInviteTimer);
+          }
+          const remaining = Math.max(0, invite.expiresAt - Date.now());
+          this.partyInviteTimer = window.setTimeout(() => {
+            this.partyInviteTimer = null;
+            this.clearPartyInvite();
+          }, remaining);
+          this.updateState((previous) => ({ ...previous, partyInvite: invite }));
         },
         onAssetResult: (result) => {
           this.inventory = result.snapshot;
@@ -779,6 +810,65 @@ class WorldSession {
     return sent;
   }
 
+  /** Invites a visible player; the server re-checks distance, party size and state. */
+  inviteToParty(targetPlayerId: string): boolean {
+    const sent = this.client?.sendPartyInvite(targetPlayerId) ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  acceptPartyInvite(): boolean {
+    const invite = this.partyInvite;
+    if (invite === null) {
+      return false;
+    }
+    const sent = this.client?.sendPartyAccept(invite.inviteId) ?? false;
+    if (sent) {
+      this.clearPartyInvite();
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  declinePartyInvite(): boolean {
+    const invite = this.partyInvite;
+    if (invite === null) {
+      return false;
+    }
+    const sent = this.client?.sendPartyDecline(invite.inviteId) ?? false;
+    if (sent) {
+      this.clearPartyInvite();
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  leaveParty(): boolean {
+    if (this.party === null) {
+      return false;
+    }
+    const sent = this.client?.sendPartyLeave() ?? false;
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  private clearPartyInvite(): void {
+    if (this.partyInviteTimer !== null) {
+      window.clearTimeout(this.partyInviteTimer);
+      this.partyInviteTimer = null;
+    }
+    this.partyInvite = null;
+    this.updateState((previous) => ({ ...previous, partyInvite: null }));
+  }
+
   shopBuy(merchantId: string, templateId: string, quantity: number): boolean {
     const sent = this.client?.sendShopBuy(merchantId, templateId, quantity) ?? false;
     if (sent) {
@@ -849,6 +939,10 @@ class WorldSession {
     if (this.levelBannerTimer !== null) {
       window.clearTimeout(this.levelBannerTimer);
       this.levelBannerTimer = null;
+    }
+    if (this.partyInviteTimer !== null) {
+      window.clearTimeout(this.partyInviteTimer);
+      this.partyInviteTimer = null;
     }
     const client = this.client;
     this.client = null;
@@ -952,6 +1046,12 @@ class WorldSession {
   private handleTransfer(mapId: string): void {
     this.shopCatalog = null;
     this.quests = [];
+    this.party = null;
+    this.partyInvite = null;
+    if (this.partyInviteTimer !== null) {
+      window.clearTimeout(this.partyInviteTimer);
+      this.partyInviteTimer = null;
+    }
     this.latestSnapshot = null;
     for (const timer of this.noticeTimers.values()) {
       window.clearTimeout(timer);
@@ -977,6 +1077,8 @@ class WorldSession {
       shopRequest: null,
       quests: [],
       questRequest: null,
+      party: null,
+      partyInvite: null,
       levelUpNotice: null,
       notices: [],
       autoAttack: null,
@@ -1044,6 +1146,12 @@ class WorldSession {
       acceptQuest: (questId) => this.acceptQuest(questId),
       claimQuest: (questId) => this.claimQuest(questId),
       questState: () => this.quests,
+      inviteToParty: (playerId) => this.inviteToParty(playerId),
+      acceptPartyInvite: () => this.acceptPartyInvite(),
+      declinePartyInvite: () => this.declinePartyInvite(),
+      leaveParty: () => this.leaveParty(),
+      partyState: () => this.party,
+      partyInviteState: () => this.partyInvite,
       lootDrops: () => this.latestLoot,
       lootScreenPoint: (dropId) => this.bridge.lootScreenPoint(dropId),
       lootIconFrame: (dropId) => this.bridge.lootIconFrame(dropId),
@@ -1078,6 +1186,10 @@ export type WorldSessionControls = {
   shopSell: (merchantId: string, itemId: string, quantity: number) => boolean;
   acceptQuest: (questId: string) => boolean;
   claimQuest: (questId: string) => boolean;
+  inviteToParty: (targetPlayerId: string) => boolean;
+  acceptPartyInvite: () => boolean;
+  declinePartyInvite: () => boolean;
+  leaveParty: () => boolean;
   toggleSfx: () => void;
 };
 
@@ -1167,6 +1279,16 @@ export function useWorldSession(
     (questId: string) => sessionRef.current?.claimQuest(questId) ?? false,
     [],
   );
+  const inviteToParty = useCallback(
+    (targetPlayerId: string) => sessionRef.current?.inviteToParty(targetPlayerId) ?? false,
+    [],
+  );
+  const acceptPartyInvite = useCallback(() => sessionRef.current?.acceptPartyInvite() ?? false, []);
+  const declinePartyInvite = useCallback(
+    () => sessionRef.current?.declinePartyInvite() ?? false,
+    [],
+  );
+  const leaveParty = useCallback(() => sessionRef.current?.leaveParty() ?? false, []);
   const toggleSfx = useCallback(() => {
     sessionRef.current?.toggleSfx();
   }, []);
@@ -1188,6 +1310,10 @@ export function useWorldSession(
     shopSell,
     acceptQuest,
     claimQuest,
+    inviteToParty,
+    acceptPartyInvite,
+    declinePartyInvite,
+    leaveParty,
     toggleSfx,
   };
 }

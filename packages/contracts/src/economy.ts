@@ -119,6 +119,7 @@ export const assetCommandKindSchema = z.enum([
   'shop_sell',
   'quest_accept',
   'quest_claim',
+  'party_kill_reward',
 ]);
 
 export type AssetCommandKind = z.infer<typeof assetCommandKindSchema>;

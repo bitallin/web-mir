@@ -253,7 +253,9 @@ ADR-013 中的包均已创建；阶段 8 如需新包必须先有真实消费者
 - 生产 WebSocket 必须校验 Origin（`GAME_SERVER_ALLOWED_ORIGINS`，生产必填）。
 - `/metrics` JSON 与 `/metrics/prometheus` 文本读取同一内存注册表；运营指标
   端点只能在内网/Prometheus 可达，不得经公网反向代理暴露。
-- 私有数据（背包、账号、GM 标记）不得进入公开 Room State。
+- 私有数据（背包、账号、GM 标记、队伍名单）不得进入公开 Room State。
+- 队伍状态属于 Room：传送、最终离开与宽限期结束必须移除队员；共享击杀经验
+  必须是独立幂等事务，不得让队友重复领取击杀奖励（ADR-035）。
 - 重连、断线、Room 崩溃必须按架构文档第 8.7 节处理。
 
 ## 8. 测试与验收

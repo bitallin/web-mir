@@ -428,6 +428,8 @@ async function main(): Promise<void> {
       'asset.result',
       'quest.snapshot',
       'quest.update',
+      'party.snapshot',
+      'party.invite',
     ]) {
       room.onMessage(type, () => undefined);
     }

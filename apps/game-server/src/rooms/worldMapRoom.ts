@@ -37,6 +37,13 @@ import {
   lootClaimedSchema,
   lootPickupSchema,
   moveToCommandSchema,
+  PARTY_INVITE_RANGE_TILES,
+  partyAcceptCommandSchema,
+  partyDeclineCommandSchema,
+  partyInviteCommandSchema,
+  partyInviteViewSchema,
+  partyLeaveCommandSchema,
+  partySnapshotSchema,
   playerRespawnPointOf,
   questAcceptSchema,
   questClaimSchema,
@@ -72,6 +79,9 @@ import {
   type LevelUp,
   type MapMonsterSpawn,
   type MapPortal,
+  type PartyMemberView,
+  type PartySnapshot,
+  type PartyView,
   type QuestSnapshot,
   type QuestUpdate,
   type QuestView,
@@ -101,6 +111,8 @@ import {
   type KillRewardOutcome,
   type LoadedAssets,
   type LootDropView,
+  type PartyKillRewardInput,
+  type PartyKillRewardOutcome,
 } from '@web-legend/game-application';
 import {
   CombatWorld,
@@ -148,6 +160,7 @@ import { BASE_ROOM_CONTENT, type ContentProvider, type RoomContent } from '../wo
 import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket } from '../world/rateLimiter';
 import { CommandGuard } from './commandGuard';
+import { PartyRegistry, type PartyState } from './partyRegistry';
 import { SessionRegistry, type SessionRecord } from './sessionRegistry';
 import { StateViewPublisher } from './stateViewPublisher';
 
@@ -199,6 +212,8 @@ const LOOT_DB_PURGE_INTERVAL_MS = 30_000;
 /** Repath towards a moving auto-attack target at most this often. */
 const AUTO_ATTACK_REPATH_INTERVAL_MS = 350;
 const REWARD_RETRY_ATTEMPTS = 3;
+/** Expired party invites are dropped once a second; the TTL is 30 seconds. */
+const PARTY_INVITE_SWEEP_INTERVAL_MS = 1_000;
 
 /**
  * Leases outlive a single tick and are refreshed in the background. A crashed
@@ -322,6 +337,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private readonly registry = new SessionRegistry();
   private guard!: CommandGuard;
   private views!: StateViewPublisher;
+  private parties!: PartyRegistry;
+  /** Current content snapshot's party rule; defaults keep the feature usable. */
+  private partyRule: { maxMembers: number; assistSharePermille: number; assistRangeTiles: number } =
+    { maxMembers: 4, assistSharePermille: 0, assistRangeTiles: 12 };
   /** Viewers to recompute once at the end of the current simulation tick. */
   private readonly pendingViewRefresh = new Set<string>();
   private readonly pendingAssets = new Map<string, LoadedAssets>();
@@ -345,6 +364,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       now: Date.now,
     });
     this.views = new StateViewPublisher(this.interest, this.state, this.registry);
+    this.partyRule = this.content.bundle.rules?.party ?? {
+      maxMembers: 4,
+      assistSharePermille: 0,
+      assistRangeTiles: 12,
+    };
+    this.parties = new PartyRegistry({ maxMembers: this.partyRule.maxMembers });
 
     let respawnTile: TilePoint;
     try {
@@ -482,6 +507,18 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.questClaim, (client, message) => {
       this.handleQuestClaim(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.partyInvite, (client, message) => {
+      this.handlePartyInvite(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.partyAccept, (client, message) => {
+      this.handlePartyInviteReply(client, message, 'accept');
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.partyDecline, (client, message) => {
+      this.handlePartyInviteReply(client, message, 'decline');
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.partyLeave, (client, message) => {
+      this.handlePartyLeave(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
@@ -492,6 +529,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.clock.setInterval(() => {
       void this.purgeExpiredDrops();
     }, LOOT_DB_PURGE_INTERVAL_MS);
+    this.clock.setInterval(() => {
+      this.parties.expireInvites();
+    }, PARTY_INVITE_SWEEP_INTERVAL_MS);
 
     options.adminHub?.register({
       roomId: this.roomId,
@@ -656,6 +696,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         defense: combatPlayer.defense,
       },
       questRecords: new Map(questRecords.map((record) => [record.questId, record])),
+      recentParty: new Map(),
       hp: combatPlayer.hp,
       mp: combatPlayer.mp,
       terminated: null,
@@ -681,6 +722,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.sendAssetSnapshot(session.client, session);
         this.sendShopCatalog(session.client, session);
         this.sendQuestSnapshot(session.client, session);
+        this.sendPartySnapshot(session.client, session);
         this.broadcastSystemNotice(
           'info',
           `${auth.displayName} 来到了 ${this.map.runtime.manifest.name}`,
@@ -2187,6 +2229,102 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         'failed to grant kill reward',
       );
     });
+    this.schedulePartyAssists(killerId, reference, monster);
+  }
+
+  /**
+   * Shares the kill's base experience with living, connected party members
+   * inside the configured radius (ADR-035). Assists never receive gold, drops
+   * or quest progress, and each share is its own idempotent transaction queued
+   * behind the killer's reward.
+   */
+  private schedulePartyAssists(
+    killerId: string,
+    reference: string,
+    monster: { templateId: string; x: number; y: number },
+  ): void {
+    if (this.partyRule.assistSharePermille <= 0) {
+      return;
+    }
+    const party = this.parties.partyOf(killerId);
+    if (party === undefined) {
+      return;
+    }
+    for (const memberId of party.memberIds) {
+      if (memberId === killerId) {
+        continue;
+      }
+      const session = this.registry.findByPlayerId(memberId);
+      const member = this.combat.getPlayer(memberId);
+      if (session === undefined || member === undefined) {
+        continue;
+      }
+      if (!member.alive || this.state.players.get(memberId)?.connected !== true) {
+        continue;
+      }
+      const distance = Math.hypot(member.x - monster.x, member.y - monster.y) / TILE_UNITS;
+      if (distance > this.partyRule.assistRangeTiles) {
+        continue;
+      }
+      const input: PartyKillRewardInput = {
+        characterId: memberId,
+        reference,
+        monsterTemplateId: monster.templateId,
+        sharePermille: this.partyRule.assistSharePermille,
+      };
+      void this.enqueueAsset(() => this.grantPartyRewardWithRetry(input)).catch(
+        (error: unknown) => {
+          this.metrics.recordAssetFailure();
+          this.options.logger.error(
+            { err: error, roomId: this.roomId, reference, characterId: memberId },
+            'failed to grant party assist reward',
+          );
+        },
+      );
+    }
+  }
+
+  private async grantPartyRewardWithRetry(input: PartyKillRewardInput): Promise<void> {
+    for (let attempt = 1; attempt <= REWARD_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        const outcome = await this.assets.grantPartyKillExperience(input);
+        if (outcome !== null) {
+          this.applyPartyReward(input.characterId, outcome);
+        }
+        return;
+      } catch (error) {
+        if (attempt >= REWARD_RETRY_ATTEMPTS) {
+          throw error;
+        }
+        this.options.logger.warn(
+          { err: error, roomId: this.roomId, reference: input.reference, attempt },
+          'party assist transaction failed; retrying',
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, 200 * attempt));
+      }
+    }
+  }
+
+  private applyPartyReward(characterId: string, outcome: PartyKillRewardOutcome): void {
+    this.combat.updatePlayerProgress(characterId, {
+      level: outcome.snapshot.level,
+      stats: outcome.stats,
+      refill: outcome.leveledUp,
+    });
+    const session = this.registry.findByPlayerId(characterId);
+    if (session === undefined) {
+      // The database is already authoritative; the next join loads it.
+      return;
+    }
+    session.assetSnapshot = outcome.snapshot;
+    this.sendProgress(session, outcome.leveledUp);
+    this.sendProfile(session.client, characterId);
+    if (outcome.leveledUp) {
+      this.broadcastSystemNotice(
+        'info',
+        `${session.displayName} 升到了 Lv.${String(outcome.snapshot.level)}`,
+      );
+    }
   }
 
   private async grantRewardWithRetry(input: KillRewardInput): Promise<void> {
@@ -2815,6 +2953,257 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
   }
 
+  private handlePartyInvite(client: Client, raw: unknown): void {
+    const parsed = partyInviteCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    this.runPartyCommand(
+      client,
+      command,
+      (session) => this.validatePartyInvite(session, command.targetPlayerId),
+      (session) => {
+        const result = this.parties.createInvite(session.playerId, command.targetPlayerId);
+        if (result.kind === 'rejected') {
+          return result.reason === 'party_full' ? 'PARTY_FULL' : 'PARTY_TARGET_BUSY';
+        }
+        const target = this.registry.findByPlayerId(command.targetPlayerId);
+        if (target === undefined) {
+          return 'PARTY_TARGET_UNAVAILABLE';
+        }
+        target.client.send(
+          SERVER_MESSAGES.partyInvite,
+          partyInviteViewSchema.parse({
+            inviteId: result.invite.inviteId,
+            fromPlayerId: session.playerId,
+            fromDisplayName: session.displayName,
+            expiresAt: result.invite.expiresAt,
+            serverTime: Date.now(),
+          }),
+        );
+        this.sendSystemNotice(session.client, 'info', `已邀请 ${target.displayName} 组队`);
+        return null;
+      },
+    );
+  }
+
+  private validatePartyInvite(
+    session: SessionRecord,
+    targetPlayerId: string,
+  ): CommandRejectionCode | null {
+    if (targetPlayerId === session.playerId) {
+      return 'PARTY_SELF';
+    }
+    const target = this.registry.findByPlayerId(targetPlayerId);
+    const self = this.combat.getPlayer(session.playerId);
+    const other = this.combat.getPlayer(targetPlayerId);
+    if (target === undefined || other === undefined || self === undefined) {
+      return 'PARTY_TARGET_UNAVAILABLE';
+    }
+    if (this.state.players.get(targetPlayerId)?.connected !== true) {
+      return 'PARTY_TARGET_UNAVAILABLE';
+    }
+    if (this.parties.isMember(targetPlayerId)) {
+      return 'PARTY_TARGET_BUSY';
+    }
+    const selfParty = this.parties.partyOf(session.playerId);
+    if (selfParty !== undefined && selfParty.memberIds.length >= this.partyRule.maxMembers) {
+      return 'PARTY_FULL';
+    }
+    const distance = Math.hypot(self.x - other.x, self.y - other.y) / TILE_UNITS;
+    return distance > PARTY_INVITE_RANGE_TILES ? 'PARTY_TARGET_UNAVAILABLE' : null;
+  }
+
+  private handlePartyInviteReply(client: Client, raw: unknown, mode: 'accept' | 'decline'): void {
+    const schema = mode === 'accept' ? partyAcceptCommandSchema : partyDeclineCommandSchema;
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    this.runPartyCommand(
+      client,
+      command,
+      () => null,
+      (session) => {
+        if (mode === 'decline') {
+          const invite = this.parties.pendingInviteFor(session.playerId);
+          const declined = this.parties.declineInvite(command.inviteId, session.playerId);
+          if (!declined) {
+            return 'PARTY_INVITE_EXPIRED';
+          }
+          if (invite !== undefined) {
+            const inviter = this.registry.findByPlayerId(invite.fromPlayerId);
+            if (inviter !== undefined) {
+              this.sendSystemNotice(
+                inviter.client,
+                'info',
+                `${session.displayName} 拒绝了组队邀请`,
+              );
+            }
+          }
+          this.sendPartySnapshot(client, session);
+          return null;
+        }
+
+        const result = this.parties.acceptInvite(command.inviteId, session.playerId);
+        if (result.kind === 'rejected') {
+          switch (result.reason) {
+            case 'already_in_party':
+              return 'PARTY_ALREADY_IN_PARTY';
+            case 'party_full':
+              return 'PARTY_FULL';
+            default:
+              return 'PARTY_INVITE_EXPIRED';
+          }
+        }
+        this.broadcastPartySnapshots(result.party.memberIds);
+        for (const memberId of result.party.memberIds) {
+          if (memberId === session.playerId) {
+            continue;
+          }
+          const member = this.registry.findByPlayerId(memberId);
+          if (member !== undefined) {
+            this.sendSystemNotice(member.client, 'info', `${session.displayName} 加入了队伍`);
+          }
+        }
+        return null;
+      },
+    );
+  }
+
+  private handlePartyLeave(client: Client, raw: unknown): void {
+    const parsed = partyLeaveCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    this.runPartyCommand(
+      client,
+      command,
+      (session) => (this.parties.isMember(session.playerId) ? null : 'PARTY_NOT_IN_PARTY'),
+      (session) => {
+        const before = this.parties.partyOf(session.playerId);
+        const result = this.parties.leave(session.playerId);
+        const affected = [session.playerId, ...(before?.memberIds ?? [])];
+        this.broadcastPartySnapshots(affected);
+        if (result.party !== null) {
+          for (const memberId of result.party.memberIds) {
+            const member = this.registry.findByPlayerId(memberId);
+            if (member !== undefined) {
+              this.sendSystemNotice(member.client, 'info', `${session.displayName} 离开了队伍`);
+            }
+          }
+        }
+        return null;
+      },
+    );
+  }
+
+  /**
+   * Party commands change only in-memory state, so they share the command gate
+   * with assets (protocol, duplicate id, sequence, rate limit) but run
+   * synchronously instead of entering the asset queue.
+   */
+  private runPartyCommand(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+    validate: (session: SessionRecord) => CommandRejectionCode | null,
+    apply: (session: SessionRecord) => CommandRejectionCode | null,
+  ): void {
+    const meta = { commandId: command.commandId, clientSequence: command.clientSequence };
+    const session = this.registry.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, meta, 'INVALID_SESSION');
+      return;
+    }
+    const gate = this.guard.check(session, command, session.recentParty.has(command.commandId));
+    if (gate.kind === 'reject') {
+      this.sendRejection(client, meta, gate.code);
+      return;
+    }
+    if (gate.kind === 'duplicate') {
+      this.sendPartySnapshot(client, session);
+      return;
+    }
+    const rejection = validate(session);
+    if (rejection !== null) {
+      this.sendRejection(client, meta, rejection);
+      return;
+    }
+
+    session.lastSequence = command.clientSequence;
+    this.guard.remember(session.recentParty, command.commandId, true);
+    const outcome = apply(session);
+    if (outcome !== null) {
+      session.recentParty.delete(command.commandId);
+      this.sendRejection(client, meta, outcome);
+      return;
+    }
+    this.metrics.recordAcceptedCommand();
+  }
+
+  private broadcastPartySnapshots(playerIds: Iterable<string>): void {
+    for (const playerId of new Set(playerIds)) {
+      const session = this.registry.findByPlayerId(playerId);
+      if (session !== undefined) {
+        this.sendPartySnapshot(session.client, session);
+      }
+    }
+  }
+
+  private sendPartySnapshot(client: Client, session: SessionRecord): void {
+    const party = this.parties.partyOf(session.playerId);
+    const snapshot: PartySnapshot = {
+      party: party === undefined ? null : this.partyView(party),
+      serverTime: Date.now(),
+    };
+    const parsed = partySnapshotSchema.safeParse(snapshot);
+    if (!parsed.success) {
+      this.options.logger.error(
+        { roomId: this.roomId, issues: parsed.error.issues.length },
+        'party snapshot failed validation',
+      );
+      return;
+    }
+    client.send(SERVER_MESSAGES.partySnapshot, parsed.data);
+  }
+
+  private partyView(party: PartyState): PartyView | null {
+    const members: PartyMemberView[] = [];
+    for (const memberId of party.memberIds) {
+      const combatPlayer = this.combat.getPlayer(memberId);
+      const statePlayer = this.state.players.get(memberId);
+      if (combatPlayer === undefined || statePlayer === undefined) {
+        continue;
+      }
+      members.push({
+        playerId: memberId,
+        displayName: combatPlayer.displayName,
+        classId: combatPlayer.classId,
+        level: combatPlayer.level,
+        hp: combatPlayer.hp,
+        maxHp: combatPlayer.maxHp,
+        alive: combatPlayer.alive,
+        connected: statePlayer.connected,
+        leader: memberId === party.leaderId,
+      });
+    }
+    if (members.length === 0) {
+      return null;
+    }
+    return {
+      partyId: party.partyId,
+      leaderId: party.leaderId,
+      maxMembers: this.partyRule.maxMembers,
+      members,
+    };
+  }
+
   private requireAlive(session: SessionRecord): CommandRejectionCode | null {
     const player = this.combat.getPlayer(session.playerId);
     if (player === undefined) {
@@ -2960,6 +3349,24 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const combatPlayer = this.combat.getPlayer(session.playerId);
     const displayName = session.displayName;
     this.registry.remove(sessionId);
+
+    // Parties are bound to this room/map; a transfer or final leave drops the
+    // member and tells the rest of the roster. The removed session is already
+    // gone from the registry, so it cannot receive its own departure.
+    const formerParty = this.parties.partyOf(session.playerId);
+    if (formerParty !== undefined) {
+      this.parties.leave(session.playerId);
+      this.broadcastPartySnapshots(formerParty.memberIds);
+      for (const memberId of formerParty.memberIds) {
+        if (memberId === session.playerId) {
+          continue;
+        }
+        const member = this.registry.findByPlayerId(memberId);
+        if (member !== undefined) {
+          this.sendSystemNotice(member.client, 'info', `${displayName} 离开了队伍`);
+        }
+      }
+    }
 
     const affected = this.interest.remove(session.playerId);
     this.views.refresh(affected);

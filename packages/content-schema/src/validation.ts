@@ -297,6 +297,7 @@ function validateMaps(bundle: ContentBundle, issues: ContentIssue[]): void {
 }
 
 function validateRules(bundle: ContentBundle, issues: ContentIssue[]): void {
+  validatePartyRule(bundle, issues);
   const rule = bundle.rules?.deathPenalty;
   if (rule === undefined) {
     return;
@@ -322,6 +323,29 @@ function validateRules(bundle: ContentBundle, issues: ContentIssue[]): void {
       'warning',
       'rules.deathPenalty.xpLossPermille',
       '单次死亡损失超过当前等级经验的 30%，可能让低等级玩家挫败',
+    );
+  }
+}
+
+function validatePartyRule(bundle: ContentBundle, issues: ContentIssue[]): void {
+  const rule = bundle.rules?.party;
+  if (rule === undefined) {
+    return;
+  }
+  if (rule.assistSharePermille === 0) {
+    issue(
+      issues,
+      'warning',
+      'rules.party.assistSharePermille',
+      '组队不共享击杀经验，组队只提供名单与协作',
+    );
+  }
+  if (rule.assistRangeTiles < 3) {
+    issue(
+      issues,
+      'warning',
+      'rules.party.assistRangeTiles',
+      '共享经验范围小于 3 格，队友必须紧贴怪物才能分享',
     );
   }
 }

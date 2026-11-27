@@ -1,4 +1,10 @@
-import type { EquipmentSlot, InventorySnapshot, QuestView } from '@web-legend/contracts';
+import type {
+  EquipmentSlot,
+  InventorySnapshot,
+  PartyInviteView,
+  PartyView,
+  QuestView,
+} from '@web-legend/contracts';
 
 import type { PlayerAppearance, TelegraphView, WorldLabelView } from './game/worldBridge';
 import type { LootView } from './net/worldClient';
@@ -45,6 +51,12 @@ declare global {
       acceptQuest: (questId: string) => boolean;
       claimQuest: (questId: string) => boolean;
       questState: () => QuestView[];
+      inviteToParty: (playerId: string) => boolean;
+      acceptPartyInvite: () => boolean;
+      declinePartyInvite: () => boolean;
+      leaveParty: () => boolean;
+      partyState: () => PartyView | null;
+      partyInviteState: () => PartyInviteView | null;
       lootDrops: () => LootView[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
       lootIconFrame: (dropId: string) => number | null;

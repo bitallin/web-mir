@@ -16,6 +16,8 @@ import {
   levelUpSchema,
   lootClaimedSchema,
   monsterStateKindFromCode,
+  partyInviteViewSchema,
+  partySnapshotSchema,
   questSnapshotSchema,
   questUpdateSchema,
   sessionKickedSchema,
@@ -36,6 +38,8 @@ import {
   type LevelUp,
   type LootClaimed,
   type MonsterStateKind,
+  type PartyInviteView,
+  type PartySnapshot,
   type QuestSnapshot,
   type QuestUpdate,
   type SessionKicked,
@@ -127,6 +131,8 @@ export type WorldClientCallbacks = {
   onShopCatalog: (catalog: ShopCatalog) => void;
   onQuestSnapshot: (snapshot: QuestSnapshot) => void;
   onQuestUpdate: (update: QuestUpdate) => void;
+  onPartySnapshot: (snapshot: PartySnapshot) => void;
+  onPartyInvite: (invite: PartyInviteView) => void;
   onAssetResult: (result: AssetResult) => void;
   onProgress: (progress: CharacterProgress) => void;
   onLevelUp: (levelUp: LevelUp) => void;
@@ -448,6 +454,37 @@ export class WorldClient {
     return true;
   }
 
+  sendPartyInvite(targetPlayerId: string): boolean {
+    return this.sendPartyCommand(CLIENT_MESSAGES.partyInvite, { targetPlayerId });
+  }
+
+  sendPartyAccept(inviteId: string): boolean {
+    return this.sendPartyCommand(CLIENT_MESSAGES.partyAccept, { inviteId });
+  }
+
+  sendPartyDecline(inviteId: string): boolean {
+    return this.sendPartyCommand(CLIENT_MESSAGES.partyDecline, { inviteId });
+  }
+
+  sendPartyLeave(): boolean {
+    return this.sendPartyCommand(CLIENT_MESSAGES.partyLeave, {});
+  }
+
+  private sendPartyCommand(kind: string, fields: Record<string, string>): boolean {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return false;
+    }
+    room.send(kind, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: createUuid(),
+      clientSequence: this.sequence,
+      ...fields,
+    });
+    this.sequence += 1;
+    return true;
+  }
+
   sendChat(text: string): boolean {
     const room = this.room;
     const message = text.trim();
@@ -677,6 +714,24 @@ export class WorldClient {
         const parsed = questUpdateSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onQuestUpdate(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.partySnapshot, (payload: unknown) => {
+        const parsed = partySnapshotSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onPartySnapshot(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.partyInvite, (payload: unknown) => {
+        const parsed = partyInviteViewSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onPartyInvite(parsed.data);
         }
       }),
     );
