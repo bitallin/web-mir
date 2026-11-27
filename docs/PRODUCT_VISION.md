@@ -2,7 +2,7 @@
 
 - 版本：1.0（2026-11-25，Alpha 0.1 完成后确立）
 - 维护者：产品与架构负责人（Tech Lead / CTO / Game Director）
-- 配套文档：`docs/PROJECT_ROADMAP.md`（版本路线）、`docs/ALPHA_02_EXECUTION_PLAN.md`
+- 配套文档：`docs/PROJECT_ROADMAP.md`（版本路线）、`docs/ALPHA_03_EXECUTION_PLAN.md`
   （当前迭代）、`docs/EVOLUTION_LOG.md`（里程碑演进与复盘）、
   `docs/ENGINEERING_LEARNINGS.md`（工程经验）
 

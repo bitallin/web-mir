@@ -6,7 +6,7 @@
 >
 > 架构基线：`docs/WEB_LEGEND_TECHNICAL_ARCHITECTURE_v2.md`
 > 历史实施基线：`docs/WEB_LEGEND_MVP_PLAN_v2.md`（阶段 0–9）
-> 当前版本计划：`docs/ALPHA_02_EXECUTION_PLAN.md`（随版本更新）
+> 当前版本计划：`docs/ALPHA_03_EXECUTION_PLAN.md`（随版本更新）
 
 ## 1. 项目目标与长期使命
 

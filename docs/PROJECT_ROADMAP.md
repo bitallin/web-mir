@@ -8,7 +8,7 @@
 - 基线：MVP 阶段 0–9 + Alpha 0.1 已交付；审计结论见 `docs/MVP_ACCEPTANCE_REPORT.md`
 - 产品评审：`docs/GAMEPLAY_REVIEW.md`
 - 债务清单：`docs/TECHNICAL_DEBT.md`
-- 当前版本计划：`docs/ALPHA_02_EXECUTION_PLAN.md`
+- 当前版本计划：`docs/ALPHA_03_EXECUTION_PLAN.md`
 - 估算口径：1 名全职全栈工程师 + 0.5 名美术，2 周一个迭代；人周为净开发量，
   不含等待与返工
 
