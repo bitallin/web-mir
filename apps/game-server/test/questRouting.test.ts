@@ -12,16 +12,21 @@ import { createMapRuntime } from '@web-legend/map-runtime';
 
 import {
   findNpcApproachPath,
-  mapsWithMonsterSpawns,
+  mapsWithAnyMonsterSpawn,
   mapsWithNpc,
-  nearestSpawnTile,
+  nearestSpawnTileAmong,
   nextPortalToward,
 } from '../src/world/questRouting';
 
 describe('quest routing', () => {
   it('finds the maps that spawn a monster or place a giver', () => {
-    expect(mapsWithMonsterSpawns(MAP_MANIFESTS, 'wild_slime')).toEqual([STARTER_WILDS_MAP_ID]);
-    expect(mapsWithMonsterSpawns(MAP_MANIFESTS, 'missing_monster')).toEqual([]);
+    expect(mapsWithAnyMonsterSpawn(MAP_MANIFESTS, new Set(['wild_slime']))).toEqual([
+      STARTER_WILDS_MAP_ID,
+    ]);
+    expect(mapsWithAnyMonsterSpawn(MAP_MANIFESTS, new Set(['wild_slime', 'forest_wolf']))).toEqual([
+      STARTER_WILDS_MAP_ID,
+    ]);
+    expect(mapsWithAnyMonsterSpawn(MAP_MANIFESTS, new Set(['missing_monster']))).toEqual([]);
     expect(mapsWithNpc(MAP_MANIFESTS, 'town_guard')).toEqual([STARTER_TOWN_MAP_ID]);
     expect(mapsWithNpc(MAP_MANIFESTS, 'missing_npc')).toEqual([]);
   });
@@ -59,9 +64,9 @@ describe('quest routing', () => {
     );
   });
 
-  it('picks the closest spawn of the requested monster', () => {
+  it('picks the closest spawn among the requested monsters', () => {
     const from = { x: 2, y: 16 };
-    const tile = nearestSpawnTile(STARTER_WILDS_MAP, 'wild_slime', from);
+    const tile = nearestSpawnTileAmong(STARTER_WILDS_MAP, new Set(['wild_slime']), from);
     expect(tile).not.toBeNull();
     const slimeSpawns = STARTER_WILDS_MAP.monsterSpawns.filter(
       (spawn) => spawn.monsterId === 'wild_slime',
@@ -70,7 +75,15 @@ describe('quest routing', () => {
       ...slimeSpawns.map((spawn) => (spawn.tile.x - from.x) ** 2 + (spawn.tile.y - from.y) ** 2),
     );
     expect(((tile?.x ?? 0) - from.x) ** 2 + ((tile?.y ?? 0) - from.y) ** 2).toBe(expected);
-    expect(nearestSpawnTile(STARTER_WILDS_MAP, 'missing_monster', from)).toBeNull();
+
+    const mixed = nearestSpawnTileAmong(
+      STARTER_WILDS_MAP,
+      new Set(['wild_slime', 'forest_wolf']),
+      from,
+    );
+    expect(mixed).not.toBeNull();
+    expect(nearestSpawnTileAmong(STARTER_WILDS_MAP, new Set(['missing_monster']), from)).toBeNull();
+    expect(nearestSpawnTileAmong(STARTER_WILDS_MAP, new Set(), from)).toBeNull();
   });
 
   it('finds a reachable walkable tile within range of the giver', () => {

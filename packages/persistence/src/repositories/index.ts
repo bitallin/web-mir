@@ -98,6 +98,7 @@ export {
   listEquippedItems,
   listInventoryItems,
   listItemTemplateUsage,
+  lockInventoryItemsByTemplate,
   listOpenWorldDrops,
   purgeExpiredWorldDrops,
 } from './items';

@@ -23,6 +23,11 @@ const SECTIONS: readonly Omit<QuestSection, 'quests'>[] = [
   { key: 'done', title: '已领取', status: 'claimed' },
 ];
 
+/** Human label for an objective: monster name or "收集 <item>" (ADR-040). */
+export function questObjectiveLabel(objective: QuestView['objective']): string {
+  return objective.kind === 'kill' ? objective.monsterName : `收集 ${objective.itemName}`;
+}
+
 export function groupQuestsByStatus(quests: readonly QuestView[]): QuestSection[] {
   return SECTIONS.map((section) => ({
     ...section,

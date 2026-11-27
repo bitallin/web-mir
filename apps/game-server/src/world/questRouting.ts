@@ -15,13 +15,13 @@ export type QuestRouteHop = {
   portal: MapPortal;
 };
 
-/** Maps that spawn the quest's target monster. */
-export function mapsWithMonsterSpawns(
+/** Maps that spawn any of the target monsters. */
+export function mapsWithAnyMonsterSpawn(
   maps: readonly MapRuntimeManifest[],
-  monsterId: string,
+  monsterIds: ReadonlySet<string>,
 ): string[] {
   return maps
-    .filter((map) => map.monsterSpawns.some((spawn) => spawn.monsterId === monsterId))
+    .filter((map) => map.monsterSpawns.some((spawn) => monsterIds.has(spawn.monsterId)))
     .map((map) => map.mapId);
 }
 
@@ -79,18 +79,18 @@ export function nextPortalToward(
 }
 
 /**
- * Closest spawn tile for a monster. Ties resolve by tile order so repeated
- * planning does not oscillate between two equidistant spawns.
+ * Closest spawn tile among the target monsters. Ties resolve by tile order so
+ * repeated planning does not oscillate between two equidistant spawns.
  */
-export function nearestSpawnTile(
+export function nearestSpawnTileAmong(
   map: MapRuntimeManifest,
-  monsterId: string,
+  monsterIds: ReadonlySet<string>,
   from: TilePoint,
 ): TilePoint | null {
   let best: TilePoint | null = null;
   let bestDistance = Number.POSITIVE_INFINITY;
   for (const spawn of map.monsterSpawns) {
-    if (spawn.monsterId !== monsterId) {
+    if (!monsterIds.has(spawn.monsterId)) {
       continue;
     }
     const distance = (spawn.tile.x - from.x) ** 2 + (spawn.tile.y - from.y) ** 2;

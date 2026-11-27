@@ -50,6 +50,7 @@ import {
   listEquippedItems,
   listInventoryItems,
   listOpenWorldDrops,
+  lockInventoryItemsByTemplate,
   markCharacterQuestClaimed,
   purgeExpiredWorldDrops,
   wallets,
@@ -1450,7 +1451,33 @@ export class AssetService {
       if (record.status === 'claimed') {
         throw new AssetError('QUEST_ALREADY_CLAIMED');
       }
-      if (record.status !== 'completed') {
+      if (quest.objective.kind === 'collect') {
+        // Turn-in consumes the bag items in the same transaction that pays the
+        // reward, so a retry or a concurrent claim can never pay twice (ADR-040).
+        const consumed = await this.consumeCollectItems(
+          tx,
+          character.id,
+          quest.objective.templateId,
+          quest.objective.count,
+          now,
+        );
+        if (!consumed) {
+          throw new AssetError('QUEST_ITEMS_MISSING');
+        }
+        if (record.status === 'active') {
+          const completed = await advanceCharacterQuest(tx, {
+            characterId: input.characterId,
+            questId: quest.id,
+            periodKey,
+            progress: quest.objective.count,
+            completed: true,
+            now,
+          });
+          if (completed === undefined) {
+            throw new AssetError('SERVICE_UNAVAILABLE');
+          }
+        }
+      } else if (record.status !== 'completed') {
         throw new AssetError('QUEST_NOT_COMPLETE');
       }
 
@@ -1536,6 +1563,46 @@ export class AssetService {
         goldGained: quest.rewards.gold,
       };
     });
+  }
+
+  /**
+   * Removes `count` items of one template from the bag, earliest slot first.
+   * Returns false without touching anything when the bag holds too few, so the
+   * caller can reject the turn-in cleanly.
+   */
+  private async consumeCollectItems(
+    executor: DbExecutor,
+    characterId: string,
+    templateId: string,
+    count: number,
+    now: Date,
+  ): Promise<boolean> {
+    const stacks = await lockInventoryItemsByTemplate(executor, characterId, templateId);
+    const total = stacks.reduce((sum, stack) => sum + stack.quantity, 0);
+    if (total < count) {
+      return false;
+    }
+    let remaining = count;
+    for (const stack of stacks) {
+      if (remaining <= 0) {
+        break;
+      }
+      if (stack.quantity <= remaining) {
+        await executor.delete(itemInstances).where(eq(itemInstances.id, stack.id));
+        remaining -= stack.quantity;
+      } else {
+        await executor
+          .update(itemInstances)
+          .set({
+            quantity: sql`${itemInstances.quantity} - ${remaining}`,
+            version: sql`${itemInstances.version} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(itemInstances.id, stack.id));
+        remaining = 0;
+      }
+    }
+    return true;
   }
 
   private async advanceQuestsOnKill(

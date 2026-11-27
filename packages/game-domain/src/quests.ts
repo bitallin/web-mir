@@ -32,6 +32,8 @@ export type QuestViewContext = {
   currentPeriodKey: string;
   /** Epoch millis of the next reset when the release declares `rules.dailyReset`. */
   nextResetAt?: number;
+  /** Template id -> quantity in the bag, used by collect objectives (ADR-040). */
+  inventory: ReadonlyMap<string, number>;
 };
 
 const MS_PER_MINUTE = 60_000;
@@ -68,8 +70,32 @@ export function nextDailyResetAt(now: Date, rule: DailyResetRule): number {
   return periodStartMs(now, rule) + MS_PER_DAY - rule.utcOffsetMinutes * MS_PER_MINUTE;
 }
 
-function objectiveMonsterName(quest: QuestContent, context: QuestViewContext): string {
-  return context.monsters[quest.objective.monsterId]?.name ?? quest.objective.monsterId;
+function objectiveView(
+  quest: QuestContent,
+  context: Pick<QuestViewContext, 'items' | 'monsters'>,
+): QuestView['objective'] {
+  if (quest.objective.kind === 'kill') {
+    return {
+      kind: 'kill',
+      monsterId: quest.objective.monsterId,
+      monsterName: context.monsters[quest.objective.monsterId]?.name ?? quest.objective.monsterId,
+      count: quest.objective.count,
+    };
+  }
+  return {
+    kind: 'collect',
+    templateId: quest.objective.templateId,
+    itemName: context.items[quest.objective.templateId]?.name ?? quest.objective.templateId,
+    count: quest.objective.count,
+  };
+}
+
+/** Items held in the bag, capped at the objective so the bar never overfills. */
+function collectProgress(quest: QuestContent, context: QuestViewContext): number {
+  if (quest.objective.kind !== 'collect') {
+    return 0;
+  }
+  return Math.min(quest.objective.count, context.inventory.get(quest.objective.templateId) ?? 0);
 }
 
 function prerequisiteSatisfied(
@@ -99,8 +125,19 @@ export function questViewFor(
       : undefined;
 
   let status: QuestStatus;
+  let progress = 0;
   if (effectiveRecord !== undefined) {
     status = effectiveRecord.status;
+    progress = effectiveRecord.progress;
+    // A collect quest is complete as soon as the bag holds enough items; the
+    // claim transaction re-checks and consumes them (ADR-040). Nothing is
+    // written on pickup, so the view is the single source of truth.
+    if (quest.objective.kind === 'collect' && effectiveRecord.status === 'active') {
+      progress = collectProgress(quest, context);
+      if (progress >= quest.objective.count) {
+        status = 'completed';
+      }
+    }
   } else if (characterLevel < quest.levelRequirement || !prerequisiteSatisfied(quest, records)) {
     status = 'locked';
   } else {
@@ -128,13 +165,8 @@ export function questViewFor(
           ...(context.nextResetAt === undefined ? {} : { nextResetAt: context.nextResetAt }),
         }),
     status,
-    progress: effectiveRecord?.progress ?? 0,
-    objective: {
-      kind: 'kill',
-      monsterId: quest.objective.monsterId,
-      monsterName: objectiveMonsterName(quest, context),
-      count: quest.objective.count,
-    },
+    progress,
+    objective: objectiveView(quest, context),
     rewards: {
       exp: quest.rewards.exp,
       gold: quest.rewards.gold,

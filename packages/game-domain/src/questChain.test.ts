@@ -7,9 +7,13 @@ import { applyExperience } from './progression';
 
 /**
  * The main chain is content, so its integrity is checked here rather than by a
- * runtime guard: exactly one linear chain, reachable levels, and enough
- * experience from the required kills alone to finish it.
+ * runtime guard: one linear chain, reachable levels, and enough experience from
+ * the required kills alone to finish it. Side quests are one-time quests that
+ * stand outside the chain and are pinned explicitly so new content stays
+ * intentional.
  */
+const SIDE_QUESTS = ['quest_supply_delivery'] as const;
+
 const EXPECTED_CHAIN = [
   'quest_slime_cleanup',
   'quest_wolf_patrol',
@@ -29,30 +33,35 @@ function oneTimeQuests(): readonly QuestContent[] {
   );
 }
 
-function linearChain(): QuestContent[] {
-  const byPrerequisite = new Map<string | undefined, QuestContent[]>();
-  for (const quest of oneTimeQuests()) {
-    const key = quest.prerequisiteQuestId;
-    byPrerequisite.set(key, [...(byPrerequisite.get(key) ?? []), quest]);
-  }
-  const roots = byPrerequisite.get(undefined) ?? [];
-  expect(roots).toHaveLength(1);
-  const chain: QuestContent[] = [];
-  let current = roots[0];
-  while (current !== undefined) {
-    chain.push(current);
-    const next = byPrerequisite.get(current.id) ?? [];
-    expect(next.length).toBeLessThanOrEqual(1);
-    current = next[0];
-  }
-  return chain;
+function chainQuests(): QuestContent[] {
+  const quests = BASE_CONTENT_BUNDLE.quests ?? {};
+  return EXPECTED_CHAIN.map((id) => {
+    const quest = quests[id];
+    if (quest === undefined) {
+      throw new Error(`missing chain quest "${id}"`);
+    }
+    return quest;
+  });
 }
 
 describe('the main quest chain', () => {
   it('is one linear ten-step chain with a frontier giver for the ruins', () => {
-    const chain = linearChain();
+    const chain = chainQuests();
     expect(chain.map((quest) => quest.id)).toEqual([...EXPECTED_CHAIN]);
-    expect(chain.length).toBe(oneTimeQuests().length);
+    expect(chain[0]?.prerequisiteQuestId).toBeUndefined();
+    for (let index = 1; index < chain.length; index += 1) {
+      expect(chain[index]?.prerequisiteQuestId).toBe(chain[index - 1]?.id);
+    }
+    // Every one-time quest is either a chain step or a declared side quest, and
+    // a side quest never gates the chain.
+    expect(
+      oneTimeQuests()
+        .map((quest) => quest.id)
+        .sort(),
+    ).toEqual([...EXPECTED_CHAIN, ...SIDE_QUESTS].sort());
+    for (const sideId of SIDE_QUESTS) {
+      expect(chain.some((quest) => quest.prerequisiteQuestId === sideId)).toBe(false);
+    }
 
     const givers = chain.map((quest) => quest.giverNpcId);
     expect(givers.slice(0, 5)).toEqual(Array.from({ length: 5 }, () => 'town_guard'));
@@ -71,8 +80,11 @@ describe('the main quest chain', () => {
   it('can be finished from level 1 using only its own kills and rewards', () => {
     let level = 1;
     let exp = 0;
-    for (const quest of linearChain()) {
+    for (const quest of chainQuests()) {
       expect(level).toBeGreaterThanOrEqual(quest.levelRequirement);
+      if (quest.objective.kind !== 'kill') {
+        throw new Error(`chain step "${quest.id}" must have a kill objective`);
+      }
       const killExp =
         (BASE_CONTENT_BUNDLE.lootTables[quest.objective.monsterId]?.exp ?? 0) *
         quest.objective.count;
@@ -81,7 +93,7 @@ describe('the main quest chain', () => {
       level = result.level;
       exp = result.exp;
     }
-    const last = linearChain().at(-1);
+    const last = chainQuests().at(-1);
     expect(level).toBeGreaterThanOrEqual(last?.levelRequirement ?? 0);
   });
 });

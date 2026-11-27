@@ -34,6 +34,30 @@ export async function listInventoryItems(
     .orderBy(asc(itemInstances.slotIndex));
 }
 
+/**
+ * Bag stacks of one template, locked for the rest of the transaction. Turn-in
+ * quests consume from these rows so a concurrent sale cannot double-spend the
+ * same items (ADR-040).
+ */
+export async function lockInventoryItemsByTemplate(
+  executor: DbExecutor,
+  characterId: string,
+  templateId: string,
+): Promise<ItemInstance[]> {
+  return executor
+    .select()
+    .from(itemInstances)
+    .where(
+      and(
+        eq(itemInstances.characterId, characterId),
+        eq(itemInstances.container, 'inventory'),
+        eq(itemInstances.templateId, templateId),
+      ),
+    )
+    .orderBy(asc(itemInstances.slotIndex))
+    .for('update');
+}
+
 export async function listEquippedItems(
   executor: DbExecutor,
   characterId: string,

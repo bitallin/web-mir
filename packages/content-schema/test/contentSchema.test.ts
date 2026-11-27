@@ -280,10 +280,14 @@ describe('content validation', () => {
     const legacy = clone(BASE_CONTENT_BUNDLE);
     delete legacy.rules;
     // Daily quests arrived after the rules section; a release without rules
-    // also predates them (ADR-038).
+    // also predates them (ADR-038). Drop every daily so the fixture stays a
+    // genuine pre-daily release as new dailies are added.
     if (legacy.quests !== undefined) {
-      delete legacy.quests.quest_daily_slime_cleanup;
-      delete legacy.quests.quest_daily_wolf_hunt;
+      for (const [id, quest] of Object.entries(legacy.quests)) {
+        if (quest.repeat === 'daily') {
+          delete legacy.quests[id];
+        }
+      }
     }
     const result = validateContentBundle(legacy);
     expect(result.valid).toBe(true);
@@ -472,6 +476,70 @@ describe('quest validation', () => {
     );
     expect(result.valid).toBe(false);
     expect(result.issues.some((issue) => issue.message.includes('missing_item'))).toBe(true);
+  });
+
+  it('rejects a collect objective whose item does not exist', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_supply_delivery'];
+        if (quest !== undefined && quest.objective.kind === 'collect') {
+          quest.objective.templateId = 'missing_item';
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.path === 'quests.quest_supply_delivery.objective.templateId' &&
+          issue.message.includes('missing_item'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a collect objective that targets equipment', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_supply_delivery'];
+        if (quest !== undefined && quest.objective.kind === 'collect') {
+          quest.objective.templateId = 'warrior_sword';
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes('材料或消耗品'))).toBe(true);
+  });
+
+  it('rejects a daily collect quest for a shop-buyable item', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_daily_ruins_stock'];
+        if (quest !== undefined && quest.objective.kind === 'collect') {
+          quest.objective.templateId = 'small_hp_potion';
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.path === 'quests.quest_daily_ruins_stock.objective.templateId' &&
+          issue.message.includes('商店购买'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a collect objective that is also the quest reward', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_supply_delivery'];
+        if (quest !== undefined) {
+          quest.rewards.items = [{ templateId: 'small_hp_potion', quantity: 1 }];
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes('不能同时作为'))).toBe(true);
   });
 
   it('rejects a prerequisite loop', () => {

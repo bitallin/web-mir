@@ -34,7 +34,7 @@ import {
   QUALITY_LABELS,
 } from '../lib/inventoryView';
 import { itemIconFrame, itemIconStyle } from '../lib/itemIcons';
-import { groupQuestsByStatus, nextAvailableQuest } from '../lib/questPanel';
+import { groupQuestsByStatus, nextAvailableQuest, questObjectiveLabel } from '../lib/questPanel';
 import type { ConnectionStatus } from '../net/worldClient';
 import { useWorldSession } from '../session/useWorldSession';
 import { Minimap } from './Minimap';
@@ -657,7 +657,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                         <span className="quest-tracker-meta">
                           {quest.status === 'completed'
                             ? `可交付 · ${giverMap === undefined ? '' : `${giverMap}·`}${quest.giverNpcName}`
-                            : `${quest.objective.monsterName} ${String(quest.progress)}/${String(quest.objective.count)}`}
+                            : `${questObjectiveLabel(quest.objective)} ${String(quest.progress)}/${String(quest.objective.count)}`}
                         </span>
                         {questNavigation?.questId === quest.questId ? (
                           <button
@@ -682,7 +682,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           >
                             去交付
                           </button>
-                        ) : quest.objective.kind === 'kill' ? (
+                        ) : (
                           <button
                             type="button"
                             className="quest-tracker-action"
@@ -694,7 +694,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           >
                             前往
                           </button>
-                        ) : null}
+                        )}
                       </li>
                     );
                   })}
@@ -1507,7 +1507,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   const canAccept = quest.status === 'available';
                   const canClaim = quest.status === 'completed' && nearby;
                   const navActive = questNavigation?.questId === quest.questId;
-                  const canHunt = quest.status === 'active' && quest.objective.kind === 'kill';
+                  const canHunt = quest.status === 'active';
                   const canReturn = quest.status === 'completed' && !nearby;
                   const location = locateNpc(quest.giverNpcId);
                   return (
@@ -1543,7 +1543,9 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           : `${location.mapName} · ${location.npcName}`}
                       </p>
                       <p className="quest-objective" data-testid="quest-objective">
-                        {quest.objective.monsterName} {quest.progress}/{quest.objective.count}
+                        {`${questObjectiveLabel(quest.objective)} ${String(quest.progress)}/${String(
+                          quest.objective.count,
+                        )}`}
                       </p>
                       {dailyResetLabel(quest) === null ? null : (
                         <p className="quest-repeat-note" data-testid="quest-reset">
@@ -1580,18 +1582,16 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                             >
                               接取
                             </button>
-                            {quest.objective.kind === 'kill' ? (
-                              <button
-                                type="button"
-                                data-testid="quest-accept-hunt"
-                                data-quest-id={quest.questId}
-                                onClick={() => {
-                                  acceptQuestAndHunt(quest.questId);
-                                }}
-                              >
-                                接取并前往
-                              </button>
-                            ) : null}
+                            <button
+                              type="button"
+                              data-testid="quest-accept-hunt"
+                              data-quest-id={quest.questId}
+                              onClick={() => {
+                                acceptQuestAndHunt(quest.questId);
+                              }}
+                            >
+                              接取并前往
+                            </button>
                           </>
                         ) : null}
                         {canAccept && !nearby ? (

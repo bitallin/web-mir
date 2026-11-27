@@ -683,7 +683,7 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     );
     expect(firstQuest?.status).toBe('available');
     expect(firstQuest?.giverNpcId).toBe('town_guard');
-    expect(firstQuest?.objective.monsterName).toBe('野地史莱姆');
+    expect(firstQuest?.objective).toMatchObject({ kind: 'kill', monsterName: '野地史莱姆' });
 
     const dailyQuest = snapshots[0]?.quests.find(
       (quest) => quest.questId === 'quest_daily_slime_cleanup',
@@ -692,10 +692,11 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     expect(dailyQuest?.repeat).toBe('daily');
     expect(dailyQuest?.nextResetAt).toBeGreaterThan(Date.now());
 
-    // The ten-step chain ships with the baseline; the frontier giver is named
-    // from the ruins map even while the player stands in town.
+    // The ten-step chain plus the supply side quest ship with the baseline; the
+    // frontier giver is named from the ruins map even while the player stands
+    // in town.
     const chain = snapshots[0]?.quests.filter((quest) => quest.repeat === undefined) ?? [];
-    expect(chain).toHaveLength(10);
+    expect(chain).toHaveLength(11);
     const ruinsQuest = snapshots[0]?.quests.find((quest) => quest.questId === 'quest_ruins_bones');
     expect(ruinsQuest?.giverNpcId).toBe('ruins_scout');
     expect(ruinsQuest?.giverNpcName).toBe('废墟斥候');
@@ -733,6 +734,148 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     });
     await waitUntil(() => rejections.length > 0, 5_000, 'locked quest rejection');
     expect(rejections[0]?.code).toBe('QUEST_UNAVAILABLE');
+  });
+
+  it('serves a collect quest from bag counts and consumes the items on turn-in', async () => {
+    const actor = await createActor(db, 'Gather', {
+      mapId: STARTER_TOWN_MAP_ID,
+      position: tileUnits({ x: 24, y: 12 }),
+    });
+    await db.insert(itemInstances).values({
+      templateId: 'small_hp_potion',
+      characterId: actor.character.id,
+      container: 'inventory',
+      slotIndex: 0,
+      quantity: 2,
+    });
+    const room = await createWorld(actor.ticket, STARTER_TOWN_MAP_ID);
+    const snapshots: QuestSnapshot[] = [];
+    const updates: QuestUpdate[] = [];
+    const results: AssetResult[] = [];
+    room.onMessage('quest.snapshot', (payload: unknown) => {
+      snapshots.push(questSnapshotSchema.parse(payload));
+    });
+    room.onMessage('quest.update', (payload: unknown) => {
+      updates.push(questUpdateSchema.parse(payload));
+    });
+    room.onMessage('asset.result', (payload: unknown) => {
+      results.push(assetResultSchema.parse(payload));
+    });
+
+    await waitUntil(() => snapshots.length > 0, 5_000, 'quest snapshot');
+    const offer = snapshots[0]?.quests.find((quest) => quest.questId === 'quest_supply_delivery');
+    expect(offer?.status).toBe('available');
+    expect(offer?.progress).toBe(0);
+    expect(offer?.objective).toEqual({
+      kind: 'collect',
+      templateId: 'small_hp_potion',
+      itemName: '金创药',
+      count: 1,
+    });
+
+    room.send('quest.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      questId: 'quest_supply_delivery',
+    });
+    await waitUntil(() => updates.length > 0, 5_000, 'collect accept update');
+    // The bag already holds a potion, so the accepted quest reads as completed
+    // without any pickup event writing progress.
+    expect(updates[0]?.quest.status).toBe('completed');
+    expect(updates[0]?.quest.progress).toBe(1);
+
+    room.send('quest.claim', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 1,
+      questId: 'quest_supply_delivery',
+    });
+    await waitUntil(
+      () => updates.some((update) => update.quest.status === 'claimed'),
+      5_000,
+      'collect claim update',
+    );
+    await waitUntil(
+      () => results.some((result) => result.kind === 'quest_claim'),
+      5_000,
+      'collect claim asset result',
+    );
+    const claimed = results.find((result) => result.kind === 'quest_claim');
+    expect(claimed?.snapshot.gold).toBe(15);
+    expect(
+      claimed?.snapshot.items.find((item) => item.templateId === 'small_hp_potion')?.quantity,
+    ).toBe(1);
+    const rows = await listCharacterQuests(db, actor.character.id);
+    expect(rows.find((row) => row.questId === 'quest_supply_delivery')).toMatchObject({
+      status: 'claimed',
+      progress: 1,
+    });
+  });
+
+  it('refreshes collect progress whenever the bag changes', async () => {
+    const actor = await createActor(db, 'BagView', {
+      mapId: STARTER_TOWN_MAP_ID,
+      position: tileUnits({ x: 24, y: 12 }),
+      hp: 10,
+    });
+    const [potion] = await db
+      .insert(itemInstances)
+      .values({
+        templateId: 'small_hp_potion',
+        characterId: actor.character.id,
+        container: 'inventory',
+        slotIndex: 0,
+        quantity: 1,
+      })
+      .returning({ id: itemInstances.id });
+    const room = await createWorld(actor.ticket, STARTER_TOWN_MAP_ID);
+    const snapshots: QuestSnapshot[] = [];
+    const updates: QuestUpdate[] = [];
+    room.onMessage('quest.snapshot', (payload: unknown) => {
+      snapshots.push(questSnapshotSchema.parse(payload));
+    });
+    room.onMessage('quest.update', (payload: unknown) => {
+      updates.push(questUpdateSchema.parse(payload));
+    });
+
+    await waitUntil(() => snapshots.length > 0, 5_000, 'quest snapshot');
+    room.send('quest.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      questId: 'quest_supply_delivery',
+    });
+    await waitUntil(() => updates.length > 0, 5_000, 'collect accept update');
+    expect(updates[0]?.quest.status).toBe('completed');
+
+    // The accept's committed snapshot also re-renders the bag-derived view.
+    await waitUntil(
+      () =>
+        snapshots.some(
+          (snapshot) =>
+            snapshot.quests.find((quest) => quest.questId === 'quest_supply_delivery')?.status ===
+            'completed',
+        ),
+      5_000,
+      'completed collect snapshot',
+    );
+
+    // Using the potion empties the bag; the next committed asset command must
+    // push a fresh snapshot that puts the quest back to active.
+    const before = snapshots.length;
+    room.send('inventory.use', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 1,
+      itemId: potion!.id,
+    });
+    await waitUntil(() => snapshots.length > before, 5_000, 'snapshot after bag change');
+    const view = snapshots
+      .at(-1)
+      ?.quests.find((quest) => quest.questId === 'quest_supply_delivery');
+    expect(view?.status).toBe('active');
+    expect(view?.progress).toBe(0);
   });
 
   it('starts and stops server-authored quest guidance', async () => {

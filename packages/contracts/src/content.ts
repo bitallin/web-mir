@@ -342,7 +342,24 @@ export const questKillObjectiveSchema = z
   })
   .strict();
 
-export const questObjectiveSchema = z.discriminatedUnion('kind', [questKillObjectiveSchema]);
+/**
+ * Turn-in objective: the player must hand over `count` items from the bag when
+ * claiming. Progress is derived from the bag at read time, so holding the items
+ * before accepting is allowed and the claim consumes them exactly once
+ * (ADR-040).
+ */
+export const questCollectObjectiveSchema = z
+  .object({
+    kind: z.literal('collect'),
+    templateId: contentIdSchema,
+    count: z.number().int().min(1).max(999),
+  })
+  .strict();
+
+export const questObjectiveSchema = z.discriminatedUnion('kind', [
+  questKillObjectiveSchema,
+  questCollectObjectiveSchema,
+]);
 export type QuestObjective = z.infer<typeof questObjectiveSchema>;
 
 export const questRewardItemSchema = z

@@ -172,9 +172,9 @@ import { CommandGuard } from './commandGuard';
 import { SessionRegistry, type QuestNavigationState, type SessionRecord } from './sessionRegistry';
 import {
   findNpcApproachPath,
-  mapsWithMonsterSpawns,
+  mapsWithAnyMonsterSpawn,
   mapsWithNpc,
-  nearestSpawnTile,
+  nearestSpawnTileAmong,
   nextPortalToward,
 } from '../world/questRouting';
 import { StateViewPublisher } from './stateViewPublisher';
@@ -3101,7 +3101,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         );
         return;
       }
-      if (record?.status !== 'completed') {
+      if (!this.questCompletedFor(session, quest, record)) {
         this.sendRejection(
           client,
           { commandId: command.commandId, clientSequence: command.clientSequence },
@@ -3115,7 +3115,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         quest,
         record,
         session.assetSnapshot.level,
-        this.questContext(),
+        this.questContext(this.inventoryCountsFor(session)),
         session.questRecords,
       );
       if (view.status !== 'available') {
@@ -3174,9 +3174,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return 'quest_changed';
     }
     const map = this.map.runtime.manifest;
+    const huntTargets = purpose === 'hunt' ? this.huntMonsterIdsFor(quest) : new Set<string>();
     const targetMapIds =
       purpose === 'hunt'
-        ? mapsWithMonsterSpawns(MAP_MANIFESTS, quest.objective.monsterId)
+        ? mapsWithAnyMonsterSpawn(MAP_MANIFESTS, huntTargets)
         : mapsWithNpc(MAP_MANIFESTS, quest.giverNpcId);
     if (targetMapIds.length === 0) {
       return 'no_route';
@@ -3198,13 +3199,13 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     navigation.nextMapId = undefined;
     if (purpose === 'hunt') {
-      const targetId = this.nearestVisibleQuestMonsterId(session, quest.objective.monsterId);
+      const targetId = this.nearestVisibleQuestMonsterId(session, huntTargets);
       if (targetId !== null) {
         this.startQuestAutoAttack(session, targetId);
         navigation.status = 'moving';
         return null;
       }
-      const spawn = nearestSpawnTile(map, quest.objective.monsterId, tileOfUnits(player));
+      const spawn = nearestSpawnTileAmong(map, huntTargets, tileOfUnits(player));
       if (spawn === null) {
         return 'no_route';
       }
@@ -3286,7 +3287,13 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         if (this.combat.elapsedMs < navigation.nextSearchAt) {
           continue;
         }
-        const targetId = this.nearestVisibleQuestMonsterId(session, quest.objective.monsterId);
+        // A collect quest is done the moment the bag holds enough items; stop
+        // hunting so the player can walk back and hand them in (ADR-040).
+        if (quest.objective.kind === 'collect' && this.collectSatisfied(session, quest)) {
+          this.stopQuestNavigation(session, { status: 'completed' });
+          continue;
+        }
+        const targetId = this.nearestVisibleQuestMonsterId(session, this.huntMonsterIdsFor(quest));
         if (targetId !== null) {
           this.startQuestAutoAttack(session, targetId);
           navigation.status = 'moving';
@@ -3316,7 +3323,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           this.stopQuestNavigation(session, { silent: true, clearPath: true });
           continue;
         }
-        if (record?.status !== 'completed') {
+        if (!this.questCompletedFor(session, quest, record)) {
           this.stopQuestNavigation(session, { reason: 'quest_changed' });
           continue;
         }
@@ -3346,7 +3353,52 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
   }
 
-  private nearestVisibleQuestMonsterId(session: SessionRecord, monsterId: string): string | null {
+  /** True once the bag holds enough of a collect objective's item. */
+  private collectSatisfied(session: SessionRecord, quest: QuestContent): boolean {
+    return (
+      quest.objective.kind === 'collect' &&
+      (this.inventoryCountsFor(session).get(quest.objective.templateId) ?? 0) >=
+        quest.objective.count
+    );
+  }
+
+  /**
+   * A collect record stays `active` until the claim transaction; for guidance
+   * and return validation it already counts as completed when the bag is full.
+   */
+  private questCompletedFor(
+    session: SessionRecord,
+    quest: QuestContent,
+    record: QuestRecordState | undefined,
+  ): boolean {
+    if (record?.status === 'completed') {
+      return true;
+    }
+    return record?.status === 'active' && this.collectSatisfied(session, quest);
+  }
+
+  /**
+   * Monsters a hunt should target. Kill quests name one monster; collect quests
+   * target every monster whose loot table drops the item (ADR-040).
+   */
+  private huntMonsterIdsFor(quest: QuestContent): Set<string> {
+    if (quest.objective.kind === 'kill') {
+      return new Set([quest.objective.monsterId]);
+    }
+    const templateId = quest.objective.templateId;
+    const ids = new Set<string>();
+    for (const [monsterId, table] of Object.entries(this.content.bundle.lootTables)) {
+      if (table.entries.some((entry) => entry.templateId === templateId)) {
+        ids.add(monsterId);
+      }
+    }
+    return ids;
+  }
+
+  private nearestVisibleQuestMonsterId(
+    session: SessionRecord,
+    monsterIds: ReadonlySet<string>,
+  ): string | null {
     const player = this.simulation.getPlayer(session.playerId);
     if (player === undefined) {
       return null;
@@ -3354,7 +3406,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     let bestId: string | null = null;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const monster of this.combat.listMonsters()) {
-      if (monster.templateId !== monsterId || monster.state === 'dead') {
+      if (!monsterIds.has(monster.templateId) || monster.state === 'dead') {
         continue;
       }
       if (!session.visible.has(monster.id)) {
@@ -3471,7 +3523,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     return distance > QUEST_NPC_RANGE_TILES ? 'OUT_OF_RANGE' : null;
   }
 
-  private questContext(): QuestViewContext {
+  private questContext(inventory: ReadonlyMap<string, number>): QuestViewContext {
     const rule = this.content.bundle.rules?.dailyReset;
     const now = new Date();
     return {
@@ -3481,7 +3533,30 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       npcNames: this.npcNames,
       currentPeriodKey: rule === undefined ? '' : dailyPeriodKey(now, rule),
       ...(rule === undefined ? {} : { nextResetAt: nextDailyResetAt(now, rule) }),
+      inventory,
     };
+  }
+
+  /** Bag totals by template; collect objectives read their progress from here. */
+  private inventoryCountsFor(session: SessionRecord): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const item of session.assetSnapshot.items) {
+      counts.set(item.templateId, (counts.get(item.templateId) ?? 0) + item.quantity);
+    }
+    return counts;
+  }
+
+  private hasActiveCollectQuest(session: SessionRecord): boolean {
+    for (const record of session.questRecords.values()) {
+      if (record.status !== 'active') {
+        continue;
+      }
+      const quest = this.content.bundle.quests?.[record.questId];
+      if (quest?.objective.kind === 'collect') {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -3515,7 +3590,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private sendQuestSnapshot(client: Client, session: SessionRecord): void {
-    const context = this.questContext();
+    const context = this.questContext(this.inventoryCountsFor(session));
     const views = questViewsFor(
       context.quests,
       [...session.questRecords.values()],
@@ -3525,6 +3600,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         monsters: context.monsters,
         npcNames: context.npcNames,
         currentPeriodKey: context.currentPeriodKey,
+        inventory: context.inventory,
         ...(context.nextResetAt === undefined ? {} : { nextResetAt: context.nextResetAt }),
       },
     );
@@ -3543,7 +3619,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private sendQuestUpdate(session: SessionRecord, record: QuestRecordState): QuestView | null {
-    const context = this.questContext();
+    const context = this.questContext(this.inventoryCountsFor(session));
     const quest = context.quests[record.questId];
     if (quest === undefined) {
       return null;
@@ -3922,6 +3998,18 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           { err: error, roomId: this.roomId, characterId: session.playerId, kind },
           'failed to deliver asset result',
         );
+      }
+      // A collect quest's progress is its bag count, so any inventory change
+      // must re-render the resolved views (ADR-040).
+      if (this.hasActiveCollectQuest(session)) {
+        try {
+          this.sendQuestSnapshot(client, session);
+        } catch (error) {
+          this.options.logger.warn(
+            { err: error, roomId: this.roomId, characterId: session.playerId, kind },
+            'failed to refresh quest views after an inventory change',
+          );
+        }
       }
     }
     this.metrics.recordAcceptedCommand();

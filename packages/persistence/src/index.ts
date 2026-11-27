@@ -127,6 +127,7 @@ export {
   listContentReleases,
   listEquippedItems,
   listInventoryItems,
+  lockInventoryItemsByTemplate,
   listItemTemplateUsage,
   listOpenWorldDrops,
   listOutboxCommands,

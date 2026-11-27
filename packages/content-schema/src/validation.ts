@@ -5,6 +5,7 @@ import {
   type ContentBundle,
   type ContentIssue,
   type ContentSection,
+  type QuestContent,
 } from '@web-legend/contracts';
 import { MAP_MANIFESTS } from '@web-legend/contracts/maps';
 
@@ -369,6 +370,69 @@ function validatePartyRule(bundle: ContentBundle, issues: ContentIssue[]): void 
   }
 }
 
+/**
+ * Collect objectives hand over items from the bag (ADR-040). The rules keep a
+ * daily from becoming a gold faucet and keep the objective reachable:
+ * - a daily cannot ask for a shop-buyable item (buy gold -> get gold reward);
+ * - the item must be a material or consumable, so bound starter gear is safe;
+ * - the same item cannot also be a reward of the same quest.
+ */
+function validateCollectObjective(
+  quest: QuestContent,
+  bundle: ContentBundle,
+  path: string,
+  issues: ContentIssue[],
+): void {
+  if (quest.objective.kind !== 'collect') {
+    return;
+  }
+  const item = bundle.items[quest.objective.templateId];
+  if (item === undefined) {
+    issue(
+      issues,
+      'error',
+      `${path}.objective.templateId`,
+      `收集目标物品 "${quest.objective.templateId}" 不存在`,
+    );
+    return;
+  }
+  if (item.kind !== 'material' && item.kind !== 'consumable') {
+    issue(
+      issues,
+      'error',
+      `${path}.objective.templateId`,
+      '收集目标必须是材料或消耗品，不能是装备',
+    );
+  }
+  if (quest.repeat === 'daily' && (item.buyPrice ?? 0) > 0) {
+    issue(
+      issues,
+      'error',
+      `${path}.objective.templateId`,
+      '每日收集任务不能要求可从商店购买的物品，否则金币可以直接兑换奖励',
+    );
+  }
+  if (quest.rewards.items.some((entry) => entry.templateId === item.id)) {
+    issue(
+      issues,
+      'error',
+      `${path}.rewards.items`,
+      `收集目标 "${item.id}" 不能同时作为该任务的奖励物品`,
+    );
+  }
+  const dropped = Object.values(bundle.lootTables).some((table) =>
+    table.entries.some((entry) => entry.templateId === item.id),
+  );
+  if (!dropped && (item.buyPrice ?? 0) === 0) {
+    issue(
+      issues,
+      'warning',
+      `${path}.objective.templateId`,
+      `目标物品 "${item.id}" 没有任何掉落或商店来源，任务可能无法完成`,
+    );
+  }
+}
+
 function validateQuests(bundle: ContentBundle, issues: ContentIssue[]): void {
   const quests = bundle.quests;
   if (quests === undefined) {
@@ -418,31 +482,35 @@ function validateQuests(bundle: ContentBundle, issues: ContentIssue[]): void {
       }
     }
 
-    const monster = bundle.monsters[quest.objective.monsterId];
-    if (monster === undefined) {
-      issue(
-        issues,
-        'error',
-        `${path}.objective.monsterId`,
-        `目标怪物 "${quest.objective.monsterId}" 不存在`,
-      );
-    } else {
-      if (!spawnedMonsters.has(monster.id)) {
+    if (quest.objective.kind === 'kill') {
+      const monster = bundle.monsters[quest.objective.monsterId];
+      if (monster === undefined) {
         issue(
           issues,
-          'warning',
+          'error',
           `${path}.objective.monsterId`,
-          `目标怪物 "${monster.id}" 没有地图刷点，任务无法完成`,
+          `目标怪物 "${quest.objective.monsterId}" 不存在`,
         );
+      } else {
+        if (!spawnedMonsters.has(monster.id)) {
+          issue(
+            issues,
+            'warning',
+            `${path}.objective.monsterId`,
+            `目标怪物 "${monster.id}" 没有地图刷点，任务无法完成`,
+          );
+        }
+        if (monster.level > quest.levelRequirement + 5) {
+          issue(
+            issues,
+            'warning',
+            `${path}.levelRequirement`,
+            `任务等级 ${String(quest.levelRequirement)} 远低于目标怪物等级 ${String(monster.level)}`,
+          );
+        }
       }
-      if (monster.level > quest.levelRequirement + 5) {
-        issue(
-          issues,
-          'warning',
-          `${path}.levelRequirement`,
-          `任务等级 ${String(quest.levelRequirement)} 远低于目标怪物等级 ${String(monster.level)}`,
-        );
-      }
+    } else {
+      validateCollectObjective(quest, bundle, path, issues);
     }
 
     for (const [index, reward] of quest.rewards.items.entries()) {

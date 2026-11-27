@@ -44,5 +44,6 @@
 | [ADR-037](ADR-037-world-boss-and-enrage-phase.md)                              | 世界首领、二阶段狂暴与地图公告           | Accepted              |
 | [ADR-038](ADR-038-daily-repeatable-quests.md)                                  | 内容驱动的每日任务与周期键               | Accepted              |
 | [ADR-039](ADR-039-one-click-quest-guidance.md)                                 | 一键任务导航、自动战斗与自动返回         | Accepted              |
+| [ADR-040](ADR-040-collect-quest-objectives.md)                                 | 收集类任务目标、背包进度与交物交付       | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

@@ -17,8 +17,9 @@ export const QUEST_STATUSES = ['locked', 'available', 'active', 'completed', 'cl
 export const questStatusSchema = z.enum(QUEST_STATUSES);
 export type QuestStatus = z.infer<typeof questStatusSchema>;
 
-export const QUEST_OBJECTIVE_KINDS = ['kill'] as const;
-export const questObjectiveViewSchema = z
+export const QUEST_OBJECTIVE_KINDS = ['kill', 'collect'] as const;
+
+export const questKillObjectiveViewSchema = z
   .object({
     kind: z.literal('kill'),
     monsterId: contentIdSchema,
@@ -27,6 +28,22 @@ export const questObjectiveViewSchema = z
   })
   .strict();
 
+export const questCollectObjectiveViewSchema = z
+  .object({
+    kind: z.literal('collect'),
+    templateId: contentIdSchema,
+    itemName: z.string().min(1).max(24),
+    count: z.number().int().min(1).max(999),
+  })
+  .strict();
+
+export const questObjectiveViewSchema = z.discriminatedUnion('kind', [
+  questKillObjectiveViewSchema,
+  questCollectObjectiveViewSchema,
+]);
+
+export type QuestKillObjectiveView = z.infer<typeof questKillObjectiveViewSchema>;
+export type QuestCollectObjectiveView = z.infer<typeof questCollectObjectiveViewSchema>;
 export type QuestObjectiveView = z.infer<typeof questObjectiveViewSchema>;
 
 export const questRewardItemViewSchema = z
@@ -64,7 +81,10 @@ export const questViewSchema = z
     /** Epoch millis of the next realm reset; present exactly when `repeat` is set. */
     nextResetAt: z.number().int().nonnegative().optional(),
     status: questStatusSchema,
-    /** Kill count already recorded; always 0 for locked/available quests. */
+    /**
+     * Recorded progress: kills for a kill objective, items currently in the bag
+     * for a collect objective. Always 0 for locked/available quests.
+     */
     progress: z.number().int().min(0).max(999),
     objective: questObjectiveViewSchema,
     rewards: questRewardsViewSchema,

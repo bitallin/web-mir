@@ -590,8 +590,35 @@ class WorldSession {
           this.updateState((previous) => ({ ...previous, shopCatalog: catalog }));
         },
         onQuestSnapshot: (snapshot) => {
+          // Collect progress arrives through snapshots (bag changes), not
+          // quest updates; compare with the previous list so the player still
+          // gets the same progress/completion feedback (ADR-040).
+          const previous = new Map(this.quests.map((quest) => [quest.questId, quest]));
           this.quests = snapshot.quests;
-          this.updateState((previous) => ({ ...previous, quests: snapshot.quests }));
+          this.updateState((state) => ({ ...state, quests: snapshot.quests }));
+          for (const quest of snapshot.quests) {
+            const before = previous.get(quest.questId);
+            if (before === undefined) {
+              continue;
+            }
+            if (before.status !== 'completed' && quest.status === 'completed') {
+              this.pushNotice(
+                'info',
+                `任务完成：${quest.title}，点击「回去交付」自动返回${quest.giverNpcName}`,
+              );
+            } else if (
+              before.status === 'active' &&
+              quest.status === 'active' &&
+              quest.progress > before.progress
+            ) {
+              this.pushNotice(
+                'info',
+                `任务进度：${quest.title} ${String(quest.progress)}/${String(
+                  quest.objective.count,
+                )}`,
+              );
+            }
+          }
           this.sendAutoQuestIntent();
         },
         onQuestUpdate: (update) => {
@@ -634,9 +661,11 @@ class WorldSession {
               }`,
             );
           }
-          if (update.quest.status === 'active' && this.autoQuestPending === update.quest.questId) {
+          if (this.autoQuestPending === update.quest.questId) {
             this.autoQuestPending = null;
-            this.navigateQuest(update.quest.questId, 'hunt');
+            if (update.quest.status === 'active') {
+              this.navigateQuest(update.quest.questId, 'hunt');
+            }
           }
           if (this.autoQuest?.questId === update.quest.questId) {
             if (update.quest.status === 'completed' && this.autoQuest.purpose === 'hunt') {

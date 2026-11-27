@@ -19,13 +19,18 @@ const NPC_NAMES = new Map([
 
 const DAILY_RULE: DailyResetRule = { hour: 5, utcOffsetMinutes: 480 };
 
-function context(currentPeriodKey = '', nextResetAt?: number) {
+function context(
+  currentPeriodKey = '',
+  nextResetAt?: number,
+  inventory: ReadonlyMap<string, number> = new Map(),
+) {
   return {
     quests: BASE_CONTENT_BUNDLE.quests ?? {},
     items: BASE_CONTENT_BUNDLE.items,
     monsters: BASE_CONTENT_BUNDLE.monsters,
     npcNames: NPC_NAMES,
     currentPeriodKey,
+    inventory,
     ...(nextResetAt === undefined ? {} : { nextResetAt }),
   };
 }
@@ -46,6 +51,7 @@ describe('quest views', () => {
       monsters: BASE_CONTENT_BUNDLE.monsters,
       npcNames: NPC_NAMES,
       currentPeriodKey: '',
+      inventory: new Map(),
     });
     const first = views.find((view) => view.questId === 'quest_slime_cleanup');
     expect(first?.status).toBe('available');
@@ -97,6 +103,83 @@ describe('quest views', () => {
     expect(view.status).toBe('active');
     expect(view.progress).toBe(2);
     expect(view.rewards.items[0]).toMatchObject({ templateId: 'small_hp_potion', name: '金创药' });
+  });
+});
+
+describe('collect progress', () => {
+  const QUEST_ID = 'quest_supply_delivery';
+
+  function collectQuest() {
+    const quest = context().quests[QUEST_ID];
+    if (quest === undefined) {
+      throw new Error('missing collect quest fixture');
+    }
+    return quest;
+  }
+
+  function bag(...entries: [string, number][]): Map<string, number> {
+    return new Map(entries);
+  }
+
+  it('derives progress from the bag and completes at the objective', () => {
+    const empty = questViewFor(collectQuest(), record(QUEST_ID, 'active'), 1, context(), new Map());
+    expect(empty.status).toBe('active');
+    expect(empty.progress).toBe(0);
+    expect(empty.objective).toEqual({
+      kind: 'collect',
+      templateId: 'small_hp_potion',
+      itemName: '金创药',
+      count: 1,
+    });
+
+    const full = questViewFor(
+      collectQuest(),
+      record(QUEST_ID, 'active'),
+      1,
+      context('', undefined, bag(['small_hp_potion', 3])),
+      new Map(),
+    );
+    expect(full.status).toBe('completed');
+    // Progress is capped at the objective even with a larger stack.
+    expect(full.progress).toBe(1);
+  });
+
+  it('keeps an unaccepted collect quest available and a claimed one claimed', () => {
+    const available = questViewFor(
+      collectQuest(),
+      undefined,
+      1,
+      context('', undefined, bag(['small_hp_potion', 3])),
+      new Map(),
+    );
+    expect(available.status).toBe('available');
+    expect(available.progress).toBe(0);
+
+    const claimed = questViewFor(
+      collectQuest(),
+      record(QUEST_ID, 'claimed', 1),
+      1,
+      context(),
+      new Map(),
+    );
+    expect(claimed.status).toBe('claimed');
+    expect(claimed.progress).toBe(1);
+  });
+
+  it('does not let bag items advance a kill objective', () => {
+    const quest = context().quests['quest_slime_cleanup'];
+    if (quest === undefined) {
+      throw new Error('missing quest fixture');
+    }
+    const view = questViewFor(
+      quest,
+      record('quest_slime_cleanup', 'active', 1),
+      1,
+      context('', undefined, bag(['small_hp_potion', 3])),
+      new Map(),
+    );
+    expect(view.status).toBe('active');
+    expect(view.progress).toBe(1);
   });
 });
 

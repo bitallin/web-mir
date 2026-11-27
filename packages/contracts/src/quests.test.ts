@@ -32,6 +32,35 @@ describe('quest views', () => {
     const parsed = questViewSchema.safeParse({ ...DAILY_VIEW, nextResetAt: -1 });
     expect(parsed.success).toBe(false);
   });
+
+  it('accepts a collect objective with the resolved item name', () => {
+    const parsed = questViewSchema.safeParse({
+      ...DAILY_VIEW,
+      repeat: undefined,
+      nextResetAt: undefined,
+      objective: {
+        kind: 'collect',
+        templateId: 'small_hp_potion',
+        itemName: '金创药',
+        count: 1,
+      },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects a collect objective that carries kill-only fields', () => {
+    const parsed = questViewSchema.safeParse({
+      ...DAILY_VIEW,
+      objective: {
+        kind: 'collect',
+        templateId: 'small_hp_potion',
+        itemName: '金创药',
+        monsterId: 'wild_slime',
+        count: 1,
+      },
+    });
+    expect(parsed.success).toBe(false);
+  });
 });
 
 describe('quest navigation', () => {

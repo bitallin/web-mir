@@ -1,7 +1,7 @@
 import type { QuestStatus, QuestView } from '@web-legend/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { groupQuestsByStatus, nextAvailableQuest } from './questPanel';
+import { groupQuestsByStatus, nextAvailableQuest, questObjectiveLabel } from './questPanel';
 
 function quest(questId: string, status: QuestStatus, repeat?: 'daily'): QuestView {
   return {
@@ -23,6 +23,27 @@ function quest(questId: string, status: QuestStatus, repeat?: 'daily'): QuestVie
     rewards: { exp: 1, gold: 1, items: [] },
   };
 }
+
+describe('questObjectiveLabel', () => {
+  it('names the monster or the collected item', () => {
+    expect(
+      questObjectiveLabel({
+        kind: 'kill',
+        monsterId: 'wild_slime',
+        monsterName: '野地史莱姆',
+        count: 3,
+      }),
+    ).toBe('野地史莱姆');
+    expect(
+      questObjectiveLabel({
+        kind: 'collect',
+        templateId: 'small_hp_potion',
+        itemName: '金创药',
+        count: 1,
+      }),
+    ).toBe('收集 金创药');
+  });
+});
 
 describe('groupQuestsByStatus', () => {
   it('puts turn-ins and active quests ahead of locked ones', () => {

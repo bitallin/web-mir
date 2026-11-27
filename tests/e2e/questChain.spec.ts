@@ -68,9 +68,10 @@ test('the full quest chain is visible and grouped by what the player can do', as
   await expect(panel).toBeVisible({ timeout: 10_000 });
   await expect(panel).toContainText('任务 · 全部地图');
 
-  // Actionable quests come first; the ten-step chain stays visible as goals.
+  // Actionable quests come first; the ten-step chain and the supply side quest
+  // stay visible as goals.
   await expect(page.getByTestId('quest-section-title')).toHaveText(['可接取', '尚未解锁']);
-  await expect(page.getByTestId('quest-section-count')).toHaveText(['2', '10']);
+  await expect(page.getByTestId('quest-section-count')).toHaveText(['3', '11']);
   await expect(
     page.locator('[data-testid="quest-section"][data-section="available"]'),
   ).toBeVisible();

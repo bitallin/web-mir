@@ -1265,6 +1265,160 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     expect(claimed.record.status).toBe('claimed');
   });
 
+  it('turns in a collect quest by consuming bag items exactly once', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    const before = await service.loadAssets(character.id);
+    const potionsBefore =
+      before.snapshot.items.find((item) => item.templateId === 'small_hp_potion')?.quantity ?? 0;
+    expect(potionsBefore).toBeGreaterThanOrEqual(1);
+
+    await service.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_supply_delivery',
+    });
+    const commandId = randomUUID();
+    const claimed = await service.claimQuest({
+      characterId: character.id,
+      commandId,
+      questId: 'quest_supply_delivery',
+    });
+    expect(claimed.deduplicated).toBe(false);
+    expect(claimed.record.status).toBe('claimed');
+    expect(claimed.record.progress).toBe(1);
+    expect(claimed.expGained).toBe(20);
+    expect(claimed.goldGained).toBe(15);
+    expect(claimed.snapshot.gold).toBe(15);
+    expect(
+      claimed.snapshot.items.find((item) => item.templateId === 'small_hp_potion')?.quantity ?? 0,
+    ).toBe(potionsBefore - 1);
+
+    const replay = await service.claimQuest({
+      characterId: character.id,
+      commandId,
+      questId: 'quest_supply_delivery',
+    });
+    expect(replay.deduplicated).toBe(true);
+    expect(
+      replay.snapshot.items.find((item) => item.templateId === 'small_hp_potion')?.quantity ?? 0,
+    ).toBe(potionsBefore - 1);
+
+    await expect(
+      service.claimQuest({
+        characterId: character.id,
+        commandId: randomUUID(),
+        questId: 'quest_supply_delivery',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_ALREADY_CLAIMED' });
+
+    const ledger = await db
+      .select()
+      .from(currencyLedger)
+      .where(
+        and(
+          eq(currencyLedger.characterId, character.id),
+          eq(currencyLedger.reason, 'quest_reward'),
+        ),
+      );
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]?.delta).toBe(15);
+    expect(ledger[0]?.referenceId).toBe('quest_supply_delivery');
+  });
+
+  it('refuses a collect turn-in when the bag no longer holds the items', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    await db
+      .delete(itemInstances)
+      .where(
+        and(eq(itemInstances.characterId, character.id), eq(itemInstances.container, 'inventory')),
+      );
+    await service.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_supply_delivery',
+    });
+    const commandId = randomUUID();
+    await expect(
+      service.claimQuest({
+        characterId: character.id,
+        commandId,
+        questId: 'quest_supply_delivery',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_ITEMS_MISSING' });
+
+    const records = await service.loadQuestRecords(character.id);
+    expect(records).toEqual([
+      { questId: 'quest_supply_delivery', periodKey: '', status: 'active', progress: 0 },
+    ]);
+    const ledger = await db
+      .select()
+      .from(currencyLedger)
+      .where(
+        and(
+          eq(currencyLedger.characterId, character.id),
+          eq(currencyLedger.reason, 'quest_reward'),
+        ),
+      );
+    expect(ledger).toHaveLength(0);
+
+    // The rejected transaction released the command id, so the same command can
+    // complete the turn-in once the item is in the bag.
+    await db.insert(itemInstances).values({
+      templateId: 'small_hp_potion',
+      characterId: character.id,
+      container: 'inventory',
+      slotIndex: 0,
+      quantity: 1,
+    });
+    const claimed = await service.claimQuest({
+      characterId: character.id,
+      commandId,
+      questId: 'quest_supply_delivery',
+    });
+    expect(claimed.record.status).toBe('claimed');
+  });
+
+  it('consumes a multi-item collect quest across bag stacks', async () => {
+    const character = await createCharacter(db, 'mage', { level: 8, gold: 0 });
+    await db
+      .delete(itemInstances)
+      .where(
+        and(eq(itemInstances.characterId, character.id), eq(itemInstances.container, 'inventory')),
+      );
+    await db.insert(itemInstances).values([
+      {
+        templateId: 'spider_leg',
+        characterId: character.id,
+        container: 'inventory',
+        slotIndex: 0,
+        quantity: 2,
+      },
+      {
+        templateId: 'spider_leg',
+        characterId: character.id,
+        container: 'inventory',
+        slotIndex: 1,
+        quantity: 4,
+      },
+    ]);
+
+    await service.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_daily_ruins_stock',
+    });
+    const claimed = await service.claimQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_daily_ruins_stock',
+    });
+    expect(claimed.record.status).toBe('claimed');
+    expect(claimed.record.progress).toBe(3);
+    const legs = claimed.snapshot.items.filter((item) => item.templateId === 'spider_leg');
+    expect(legs).toHaveLength(1);
+    expect(legs[0]?.quantity).toBe(3);
+  });
+
   it('completes the ten-step main chain with every step paid once', async () => {
     // A high-level character isolates the chain itself from levelling: every
     // step must still accept, advance and pay out with the shipped content.
