@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ContentBundle } from '@web-legend/contracts';
+import { RUINED_FIELDS_MAP } from '@web-legend/contracts/maps';
 
 import {
   BASE_CONTENT_BUNDLE,
@@ -245,6 +246,25 @@ describe('content validation', () => {
     );
   });
 
+  it('ships a world boss with an enrage phase and a ruins spawn', () => {
+    const boss = BASE_CONTENT_BUNDLE.monsters['ashen_colossus'];
+    expect(boss?.boss).toBe(true);
+    expect(boss?.enrage).toEqual({
+      atHpPermille: 500,
+      attackMultiplier: 1.25,
+      attackIntervalMultiplier: 0.75,
+      windupRadiusTiles: 2.6,
+      moveSpeedMultiplier: 1.2,
+    });
+    expect(BASE_CONTENT_BUNDLE.lootTables['ashen_colossus']?.exp).toBeGreaterThan(
+      BASE_CONTENT_BUNDLE.lootTables['ruin_gargoyle']?.exp ?? 0,
+    );
+    const spawn = RUINED_FIELDS_MAP.monsterSpawns.find(
+      (candidate) => candidate.monsterId === 'ashen_colossus',
+    );
+    expect(spawn?.id).toBe('ruins_colossus_1');
+  });
+
   it('ships a content-driven death penalty with new-player protection', () => {
     expect(BASE_CONTENT_BUNDLE.rules?.deathPenalty).toEqual({
       xpLossPermille: 100,
@@ -297,6 +317,23 @@ describe('content validation', () => {
     expect(disabled.issues.some((issue) => issue.message.includes('死亡不产生成长代价'))).toBe(
       true,
     );
+  });
+
+  it('rejects an enraged dodge radius without a wind-up', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const boss = bundle.monsters['ashen_colossus'];
+        if (boss !== undefined) {
+          boss.windupMs = 0;
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) => issue.path === 'monsters.ashen_colossus.enrage.windupRadiusTiles',
+      ),
+    ).toBe(true);
   });
 
   it('rejects a dodge radius without a wind-up', () => {

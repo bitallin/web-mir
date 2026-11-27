@@ -344,6 +344,22 @@ const telegraphEventSchema = z
   })
   .strict();
 
+/**
+ * A monster crossed its content enrage threshold and switched phase for the
+ * rest of this life. Sent to everyone who can see it; the server has already
+ * applied the boosted stats to all later damage.
+ */
+const enrageEventSchema = z
+  .object({
+    ...eventBase,
+    kind: z.literal('enrage'),
+    entityId: z.string().min(1).max(64),
+    entityType: z.literal('monster'),
+    hp: z.number().int().nonnegative(),
+    maxHp: z.number().int().positive(),
+  })
+  .strict();
+
 export const combatEventSchema = z.discriminatedUnion('kind', [
   attackEventSchema,
   hitEventSchema,
@@ -354,6 +370,7 @@ export const combatEventSchema = z.discriminatedUnion('kind', [
   spawnEventSchema,
   respawnEventSchema,
   telegraphEventSchema,
+  enrageEventSchema,
 ]);
 
 export type CombatEvent = z.infer<typeof combatEventSchema>;

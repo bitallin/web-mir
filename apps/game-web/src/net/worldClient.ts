@@ -91,6 +91,8 @@ export type MonsterView = {
   hp: number;
   maxHp: number;
   state: MonsterStateKind;
+  boss: boolean;
+  enraged: boolean;
 };
 
 export type LootView = {
@@ -883,6 +885,8 @@ export class WorldClient {
         hp: monster.hp,
         maxHp: monster.maxHp,
         state: monsterStateKindFromCode(monster.state),
+        boss: monster.boss,
+        enraged: monster.enraged,
       });
     });
 

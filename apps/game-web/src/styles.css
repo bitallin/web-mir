@@ -194,6 +194,94 @@ body {
   margin-left: 0;
 }
 
+/* World boss plate: top edge between the player card and the connection
+   card, so the fight stays visible without covering the play area. */
+.hud-boss {
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(320px, 36vw, 520px);
+  z-index: 2;
+}
+
+.boss-bar {
+  padding: 8px 12px 10px;
+  border: 1px solid rgba(201, 162, 39, 0.45);
+  background: rgba(11, 13, 16, 0.9);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.boss-bar.enraged {
+  border-color: rgba(184, 84, 74, 0.75);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.45),
+    0 0 18px rgba(184, 84, 74, 0.28);
+}
+
+.boss-bar-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+
+.boss-bar-tag {
+  padding: 1px 6px;
+  border: 1px solid rgba(201, 162, 39, 0.5);
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.boss-bar-heading strong {
+  overflow: hidden;
+  color: #f0c66b;
+  font-family: var(--serif);
+  font-size: 16px;
+  letter-spacing: 0.05em;
+  text-overflow: ellipsis;
+}
+
+.boss-bar-level,
+.boss-bar-hp {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.boss-bar-hp {
+  margin-left: auto;
+}
+
+.boss-bar-enraged {
+  color: #ff8f5a;
+  font-family: var(--serif);
+  font-size: 12px;
+  font-style: normal;
+  letter-spacing: 0.16em;
+}
+
+.boss-bar-track {
+  height: 8px;
+  border: 1px solid #2a2320;
+  background: #1a0f0c;
+  overflow: hidden;
+}
+
+.boss-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8e2f24, #d2543c 60%, #f0a25a);
+  transition: width 120ms linear;
+}
+
+.boss-bar.enraged .boss-bar-fill {
+  background: linear-gradient(90deg, #b8361f, #ff6a3a 60%, #ffd08a);
+}
+
 /* Right column: minimap/players above, combat information below. */
 .hud-right {
   top: 132px;
@@ -766,6 +854,23 @@ body {
 
 .monster-row.selected {
   box-shadow: inset 2px 0 0 var(--gold);
+}
+
+.monster-row.boss {
+  color: #f0c66b;
+}
+
+.monster-row.boss.enraged {
+  color: #ff8f5a;
+}
+
+.boss-tag {
+  margin-right: 5px;
+  padding: 0 4px;
+  border: 1px solid rgba(201, 162, 39, 0.5);
+  color: var(--gold);
+  font-size: 10px;
+  font-style: normal;
 }
 
 .skill-list {

@@ -520,8 +520,16 @@
         "x": 43,
         "y": 30
       }
+    },
+    {
+      "id": "ruins_colossus_1",
+      "monsterId": "ashen_colossus",
+      "tile": {
+        "x": 30,
+        "y": 33
+      }
     }
   ],
   "assetManifestVersion": "alpha0.2.2",
-  "checksum": "0b6098145343b03b7d75ee78609c6f09273869d2a61f723816f5380c84c567f4"
+  "checksum": "b657032755f446626019a889df2d7f0472658d6e3f1433d51dacf7c0fa627442"
 }

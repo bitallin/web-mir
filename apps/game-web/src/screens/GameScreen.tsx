@@ -194,6 +194,12 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     state.selectedTargetId === null
       ? undefined
       : state.players.find((player) => player.playerId === state.selectedTargetId);
+  const bossMonster =
+    state.monsters.find(
+      (monster) => monster.boss && monster.monsterId === state.selectedTargetId,
+    ) ??
+    state.monsters.find((monster) => monster.boss && monster.state !== 'dead') ??
+    null;
   const profileSkills = state.combatProfile?.skills;
   const skills = useMemo(() => profileSkills ?? [], [profileSkills]);
   const isDead = self?.alive === false;
@@ -713,6 +719,45 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         </section>
       </header>
 
+      {bossMonster !== null ? (
+        <section
+          className={`hud hud-boss boss-bar${bossMonster.enraged ? ' enraged' : ''}`}
+          aria-label="世界首领"
+          data-testid="boss-bar"
+          data-monster-id={bossMonster.monsterId}
+          data-enraged={bossMonster.enraged ? 'true' : 'false'}
+          data-hp={bossMonster.hp}
+          data-max-hp={bossMonster.maxHp}
+        >
+          <div className="boss-bar-heading">
+            <span className="boss-bar-tag">世界首领</span>
+            <strong data-testid="boss-bar-name">{bossMonster.displayName}</strong>
+            <span className="boss-bar-level">Lv.{bossMonster.level}</span>
+            {bossMonster.enraged ? (
+              <em className="boss-bar-enraged" data-testid="boss-bar-enraged">
+                狂暴
+              </em>
+            ) : null}
+            <span className="boss-bar-hp" data-testid="boss-bar-hp">
+              {bossMonster.hp}/{bossMonster.maxHp}
+            </span>
+          </div>
+          <div
+            className="boss-bar-track"
+            role="progressbar"
+            aria-label="首领生命"
+            aria-valuemin={0}
+            aria-valuemax={bossMonster.maxHp}
+            aria-valuenow={bossMonster.hp}
+          >
+            <span
+              className="boss-bar-fill"
+              style={{ width: `${String(hpPercent(bossMonster.hp, bossMonster.maxHp))}%` }}
+            />
+          </div>
+        </section>
+      ) : null}
+
       <div className="hud hud-right">
         <aside className="players-panel" aria-label="在线玩家">
           <Minimap
@@ -840,11 +885,20 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 <div className="target-heading">
                   <strong data-testid="target-name">{targetMonster.displayName}</strong>
                   <span>Lv.{targetMonster.level}</span>
-                  <span data-testid="target-kind" data-kind="monster">
-                    怪物
+                  <span
+                    data-testid="target-kind"
+                    data-kind="monster"
+                    data-boss={targetMonster.boss ? 'true' : 'false'}
+                  >
+                    {targetMonster.boss ? '首领' : '怪物'}
                   </span>
-                  <span data-testid="target-state">
-                    {MONSTER_STATE_LABELS[targetMonster.state] ?? ''}
+                  <span
+                    data-testid="target-state"
+                    data-enraged={targetMonster.enraged ? 'true' : 'false'}
+                  >
+                    {targetMonster.enraged
+                      ? '狂暴'
+                      : (MONSTER_STATE_LABELS[targetMonster.state] ?? '')}
                   </span>
                 </div>
                 <div className="hp-track">
@@ -948,18 +1002,23 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 <li key={monster.monsterId}>
                   <button
                     type="button"
-                    className={`monster-row${monster.monsterId === state.selectedTargetId ? ' selected' : ''}`}
+                    className={`monster-row${monster.monsterId === state.selectedTargetId ? ' selected' : ''}${monster.boss ? ' boss' : ''}${monster.enraged ? ' enraged' : ''}`}
                     data-testid="monster-row"
                     data-monster-id={monster.monsterId}
                     data-hp={monster.hp}
                     data-max-hp={monster.maxHp}
                     data-state={monster.state}
+                    data-boss={monster.boss ? 'true' : 'false'}
+                    data-enraged={monster.enraged ? 'true' : 'false'}
                     onClick={() => {
                       selectTarget(monster.monsterId);
                       attack(monster.monsterId);
                     }}
                   >
-                    <span>{monster.displayName}</span>
+                    <span>
+                      {monster.boss ? <em className="boss-tag">首领</em> : null}
+                      {monster.displayName}
+                    </span>
                     <span>
                       {monster.hp}/{monster.maxHp}
                     </span>

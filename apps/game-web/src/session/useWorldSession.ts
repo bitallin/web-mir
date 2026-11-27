@@ -296,6 +296,8 @@ function combatLogFor(
         return entry(`${name(event.sourceId)} 蓄势扑击，快离开红圈！`, 'system');
       }
       return null;
+    case 'enrage':
+      return entry(`${name(event.entityId)} 进入狂暴状态！`, 'system');
     case 'attack':
       return null;
   }

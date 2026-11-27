@@ -9,6 +9,8 @@ const DISPLAY_FONT = '"Noto Serif SC", "Songti SC", "SimSun", Georgia, serif';
 const HP_BAR_WIDTH = 44;
 const HP_BAR_HEIGHT = 4;
 const HP_BAR_OFFSET_Y = -60;
+/** World bosses read as a different class of threat at a glance. */
+const BOSS_SCALE = 1.45;
 
 type MonsterPalette = {
   body: number;
@@ -25,6 +27,7 @@ const PALETTES: Record<string, MonsterPalette> = {
   skeleton_warrior: { body: 0xd8d2c2, highlight: 0xf0ead8, shadow: 0x6d6a5e },
   corrupt_warlock: { body: 0x3b2b55, highlight: 0x7a5aa6, shadow: 0x1a1226 },
   ruin_gargoyle: { body: 0x5f6469, highlight: 0x8d949b, shadow: 0x2c3034 },
+  ashen_colossus: { body: 0x4a3b36, highlight: 0xd8722f, shadow: 0x1d1614 },
 };
 
 const FALLBACK_PALETTE: MonsterPalette = { body: 0x6a5f86, highlight: 0x9a8fbf, shadow: 0x2a2536 };
@@ -40,12 +43,16 @@ export class MonsterVisual {
   private readonly nameText: Phaser.GameObjects.Text;
   private readonly hpBar: Phaser.GameObjects.Graphics;
   private readonly body: Phaser.GameObjects.Graphics;
+  private readonly aura: Phaser.GameObjects.Graphics;
   private initialized = false;
   private hp = 1;
   private maxHp = 1;
   private state: MonsterStateKind = 'idle';
   private level = 0;
   private displayName = '';
+  private boss = false;
+  private enraged = false;
+  private readonly baseScale: number;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -63,11 +70,23 @@ export class MonsterVisual {
       .setOrigin(0.5, 1);
     this.hpBar = scene.add.graphics();
     this.body = scene.add.graphics();
+    this.aura = scene.add.graphics();
+    this.aura.fillStyle(0xff5a1f, 0.14);
+    this.aura.fillCircle(0, -22, 38);
+    this.aura.fillStyle(0xff7a2f, 0.1);
+    this.aura.fillCircle(0, -22, 46);
+    this.aura.setVisible(false);
 
     const palette = PALETTES[templateId] ?? FALLBACK_PALETTE;
     this.drawBody(palette);
 
-    this.container = scene.add.container(0, 0, [this.body, this.nameText, this.hpBar]);
+    this.container = scene.add.container(0, 0, [this.aura, this.body, this.nameText, this.hpBar]);
+    this.boss = view.boss;
+    this.baseScale = view.boss ? BOSS_SCALE : 1;
+    this.container.setScale(this.baseScale);
+    if (view.boss) {
+      this.nameText.setColor('#f0c66b');
+    }
     this.applyView(view);
   }
 
@@ -99,6 +118,11 @@ export class MonsterVisual {
       this.displayName = view.displayName;
       this.nameText.setText(`Lv.${String(view.level)} ${view.displayName}`);
     }
+    if (view.enraged !== this.enraged) {
+      this.enraged = view.enraged;
+      this.aura.setVisible(view.enraged);
+      this.nameText.setColor(view.enraged ? '#ff8f5a' : this.boss ? '#f0c66b' : '#e8e0cd');
+    }
     this.setHp(view.hp, view.maxHp);
     this.setState(view.state);
   }
@@ -126,8 +150,8 @@ export class MonsterVisual {
   playAttack(_kind: 'attack' | 'cast' = 'attack'): void {
     this.scene.tweens.add({
       targets: this.container,
-      scaleX: 1.12,
-      scaleY: 0.92,
+      scaleX: this.baseScale * 1.12,
+      scaleY: this.baseScale * 0.92,
       duration: 70,
       yoyo: true,
     });
@@ -136,8 +160,8 @@ export class MonsterVisual {
   playHit(): void {
     this.scene.tweens.add({
       targets: this.container,
-      scaleX: 1.08,
-      scaleY: 0.94,
+      scaleX: this.baseScale * 1.08,
+      scaleY: this.baseScale * 0.94,
       duration: 60,
       yoyo: true,
       ease: 'Quad.easeOut',
@@ -148,15 +172,16 @@ export class MonsterVisual {
     this.state = 'dead';
     this.container.setAlpha(0.32);
     this.hpBar.setVisible(false);
+    this.aura.setVisible(false);
   }
 
   playSpawn(): void {
     this.container.setAlpha(1);
-    this.container.setScale(0.2);
+    this.container.setScale(this.baseScale * 0.2);
     this.scene.tweens.add({
       targets: this.container,
-      scaleX: 1,
-      scaleY: 1,
+      scaleX: this.baseScale,
+      scaleY: this.baseScale,
       duration: 220,
       ease: 'Back.easeOut',
     });
@@ -326,6 +351,27 @@ export class MonsterVisual {
       graphics.fillCircle(4, -35, 2);
       graphics.fillStyle(palette.shadow, 1);
       graphics.fillRect(-15, -12, 30, 4);
+      return;
+    }
+
+    if (this.templateId === 'ashen_colossus') {
+      // Molten stone giant: heavy arms, cracked torso, ember eyes.
+      graphics.fillStyle(palette.shadow, 1);
+      graphics.fillRect(-30, -36, 11, 30);
+      graphics.fillRect(19, -36, 11, 30);
+      graphics.fillRect(-16, -44, 32, 42);
+      graphics.fillStyle(palette.body, 1);
+      graphics.fillRect(-14, -48, 28, 40);
+      graphics.fillCircle(0, -52, 9);
+      graphics.fillStyle(palette.highlight, 1);
+      graphics.fillRect(-7, -46, 3, 18);
+      graphics.fillRect(2, -42, 3, 24);
+      graphics.fillRect(-10, -36, 20, 2);
+      graphics.fillRect(-3, -31, 2, 12);
+      graphics.fillCircle(-4, -53, 2.2);
+      graphics.fillCircle(4, -53, 2.2);
+      graphics.fillStyle(palette.shadow, 1);
+      graphics.fillRect(-14, -12, 28, 5);
       return;
     }
 

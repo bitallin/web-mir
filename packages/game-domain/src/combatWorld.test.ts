@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { MONSTER_CATALOG, requireMonster } from './content';
 import { equipmentBonuses, requireItem, statsWithEquipment } from './items';
+import { monsterStatsAtPhase } from './monsterPhase';
 import { combatStatsFor } from './stats';
 import {
   DEFAULT_SLIME_SPAWN,
@@ -744,3 +745,112 @@ describe('CombatWorld monster threat', () => {
     expect(world.getMonster(spawn.id)?.x).toBe(startX);
   });
 });
+
+const BOSS_SPAWN = {
+  id: 'ruins_colossus_1',
+  monsterId: 'ashen_colossus',
+  tile: { x: 5, y: 5 },
+} as const;
+
+function bossWorld(maxHp: number, monsterRespawnMs = 60_000) {
+  const content = contentWithMonster('ashen_colossus', (boss) => {
+    boss.maxHp = maxHp;
+  });
+  return createTestWorld({ spawns: [BOSS_SPAWN], content, monsterRespawnMs });
+}
+
+function bossFighter() {
+  return warrior({ level: 10, hp: 280, mp: 30, ...center({ x: 4, y: 5 }) });
+}
+
+function attackUntilEnrage(world: ReturnType<typeof createTestWorld>): CombatEventPayload[] {
+  const events: CombatEventPayload[] = [];
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    events.push(...world.basicAttack('player-1', BOSS_SPAWN.id).events);
+    if (events.some((event) => event.kind === 'enrage')) {
+      break;
+    }
+    advance(world, 900);
+  }
+  return events;
+}
+
+describe('CombatWorld boss enrage phase', () => {
+  it('computes the content phase multipliers for the baseline boss', () => {
+    const boss = requireMonster('ashen_colossus');
+    expect(monsterStatsAtPhase(boss, false)).toEqual({
+      attack: 44,
+      attackIntervalMs: 3_200,
+      moveSpeedUnitsPerSecond: 800,
+      windupRadiusTiles: 1.9,
+    });
+    expect(monsterStatsAtPhase(boss, true)).toEqual({
+      attack: 55,
+      attackIntervalMs: 2_400,
+      moveSpeedUnitsPerSecond: 960,
+      windupRadiusTiles: 2.6,
+    });
+    // A monster without an enrage phase keeps its base stats forever.
+    const slime = requireMonster('wild_slime');
+    expect(monsterStatsAtPhase(slime, true)).toEqual(monsterStatsAtPhase(slime, false));
+  });
+
+  it('switches phase once when hp crosses the threshold and reports it', () => {
+    const world = bossWorld(100);
+    world.addPlayer(bossFighter());
+
+    const events = attackUntilEnrage(world);
+    expect(countKind(events, 'enrage')).toBe(1);
+    const enrage = events.find((event) => event.kind === 'enrage');
+    expect(enrage).toMatchObject({
+      entityId: BOSS_SPAWN.id,
+      entityType: 'monster',
+      maxHp: 100,
+    });
+    expect(enrage?.kind === 'enrage' ? enrage.hp : -1).toBeLessThanOrEqual(50);
+    expect(world.getMonster(BOSS_SPAWN.id)?.boss).toBe(true);
+    expect(world.getMonster(BOSS_SPAWN.id)?.enraged).toBe(true);
+
+    // Further damage stays in the same phase; the transition is not repeated.
+    const later: CombatEventPayload[] = [];
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      later.push(...world.basicAttack('player-1', BOSS_SPAWN.id).events);
+      advance(world, 900);
+    }
+    expect(countKind(later, 'enrage')).toBe(0);
+  });
+
+  it('does not enrage when the killing blow crosses the threshold', () => {
+    const world = bossWorld(20);
+    world.addPlayer(bossFighter());
+
+    const result = world.basicAttack('player-1', BOSS_SPAWN.id);
+    expect(result.accepted).toBe(true);
+    expect(countKind(result.events, 'death')).toBe(1);
+    expect(countKind(result.events, 'enrage')).toBe(0);
+    expect(world.getMonster(BOSS_SPAWN.id)?.state).toBe('dead');
+    expect(world.getMonster(BOSS_SPAWN.id)?.enraged).toBe(false);
+  });
+
+  it('resets the phase on respawn so the next pull starts calm', () => {
+    const world = bossWorld(100, 1_000);
+    world.addPlayer(bossFighter());
+    attackUntilEnrage(world);
+    expect(world.getMonster(BOSS_SPAWN.id)?.enraged).toBe(true);
+
+    while (world.getMonster(BOSS_SPAWN.id)?.state !== 'dead') {
+      world.basicAttack('player-1', BOSS_SPAWN.id);
+      advance(world, 900);
+    }
+    expect(world.getMonster(BOSS_SPAWN.id)?.enraged).toBe(false);
+
+    const respawn = world.step(1_000, positions(world));
+    expect(respawn.some((event) => event.kind === 'spawn')).toBe(true);
+    expect(world.getMonster(BOSS_SPAWN.id)?.hp).toBe(100);
+    expect(world.getMonster(BOSS_SPAWN.id)?.enraged).toBe(false);
+  });
+});
+
+function countKind(events: readonly CombatEventPayload[], kind: string): number {
+  return events.filter((event) => event.kind === kind).length;
+}

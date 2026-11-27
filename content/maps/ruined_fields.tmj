@@ -3,7 +3,7 @@
   "height": 36,
   "infinite": false,
   "nextlayerid": 9,
-  "nextobjectid": 35,
+  "nextobjectid": 36,
   "orientation": "orthogonal",
   "properties": [
     {
@@ -8184,6 +8184,40 @@
           "width": 0,
           "x": 1392,
           "y": 976
+        },
+        {
+          "height": 0,
+          "id": 35,
+          "name": "",
+          "point": true,
+          "properties": [
+            {
+              "name": "tileX",
+              "type": "int",
+              "value": 30
+            },
+            {
+              "name": "tileY",
+              "type": "int",
+              "value": 33
+            },
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "ruins_colossus_1"
+            },
+            {
+              "name": "monsterId",
+              "type": "string",
+              "value": "ashen_colossus"
+            }
+          ],
+          "rotation": 0,
+          "type": "",
+          "visible": true,
+          "width": 0,
+          "x": 976,
+          "y": 1072
         }
       ],
       "opacity": 1,

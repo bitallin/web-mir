@@ -148,6 +148,30 @@ export const skillContentSchema = z
 
 export type SkillContent = z.infer<typeof skillContentSchema>;
 
+/**
+ * One-shot second phase for a monster. When its HP first drops to the
+ * threshold, the server applies the multipliers for the rest of that life;
+ * every absent multiplier means "unchanged". The phase is content data, not a
+ * script, so a new behaviour still needs a code release (ADR-037).
+ */
+export const monsterEnrageSchema = z
+  .object({
+    /** Trigger threshold in per-mille of max HP (500 = half health). */
+    atHpPermille: z.number().int().min(1).max(999),
+    attackMultiplier: z.number().min(1).max(5).optional(),
+    /**
+     * Multiplies the attack interval. Values below 1 attack sooner; 0.5 halves
+     * the time between swings.
+     */
+    attackIntervalMultiplier: z.number().min(0.2).max(1).optional(),
+    moveSpeedMultiplier: z.number().min(0.2).max(3).optional(),
+    /** Absolute wind-up radius while enraged; requires `windupMs`. */
+    windupRadiusTiles: z.number().positive().max(10).optional(),
+  })
+  .strict();
+
+export type MonsterEnrage = z.infer<typeof monsterEnrageSchema>;
+
 export const monsterContentSchema = z
   .object({
     id: contentIdSchema,
@@ -174,6 +198,13 @@ export const monsterContentSchema = z
     windupMs: z.number().int().min(0).max(5_000).optional(),
     /** Dodge window around the telegraphed impact point. */
     windupRadiusTiles: z.number().positive().max(6).optional(),
+    /**
+     * Marks a world boss: map-wide spawn/phase/death announcements, the boss
+     * HUD and a distinct minimap marker. Optional so historical releases keep
+     * their checksum (EL-004).
+     */
+    boss: z.boolean().optional(),
+    enrage: monsterEnrageSchema.optional(),
   })
   .strict();
 

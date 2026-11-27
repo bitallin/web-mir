@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PlayerState, WorldState } from './worldState';
+import { MonsterState, PlayerState, WorldState } from './worldState';
 
 describe('WorldState schema', () => {
   it('holds players in a synchronized map', () => {
@@ -28,5 +28,16 @@ describe('WorldState schema', () => {
     const state = new WorldState();
     expect(state.tickHz).toBe(20);
     expect(state.speedUnitsPerSecond).toBe(4_000);
+  });
+
+  it('starts ordinary monsters outside the boss phase', () => {
+    const monster = new MonsterState();
+    expect(monster.boss).toBe(false);
+    expect(monster.enraged).toBe(false);
+
+    monster.boss = true;
+    monster.enraged = true;
+    expect(monster.boss).toBe(true);
+    expect(monster.enraged).toBe(true);
   });
 });

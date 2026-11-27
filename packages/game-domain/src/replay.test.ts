@@ -27,6 +27,8 @@ function describeEvent(event: CombatEventPayload): string {
       return `respawn ${event.entityId} at ${String(event.x)},${String(event.y)} hp=${String(event.hp)}`;
     case 'telegraph':
       return `telegraph ${event.sourceId} -> ${event.targetId} at ${String(event.x)},${String(event.y)} in ${String(event.impactInMs)}ms`;
+    case 'enrage':
+      return `enrage ${event.entityId} hp=${String(event.hp)}/${String(event.maxHp)}`;
   }
 }
 

@@ -39,5 +39,8 @@
 | [ADR-032](ADR-032-equipment-tiers-quality-and-comparison.md)                   | 装备成长线、稀有品质与背包对比           | Accepted              |
 | [ADR-033](ADR-033-item-icon-atlas-and-quality-presentation.md)                 | 物品图标由资源 manifest 提供             | Accepted              |
 | [ADR-034](ADR-034-content-driven-quest-chain.md)                               | 内容驱动任务链、事务进度与交付           | Accepted              |
+| [ADR-035](ADR-035-party-membership-and-shared-kill-experience.md)              | 队伍成员、共享击杀经验与掉落归属         | Accepted              |
+| [ADR-036](ADR-036-process-wide-party-service.md)                               | 队伍提升为进程级服务，过图保留           | Accepted              |
+| [ADR-037](ADR-037-world-boss-and-enrage-phase.md)                              | 世界首领、二阶段狂暴与地图公告           | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

@@ -224,6 +224,14 @@ describe('combat events', () => {
         radiusTiles: 1.5,
         impactInMs: 900,
       },
+      {
+        ...base,
+        kind: 'enrage',
+        entityId: 'ruins_colossus_1',
+        entityType: 'monster',
+        hp: 2_600,
+        maxHp: 5_200,
+      },
     ];
 
     for (const event of events) {
@@ -247,6 +255,22 @@ describe('combat events', () => {
         targetMaxHp: 50,
       }).success,
     ).toBe(false);
+  });
+
+  it('rejects an enrage event aimed at a player or carrying a forged max hp', () => {
+    const base = {
+      eventId: commandId,
+      serverTime: 1,
+      kind: 'enrage',
+      entityId: 'ruins_colossus_1',
+      entityType: 'monster',
+      hp: 2_600,
+      maxHp: 5_200,
+    };
+    expect(combatEventSchema.safeParse(base).success).toBe(true);
+    expect(combatEventSchema.safeParse({ ...base, entityType: 'player' }).success).toBe(false);
+    expect(combatEventSchema.safeParse({ ...base, maxHp: 0 }).success).toBe(false);
+    expect(combatEventSchema.safeParse({ ...base, hp: -1 }).success).toBe(false);
   });
 
   it('rejects a telegraph without a dodge radius or impact delay', () => {

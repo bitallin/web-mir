@@ -36,6 +36,9 @@ export type {
 export { combatStatsFor, MAX_COMBAT_LEVEL } from './stats';
 export type { CombatStats } from './stats';
 
+export { monsterStatsAtPhase } from './monsterPhase';
+export type { MonsterPhaseStats } from './monsterPhase';
+
 export {
   ITEM_CATALOG,
   STARTER_GOLD,

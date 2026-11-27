@@ -44,6 +44,7 @@ describe('phase-4 content catalog', () => {
     const monsters = Object.values(MONSTER_CATALOG);
     expect(monsters.map((monster) => monster.id).sort()).toEqual([
       'alpha_wolf',
+      'ashen_colossus',
       'corrupt_warlock',
       'forest_wolf',
       'ruin_gargoyle',

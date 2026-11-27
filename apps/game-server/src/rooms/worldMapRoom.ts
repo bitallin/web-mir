@@ -422,6 +422,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       monsterState.hp = monster.hp;
       monsterState.maxHp = monster.maxHp;
       monsterState.state = MONSTER_STATE_CODES[monster.state];
+      monsterState.boss = monster.boss;
+      monsterState.enraged = monster.enraged;
       this.state.monsters.set(monster.id, monsterState);
       this.interest.add(monster.id, tileOfUnits(monster));
     }
@@ -1253,6 +1255,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       case 'telegraph':
         addViewersOf([event.sourceId, event.targetId]);
         break;
+      case 'enrage':
+        // The phase change is visible to everyone who can see the boss; the
+        // room-wide notice below is a separate, map-level announcement.
+        addViewersOf([event.entityId]);
+        break;
     }
 
     for (const client of recipients.values()) {
@@ -1300,6 +1307,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       stateMonster.maxHp = monster.maxHp;
       stateMonster.moving = monster.moving;
       stateMonster.state = MONSTER_STATE_CODES[monster.state];
+      stateMonster.enraged = monster.enraged;
 
       this.queueViewRefresh(this.interest.move(monster.id, tileOfUnits(monster)));
     }
@@ -1884,12 +1892,38 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
    */
   private recordCombatOutcomes(events: readonly CombatEvent[]): void {
     for (const event of events) {
+      if (event.kind === 'enrage') {
+        const monster = this.combat.getMonster(event.entityId);
+        if (monster?.boss === true) {
+          this.broadcastSystemNotice('warning', `${monster.displayName}陷入狂暴，攻势更加凶猛！`);
+        }
+        continue;
+      }
+      if (event.kind === 'spawn') {
+        if (this.isBossTemplate(event.templateId)) {
+          this.broadcastSystemNotice('warning', `${event.displayName}重新苏醒了`);
+        }
+        continue;
+      }
       if (event.kind !== 'death') {
         continue;
       }
       if (event.entityType === 'monster') {
         this.metrics.recordMonsterKill();
         this.scheduleKillReward(event);
+        const monster = this.combat.getMonster(event.entityId);
+        if (monster?.boss === true) {
+          const killerName =
+            event.killerId === undefined
+              ? undefined
+              : this.state.players.get(event.killerId)?.displayName;
+          this.broadcastSystemNotice(
+            'info',
+            killerName === undefined
+              ? `${monster.displayName}被击败了`
+              : `${monster.displayName}被 ${killerName} 击败了`,
+          );
+        }
         continue;
       }
 
@@ -2020,6 +2054,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     };
     this.broadcast(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(message));
     this.metrics.recordChatMessage();
+  }
+
+  private isBossTemplate(templateId: string): boolean {
+    return this.content.bundle.monsters[templateId]?.boss === true;
   }
 
   private broadcastSystemNotice(kind: SystemNotice['kind'], message: string): void {

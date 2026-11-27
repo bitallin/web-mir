@@ -27,6 +27,7 @@ import {
   type MonsterDefinition,
   type SkillDefinition,
 } from './content';
+import { monsterStatsAtPhase } from './monsterPhase';
 import { combatStatsFor, type CombatStats } from './stats';
 
 export type CombatGrid = {
@@ -89,6 +90,8 @@ export type CombatMonsterSnapshot = {
   maxHp: number;
   state: MonsterStateKind;
   moving: boolean;
+  boss: boolean;
+  enraged: boolean;
 };
 
 export type CombatRejection = {
@@ -197,6 +200,8 @@ type MonsterRuntime = {
   dots: Map<string, ActiveDot>;
   /** Attack committed at cast time; it lands at `impactAt` on this point. */
   windup: MonsterWindup | null;
+  /** Set once when HP first crosses the content enrage threshold. */
+  enraged: boolean;
 };
 
 type MonsterWindup = {
@@ -327,6 +332,7 @@ export class CombatWorld {
         respawnAt: 0,
         dots: new Map(),
         windup: null,
+        enraged: false,
       });
     }
   }
@@ -851,6 +857,7 @@ export class CombatWorld {
             this.killMonster(monster, dot.sourceId, events);
             break;
           }
+          this.maybeEnrage(monster, events);
         }
         if (monster.hp === 0) {
           break;
@@ -949,6 +956,49 @@ export class CombatWorld {
     });
   }
 
+  /**
+   * Switches to the content enrage phase exactly once per life, the first time
+   * damage leaves the monster at or below the threshold. The event carries the
+   * authoritative HP that triggered it so clients cannot derive it themselves.
+   */
+  private maybeEnrage(monster: MonsterRuntime, events: CombatEventPayload[]): void {
+    const enrage = monster.definition.enrage;
+    if (enrage === undefined || monster.enraged || monster.hp === 0) {
+      return;
+    }
+    const threshold = Math.max(
+      1,
+      Math.ceil((monster.definition.maxHp * enrage.atHpPermille) / 1_000),
+    );
+    if (monster.hp > threshold) {
+      return;
+    }
+    monster.enraged = true;
+    events.push({
+      kind: 'enrage',
+      entityId: monster.id,
+      entityType: 'monster',
+      hp: monster.hp,
+      maxHp: monster.definition.maxHp,
+    });
+  }
+
+  private monsterAttackPower(monster: MonsterRuntime): number {
+    return monsterStatsAtPhase(monster.definition, monster.enraged).attack;
+  }
+
+  private monsterAttackInterval(monster: MonsterRuntime): number {
+    return monsterStatsAtPhase(monster.definition, monster.enraged).attackIntervalMs;
+  }
+
+  private monsterMoveSpeed(monster: MonsterRuntime): number {
+    return monsterStatsAtPhase(monster.definition, monster.enraged).moveSpeedUnitsPerSecond;
+  }
+
+  private monsterWindupRadius(monster: MonsterRuntime): number {
+    return monsterStatsAtPhase(monster.definition, monster.enraged).windupRadiusTiles;
+  }
+
   private killMonster(
     monster: MonsterRuntime,
     killerId: string,
@@ -960,6 +1010,7 @@ export class CombatWorld {
     monster.waypoints = [];
     monster.dots.clear();
     monster.windup = null;
+    monster.enraged = false;
     monster.respawnAt = this.now + (this.monsterRespawnMs ?? monster.definition.respawnMs);
     events.push({
       kind: 'death',
@@ -1020,6 +1071,7 @@ export class CombatWorld {
       monster.respawnAt = 0;
       monster.dots.clear();
       monster.windup = null;
+      monster.enraged = false;
       events.push({
         kind: 'spawn',
         entityId: monster.id,
@@ -1159,7 +1211,7 @@ export class CombatWorld {
   }
 
   private advanceMonster(monster: MonsterRuntime, stepMs: number): void {
-    monster.moveCredit += monster.definition.moveSpeedUnitsPerSecond * stepMs;
+    monster.moveCredit += this.monsterMoveSpeed(monster) * stepMs;
     let remaining = Math.floor(monster.moveCredit / 1_000);
     monster.moveCredit -= remaining * 1_000;
 
@@ -1201,7 +1253,7 @@ export class CombatWorld {
     events: CombatEventPayload[],
   ): void {
     const windupMs = monster.definition.windupMs ?? 0;
-    const radiusTiles = monster.definition.windupRadiusTiles ?? 1.5;
+    const radiusTiles = this.monsterWindupRadius(monster);
     monster.facing = facingForDelta(monster, player);
     monster.moving = false;
     monster.waypoints = [];
@@ -1233,12 +1285,12 @@ export class CombatWorld {
     }
     const target = this.players.get(windup.targetId);
     if (target === undefined || !target.alive || !target.targetable) {
-      monster.nextAttackAt = this.now + monster.definition.attackIntervalMs;
+      monster.nextAttackAt = this.now + this.monsterAttackInterval(monster);
       return;
     }
     const distanceTiles = Math.hypot(target.x - windup.x, target.y - windup.y) / TILE_UNITS;
     if (distanceTiles > windup.radiusTiles) {
-      monster.nextAttackAt = this.now + monster.definition.attackIntervalMs;
+      monster.nextAttackAt = this.now + this.monsterAttackInterval(monster);
       events.push({
         kind: 'miss',
         sourceId: monster.id,
@@ -1256,7 +1308,7 @@ export class CombatWorld {
     player: PlayerRuntime,
     events: CombatEventPayload[],
   ): void {
-    monster.nextAttackAt = this.now + monster.definition.attackIntervalMs;
+    monster.nextAttackAt = this.now + this.monsterAttackInterval(monster);
     monster.facing = facingForDelta(monster, player);
     events.push({
       kind: 'attack',
@@ -1268,7 +1320,7 @@ export class CombatWorld {
 
     const roll = rollAttack(
       {
-        attack: monster.definition.attack,
+        attack: this.monsterAttackPower(monster),
         hitChance: monster.definition.hitChance,
         critChance: monster.definition.critChance,
         critMultiplier: monster.definition.critMultiplier,
@@ -1350,6 +1402,8 @@ export class CombatWorld {
 
     if (monster.hp === 0) {
       this.killMonster(monster, player.id, events);
+    } else {
+      this.maybeEnrage(monster, events);
     }
   }
 
@@ -1413,6 +1467,8 @@ export class CombatWorld {
       maxHp: monster.definition.maxHp,
       state: monster.state,
       moving: monster.moving,
+      boss: monster.definition.boss === true,
+      enraged: monster.enraged,
     };
   }
 

@@ -18,6 +18,7 @@ describe('loot tables', () => {
   it('defines a table for every monster with valid references', () => {
     expect(Object.keys(MONSTER_LOOT_TABLES).sort()).toEqual([
       'alpha_wolf',
+      'ashen_colossus',
       'corrupt_warlock',
       'forest_wolf',
       'ruin_gargoyle',

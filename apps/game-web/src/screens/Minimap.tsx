@@ -69,6 +69,10 @@ export function Minimap({ mapId, selfId, players, monsters, loot }: MinimapProps
       if (monster.state === 'dead') {
         continue;
       }
+      if (monster.boss) {
+        dot(monster.x, monster.y, 3.6, monster.enraged ? '#ff6a3a' : '#f0c66b');
+        continue;
+      }
       dot(monster.x, monster.y, 2, '#b8544a');
     }
     for (const player of players) {

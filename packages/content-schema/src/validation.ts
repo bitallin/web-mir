@@ -156,6 +156,25 @@ function validateMonsters(bundle: ContentBundle, issues: ContentIssue[]): void {
     ) {
       issue(issues, 'warning', `${path}.windupMs`, '攻击前摇不短于攻击间隔，节奏可能异常');
     }
+    if (monster.enrage !== undefined) {
+      const enrage = monster.enrage;
+      if (enrage.windupRadiusTiles !== undefined && (monster.windupMs ?? 0) === 0) {
+        issue(
+          issues,
+          'error',
+          `${path}.enrage.windupRadiusTiles`,
+          '狂暴阶段扩大了闪避半径，但怪物没有攻击前摇',
+        );
+      }
+      if (
+        enrage.attackMultiplier === undefined &&
+        enrage.attackIntervalMultiplier === undefined &&
+        enrage.moveSpeedMultiplier === undefined &&
+        enrage.windupRadiusTiles === undefined
+      ) {
+        issue(issues, 'warning', `${path}.enrage`, '狂暴阶段没有改变任何数值');
+      }
+    }
     const table = bundle.lootTables[key];
     if (table === undefined) {
       issue(issues, 'error', path, `怪物 "${key}" 缺少掉落表`);

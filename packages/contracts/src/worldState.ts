@@ -51,6 +51,10 @@ export const MonsterState = schema(
     maxHp: t.number().default(1),
     /** Encoded by `MONSTER_STATE_CODES` in `contracts/combat`. */
     state: t.uint8().default(0),
+    /** Boss monsters get map-wide announcements and the boss HUD (ADR-037). */
+    boss: t.boolean().default(false),
+    /** True once the boss crossed its content enrage threshold this life. */
+    enraged: t.boolean().default(false),
   },
   'MonsterState',
 );

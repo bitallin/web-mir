@@ -96,10 +96,10 @@ describe('Tiled map compilation', () => {
     expect(new Set(wilds?.monsterSpawns.map((spawn) => spawn.monsterId))).toEqual(
       new Set(['wild_slime', 'forest_wolf', 'venom_spider', 'stone_guard', 'alpha_wolf']),
     );
-    expect(ruins?.monsterSpawns).toHaveLength(29);
-    expect(new Set(ruins?.monsterSpawns.map((spawn) => spawn.id)).size).toBe(29);
+    expect(ruins?.monsterSpawns).toHaveLength(30);
+    expect(new Set(ruins?.monsterSpawns.map((spawn) => spawn.id)).size).toBe(30);
     expect(new Set(ruins?.monsterSpawns.map((spawn) => spawn.monsterId))).toEqual(
-      new Set(['skeleton_warrior', 'corrupt_warlock', 'ruin_gargoyle']),
+      new Set(['skeleton_warrior', 'corrupt_warlock', 'ruin_gargoyle', 'ashen_colossus']),
     );
     expect(town?.portals.find((portal) => portal.targetMapId === 'ruined_fields')).toBeDefined();
     expect(ruins?.portals[0]?.targetMapId).toBe('starter_town');
