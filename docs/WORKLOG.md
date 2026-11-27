@@ -3959,3 +3959,20 @@ pnpm verify:invariants
 - `c9613fd` `feat(alpha-03): add collect quest objectives with bag-derived progress`
   （36 个文件：契约、内容、领域、应用、服务端、客户端、测试、ADR、报告、状态与
   日志）。
+
+### 补记：开发栈重启、内容发布与容量
+
+- **开发栈重启**：用户确认后重试成功，84–87 于 10:12 重启到本切片代码；四个
+  服务健康 200，Game Server 启动清理把 159 条过期地面掉落归零。
+- **内容发布**：draft 200、validate 200（valid=true，0 issue，新增 2）、
+  publish 201、activate 200；版本 `2026.11.27.5`（checksum `365b46e2…`），
+  Game Server 日志在 10:13:07 确认内容刷新。
+- **8584 实测**：真实 Chromium 新角色面板显示「巡路补给」可接取、
+  「收集 金创药 0/1」、奖励 20 经验/15 金；「每日：收集蛛腿」未解锁、
+  「收集 蛛腿 0/3」；分组为可接取 3 / 尚未解锁 11。截图
+  `docs/phase-reports/alpha-03/collect-quests/dev-panel-8584.png`。
+- **容量 sanity**：50 人 × 2 分钟 50/50、接受率 99.0%、165 击杀、0 资产
+  失败；tick p50 2.81ms / p95 **5.25ms** / p99 6.52ms / max 9ms，资产事务
+  p95 57.99ms；证据 `collect-quests/load-50p2a.json`，脚本 `EXIT:0`。
+- **资产不变量**：重启后与压测后均 7/7 为 0。
+- 新增证据文件：`collect-quests/dev-panel-8584.png`、`collect-quests/load-50p2a.json`。
