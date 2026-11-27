@@ -115,9 +115,11 @@ import {
 } from '@web-legend/game-application';
 import {
   CombatWorld,
+  dailyPeriodKey,
   defaultChatFilter,
   itemBuyPrice,
   itemSellPrice,
+  nextDailyResetAt,
   questViewFor,
   questViewsFor,
   type ChatFilter,
@@ -216,6 +218,8 @@ const AUTO_ATTACK_REPATH_INTERVAL_MS = 350;
 const REWARD_RETRY_ATTEMPTS = 3;
 /** Expired party invites are dropped once a second; the TTL is 30 seconds. */
 const PARTY_INVITE_SWEEP_INTERVAL_MS = 1_000;
+/** Daily quest rollover is announced within half a minute of the realm reset. */
+const QUEST_PERIOD_SWEEP_INTERVAL_MS = 30_000;
 
 /**
  * Leases outlive a single tick and are refreshed in the background. A crashed
@@ -347,6 +351,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private readonly pendingViewRefresh = new Set<string>();
   private readonly pendingAssets = new Map<string, LoadedAssets>();
   private readonly pendingQuests = new Map<string, QuestRecordState[]>();
+  /** Last daily period this room has announced; null until the first sweep. */
+  private questPeriodKey: string | null = null;
   /** Quest giver display names from this room's compiled map. */
   private readonly npcNames = new Map<string, string>();
 
@@ -436,6 +442,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     for (const npc of this.map.runtime.manifest.npcPoints) {
       this.npcNames.set(npc.id, npc.name);
     }
+
+    const resetRule = this.content.bundle.rules?.dailyReset;
+    this.questPeriodKey = resetRule === undefined ? null : dailyPeriodKey(new Date(), resetRule);
 
     this.metrics = options.metrics.register(this.roomId, {
       mapId: this.map.mapId,
@@ -551,6 +560,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       this.parties.expireInvites();
       this.refreshPartyPresence();
     }, PARTY_INVITE_SWEEP_INTERVAL_MS);
+    this.clock.setInterval(() => {
+      this.refreshQuestPeriod();
+    }, QUEST_PERIOD_SWEEP_INTERVAL_MS);
 
     options.adminHub?.register({
       roomId: this.roomId,
@@ -2985,12 +2997,46 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   }
 
   private questContext(): QuestViewContext {
+    const rule = this.content.bundle.rules?.dailyReset;
+    const now = new Date();
     return {
       quests: this.content.bundle.quests ?? {},
       items: this.content.bundle.items,
       monsters: this.content.bundle.monsters,
       npcNames: this.npcNames,
+      currentPeriodKey: rule === undefined ? '' : dailyPeriodKey(now, rule),
+      ...(rule === undefined ? {} : { nextResetAt: nextDailyResetAt(now, rule) }),
     };
+  }
+
+  /**
+   * Re-sends quest snapshots after the realm day rolls over so an online
+   * player sees the daily quests become available again without rejoining
+   * (ADR-038). The per-quest views ignore records from older periods, so this
+   * needs no database read.
+   */
+  private refreshQuestPeriod(): void {
+    const rule = this.content.bundle.rules?.dailyReset;
+    if (rule === undefined) {
+      return;
+    }
+    const periodKey = dailyPeriodKey(new Date(), rule);
+    const previous = this.questPeriodKey;
+    this.questPeriodKey = periodKey;
+    if (previous === null || previous === periodKey) {
+      return;
+    }
+    for (const session of this.registry.all()) {
+      this.sendQuestSnapshot(session.client, session);
+    }
+    if (this.hasDailyQuests()) {
+      this.broadcastSystemNotice('info', '每日任务已重置，可以重新接取。');
+    }
+  }
+
+  private hasDailyQuests(): boolean {
+    const quests = this.content.bundle.quests;
+    return quests !== undefined && Object.values(quests).some((quest) => quest.repeat === 'daily');
   }
 
   private sendQuestSnapshot(client: Client, session: SessionRecord): void {
@@ -2999,7 +3045,13 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       context.quests,
       [...session.questRecords.values()],
       session.assetSnapshot.level,
-      { items: context.items, monsters: context.monsters, npcNames: context.npcNames },
+      {
+        items: context.items,
+        monsters: context.monsters,
+        npcNames: context.npcNames,
+        currentPeriodKey: context.currentPeriodKey,
+        ...(context.nextResetAt === undefined ? {} : { nextResetAt: context.nextResetAt }),
+      },
     );
     const snapshot: QuestSnapshot = { quests: views, serverTime: Date.now() };
     // Content grows over releases; a release with too many quests must degrade

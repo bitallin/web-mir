@@ -120,6 +120,7 @@ export {
   listAdminAudit,
   listAdminPlayers,
   listCharacterQuests,
+  listCharacterQuestsForPeriod,
   listCharactersByAccount,
   listContentActivations,
   listContentDrafts,

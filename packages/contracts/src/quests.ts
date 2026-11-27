@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { contentIdSchema } from './content';
+import { contentIdSchema, questRepeatSchema } from './content';
 
 /**
  * Quest wire contract. The server owns progression and rewards: the browser
@@ -58,6 +58,10 @@ export const questViewSchema = z
     levelRequirement: z.number().int().min(1).max(100),
     prerequisiteQuestId: contentIdSchema.optional(),
     prerequisiteTitle: z.string().min(1).max(24).optional(),
+    /** Present only for repeatable quests (ADR-038). */
+    repeat: questRepeatSchema.optional(),
+    /** Epoch millis of the next realm reset; present exactly when `repeat` is set. */
+    nextResetAt: z.number().int().nonnegative().optional(),
     status: questStatusSchema,
     /** Kill count already recorded; always 0 for locked/available quests. */
     progress: z.number().int().min(0).max(999),

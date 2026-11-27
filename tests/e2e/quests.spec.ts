@@ -7,6 +7,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 const ARTIFACT_DIR = join(process.cwd(), 'docs', 'phase-reports', 'alpha-02', 'quests');
 const PASSWORD = 'alpha-two-quest-password';
 const QUEST_ID = 'quest_slime_cleanup';
+const DAILY_QUEST_ID = 'quest_daily_slime_cleanup';
 /**
  * Exclusive slime spawn, close to the wilds entrance so a level-1 character
  * never crosses wolf/spider territory. Every other spec owns one or two
@@ -77,8 +78,16 @@ function trackerRow(page: Page) {
   return page.locator(`[data-testid="quest-tracker-row"][data-quest-id="${QUEST_ID}"]`);
 }
 
+function dailyTrackerRow(page: Page) {
+  return page.locator(`[data-testid="quest-tracker-row"][data-quest-id="${DAILY_QUEST_ID}"]`);
+}
+
 function questRow(page: Page) {
   return page.locator(`[data-testid="quest-row"][data-quest-id="${QUEST_ID}"]`);
+}
+
+function dailyQuestRow(page: Page) {
+  return page.locator(`[data-testid="quest-row"][data-quest-id="${DAILY_QUEST_ID}"]`);
 }
 
 function questSlimeRow(page: Page) {
@@ -116,7 +125,7 @@ test.afterEach(async () => {
   }
 });
 
-test('the guard quest chain tracks kills and pays out on turn-in', async ({ browser }) => {
+test('the guard quest chain and daily track kills and pay out on turn-in', async ({ browser }) => {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   const page = await registerWorld(browser);
 
@@ -134,12 +143,24 @@ test('the guard quest chain tracks kills and pays out on turn-in', async ({ brow
   await expect(page.getByTestId('quest-panel')).toBeVisible({ timeout: 10_000 });
   await expect(questRow(page)).toHaveAttribute('data-status', 'available');
   await expect(questRow(page)).toHaveAttribute('data-near', 'true');
+
+  // The daily repeatable sits next to the one-time chain and shows its realm
+  // reset instant (ADR-038).
+  await expect(dailyQuestRow(page)).toHaveAttribute('data-repeat', 'daily');
+  await expect(dailyQuestRow(page).getByTestId('quest-repeat')).toBeVisible();
+  await expect(dailyQuestRow(page).getByTestId('quest-reset')).toContainText('每日');
   await page.screenshot({ path: join(ARTIFACT_DIR, 'quest-offer.png') });
 
+  await dailyQuestRow(page).getByTestId('quest-accept').click();
+  await expect(dailyQuestRow(page)).toHaveAttribute('data-status', 'active', {
+    timeout: 10_000,
+  });
   await questRow(page).getByTestId('quest-accept').click();
   await expect(questRow(page)).toHaveAttribute('data-status', 'active', { timeout: 10_000 });
   await expect(trackerRow(page)).toHaveAttribute('data-progress', '0');
   await expect(trackerRow(page)).toContainText('野地史莱姆 0/3');
+  await expect(dailyTrackerRow(page)).toHaveAttribute('data-progress', '0');
+  await expect(dailyTrackerRow(page)).toContainText('野地史莱姆 0/5');
   await page.getByTestId('quest-close').click();
   await expect(page.getByTestId('quest-panel')).toHaveCount(0);
 
@@ -161,6 +182,15 @@ test('the guard quest chain tracks kills and pays out on turn-in', async ({ brow
   }
   await expect(trackerRow(page)).toHaveAttribute('data-status', 'completed');
   await expect(trackerRow(page)).toContainText('可交付');
+
+  // Two more kills complete the daily objective as well.
+  for (let kill = 4; kill <= 5; kill += 1) {
+    await killSlime(page);
+    await expect(dailyTrackerRow(page)).toHaveAttribute('data-progress', String(kill), {
+      timeout: 20_000,
+    });
+  }
+  await expect(dailyTrackerRow(page)).toHaveAttribute('data-status', 'completed');
   await page.screenshot({ path: join(ARTIFACT_DIR, 'quest-complete.png') });
 
   // Return to the guard and turn it in.
@@ -189,8 +219,24 @@ test('the guard quest chain tracks kills and pays out on turn-in', async ({ brow
   expect(after?.items.find((item) => item.templateId === 'small_hp_potion')?.quantity).toBe(
     potionsBefore + 1,
   );
-  await expect(page.getByTestId('quest-tracker')).toHaveCount(0);
   await expect(trackerRow(page)).toHaveCount(0);
+  await expect(dailyTrackerRow(page)).toHaveAttribute('data-status', 'completed');
+
+  // Turn the daily in before leaving the guard: the panel must remember it is
+  // already paid for today.
+  await expect(dailyQuestRow(page)).toHaveAttribute('data-status', 'completed', {
+    timeout: 10_000,
+  });
+  await dailyQuestRow(page).getByTestId('quest-claim').click();
+  await expect(dailyQuestRow(page)).toHaveAttribute('data-status', 'claimed', {
+    timeout: 10_000,
+  });
+  await expect(dailyQuestRow(page)).toContainText('今日已完成');
+  await expect
+    .poll(async () => (await inventory(page))?.gold ?? null, { timeout: 10_000 })
+    .toBe((before?.gold ?? 0) + 35);
+  await expect(page.getByTestId('quest-tracker')).toHaveCount(0);
+
   // Claiming the first quest and reaching level 3 must unlock the second one
   // without a rejoin; the server re-sends the whole resolved chain.
   await expect(

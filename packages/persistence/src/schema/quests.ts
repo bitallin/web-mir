@@ -30,6 +30,13 @@ export const characterQuests = pgTable(
       .notNull()
       .references(() => characters.id, { onDelete: 'cascade' }),
     questId: text('quest_id').notNull(),
+    /**
+     * Daily period key (`YYYY-MM-DD`), empty for one-time quests. A daily
+     * quest gets a new row per period, so history survives the reset while the
+     * unique constraint still stops a double accept within one period
+     * (ADR-038).
+     */
+    periodKey: text('period_key').notNull().default(''),
     status: text('status', { enum: QUEST_STATUS_IDS }).notNull().default('active'),
     progress: integer('progress').notNull().default(0),
     acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
@@ -39,7 +46,11 @@ export const characterQuests = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('character_quests_character_quest_unique').on(table.characterId, table.questId),
+    uniqueIndex('character_quests_character_quest_period_unique').on(
+      table.characterId,
+      table.questId,
+      table.periodKey,
+    ),
     index('character_quests_character_status_idx').on(table.characterId, table.status),
     check('character_quests_progress_non_negative', sql`${table.progress} >= 0`),
     check(

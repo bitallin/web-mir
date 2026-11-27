@@ -1220,6 +1220,10 @@ const RAW_BASE_CONTENT = {
       assistSharePermille: 500,
       assistRangeTiles: 12,
     },
+    dailyReset: {
+      hour: 5,
+      utcOffsetMinutes: 480,
+    },
   },
   quests: {
     quest_slime_cleanup: {
@@ -1264,6 +1268,34 @@ const RAW_BASE_CONTENT = {
         exp: 400,
         gold: 100,
         items: [{ templateId: 'alpha_pelt', quantity: 1 }],
+      },
+    },
+    quest_daily_slime_cleanup: {
+      id: 'quest_daily_slime_cleanup',
+      title: '每日：清理史莱姆',
+      description: '守卫每天都要清理村外的史莱姆。击杀 5 只史莱姆，回来领取今日报酬。',
+      giverNpcId: 'town_guard',
+      levelRequirement: 1,
+      repeat: 'daily',
+      objective: { kind: 'kill', monsterId: 'wild_slime', count: 5 },
+      rewards: {
+        exp: 50,
+        gold: 15,
+        items: [{ templateId: 'small_hp_potion', quantity: 1 }],
+      },
+    },
+    quest_daily_wolf_hunt: {
+      id: 'quest_daily_wolf_hunt',
+      title: '每日：驱逐狼群',
+      description: '森林狼又在商路附近聚集。击杀 6 只森林狼，让今天的道路保持安全。',
+      giverNpcId: 'town_guard',
+      levelRequirement: 3,
+      repeat: 'daily',
+      objective: { kind: 'kill', monsterId: 'forest_wolf', count: 6 },
+      rewards: {
+        exp: 120,
+        gold: 30,
+        items: [{ templateId: 'small_mp_potion', quantity: 1 }],
       },
     },
   },

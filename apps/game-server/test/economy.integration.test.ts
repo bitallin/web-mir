@@ -683,6 +683,13 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     expect(firstQuest?.giverNpcId).toBe('town_guard');
     expect(firstQuest?.objective.monsterName).toBe('野地史莱姆');
 
+    const dailyQuest = snapshots[0]?.quests.find(
+      (quest) => quest.questId === 'quest_daily_slime_cleanup',
+    );
+    expect(dailyQuest?.status).toBe('available');
+    expect(dailyQuest?.repeat).toBe('daily');
+    expect(dailyQuest?.nextResetAt).toBeGreaterThan(Date.now());
+
     const commandId = randomUUID();
     room.send('quest.accept', {
       protocolVersion: PROTOCOL_VERSION,
@@ -744,6 +751,7 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     await insertCharacterQuest(db, {
       characterId: actor.character.id,
       questId: 'quest_slime_cleanup',
+      periodKey: '',
       now: new Date(),
     });
     const room = await createWorld(actor.ticket);

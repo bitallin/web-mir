@@ -8,12 +8,14 @@ import {
   type InventorySnapshot,
   type ItemView,
   type LootClaimed,
+  type QuestContent,
 } from '@web-legend/contracts';
 import {
   DEFAULT_CONTENT_BUNDLE,
   advanceQuestOnKill,
   applyDeathPenalty,
   applyExperience,
+  dailyPeriodKey,
   canEquip,
   combatStatsFor,
   equipmentBonuses,
@@ -44,7 +46,7 @@ import {
   findWallet,
   insertCharacterQuest,
   itemInstances,
-  listCharacterQuests,
+  listCharacterQuestsForPeriod,
   listEquippedItems,
   listInventoryItems,
   listOpenWorldDrops,
@@ -262,10 +264,16 @@ function clamp(value: number, min: number, max: number): number {
 
 function questRecordOf(row: {
   questId: string;
+  periodKey: string;
   status: 'active' | 'completed' | 'claimed';
   progress: number;
 }): QuestRecordState {
-  return { questId: row.questId, status: row.status, progress: row.progress };
+  return {
+    questId: row.questId,
+    periodKey: row.periodKey,
+    status: row.status,
+    progress: row.progress,
+  };
 }
 
 /**
@@ -294,8 +302,23 @@ export class AssetService {
 
   /** Quest rows for the join handshake; separate from the asset snapshot. */
   async loadQuestRecords(characterId: string): Promise<QuestRecordState[]> {
-    const rows = await listCharacterQuests(this.db, characterId);
+    const periodKey = this.currentPeriodKey(this.now());
+    const rows = await listCharacterQuestsForPeriod(this.db, characterId, periodKey);
     return rows.map((row) => questRecordOf(row));
+  }
+
+  /** Empty for one-time quests, the realm day for dailies, null if misconfigured. */
+  private periodKeyForQuest(quest: QuestContent, now: Date): string | null {
+    if (quest.repeat !== 'daily') {
+      return '';
+    }
+    const rule = this.content.rules?.dailyReset;
+    return rule === undefined ? null : dailyPeriodKey(now, rule);
+  }
+
+  private currentPeriodKey(now: Date): string {
+    const rule = this.content.rules?.dailyReset;
+    return rule === undefined ? '' : dailyPeriodKey(now, rule);
   }
 
   /**
@@ -1278,6 +1301,17 @@ export class AssetService {
         throw new AssetError('INVALID_SESSION');
       }
 
+      const quest = this.content.quests?.[input.questId];
+      if (quest === undefined) {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+      // A daily quest without a reset rule can never be scheduled; treat it as
+      // unavailable instead of failing the transaction later (ADR-038).
+      const periodKey = this.periodKeyForQuest(quest, now);
+      if (periodKey === null) {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+
       const inserted = await this.claimCommand(
         tx,
         input.characterId,
@@ -1285,7 +1319,12 @@ export class AssetService {
         input.commandId,
       );
       if (!inserted) {
-        const existing = await findCharacterQuestForUpdate(tx, input.characterId, input.questId);
+        const existing = await findCharacterQuestForUpdate(
+          tx,
+          input.characterId,
+          input.questId,
+          periodKey,
+        );
         if (existing === undefined) {
           throw new AssetError('QUEST_UNAVAILABLE');
         }
@@ -1298,24 +1337,28 @@ export class AssetService {
         };
       }
 
-      const quest = this.content.quests?.[input.questId];
-      if (quest === undefined) {
-        throw new AssetError('QUEST_UNAVAILABLE');
-      }
       if (character.level < quest.levelRequirement) {
         throw new AssetError('QUEST_UNAVAILABLE');
       }
-      const existing = await findCharacterQuestForUpdate(tx, input.characterId, input.questId);
+      const existing = await findCharacterQuestForUpdate(
+        tx,
+        input.characterId,
+        input.questId,
+        periodKey,
+      );
       if (existing !== undefined) {
         throw new AssetError(
           existing.status === 'claimed' ? 'QUEST_ALREADY_CLAIMED' : 'QUEST_UNAVAILABLE',
         );
       }
       if (quest.prerequisiteQuestId !== undefined) {
+        // Content validation forbids daily quests as prerequisites, so chain
+        // steps only ever look at one-time rows (periodKey '').
         const prerequisite = await findCharacterQuestForUpdate(
           tx,
           input.characterId,
           quest.prerequisiteQuestId,
+          '',
         );
         if (prerequisite?.status !== 'claimed') {
           throw new AssetError('QUEST_UNAVAILABLE');
@@ -1325,6 +1368,7 @@ export class AssetService {
       const row = await insertCharacterQuest(tx, {
         characterId: input.characterId,
         questId: quest.id,
+        periodKey,
         now,
       });
       if (row === undefined) {
@@ -1357,6 +1401,15 @@ export class AssetService {
         throw new AssetError('INVALID_SESSION');
       }
 
+      const quest = this.content.quests?.[input.questId];
+      if (quest === undefined) {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+      const periodKey = this.periodKeyForQuest(quest, now);
+      if (periodKey === null) {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+
       const inserted = await this.claimCommand(
         tx,
         input.characterId,
@@ -1364,7 +1417,12 @@ export class AssetService {
         input.commandId,
       );
       if (!inserted) {
-        const existing = await findCharacterQuestForUpdate(tx, input.characterId, input.questId);
+        const existing = await findCharacterQuestForUpdate(
+          tx,
+          input.characterId,
+          input.questId,
+          periodKey,
+        );
         if (existing === undefined) {
           throw new AssetError('QUEST_NOT_ACTIVE');
         }
@@ -1380,11 +1438,12 @@ export class AssetService {
         };
       }
 
-      const quest = this.content.quests?.[input.questId];
-      if (quest === undefined) {
-        throw new AssetError('QUEST_UNAVAILABLE');
-      }
-      const record = await findCharacterQuestForUpdate(tx, input.characterId, input.questId);
+      const record = await findCharacterQuestForUpdate(
+        tx,
+        input.characterId,
+        input.questId,
+        periodKey,
+      );
       if (record === undefined) {
         throw new AssetError('QUEST_NOT_ACTIVE');
       }
@@ -1459,6 +1518,7 @@ export class AssetService {
       const claimed = await markCharacterQuestClaimed(tx, {
         characterId: input.characterId,
         questId: quest.id,
+        periodKey,
         now,
       });
       if (claimed === undefined) {
@@ -1488,20 +1548,22 @@ export class AssetService {
     if (quests === undefined) {
       return [];
     }
-    const records = await listCharacterQuests(executor, characterId);
+    const periodKey = this.currentPeriodKey(now);
+    const records = await listCharacterQuestsForPeriod(executor, characterId, periodKey);
     const updates: KillQuestUpdate[] = [];
     for (const row of records) {
       const quest = quests[row.questId];
       if (quest === undefined) {
         continue;
       }
-      const change = advanceQuestOnKill(quest, questRecordOf(row), monsterId);
+      const change = advanceQuestOnKill(quest, questRecordOf(row), monsterId, periodKey);
       if (change === null) {
         continue;
       }
       const updated = await advanceCharacterQuest(executor, {
         characterId,
         questId: quest.id,
+        periodKey: row.periodKey,
         progress: change.progress,
         completed: change.completed,
         now,

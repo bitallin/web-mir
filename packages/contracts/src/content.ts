@@ -299,10 +299,26 @@ export const partyRuleSchema = z
 
 export type PartyRule = z.infer<typeof partyRuleSchema>;
 
+/**
+ * Daily quests reset on a per-realm wall clock (ADR-038). `hour` and
+ * `utcOffsetMinutes` describe the realm-local reset time, so a player's day
+ * boundary is the same for every client on the realm regardless of where the
+ * browser runs.
+ */
+export const dailyResetRuleSchema = z
+  .object({
+    hour: z.number().int().min(0).max(23),
+    utcOffsetMinutes: z.number().int().min(-720).max(840),
+  })
+  .strict();
+
+export type DailyResetRule = z.infer<typeof dailyResetRuleSchema>;
+
 export const rulesContentSchema = z
   .object({
     deathPenalty: deathPenaltyRuleSchema.optional(),
     party: partyRuleSchema.optional(),
+    dailyReset: dailyResetRuleSchema.optional(),
   })
   .strict();
 
@@ -348,6 +364,15 @@ export const questRewardsSchema = z
 
 export type QuestRewards = z.infer<typeof questRewardsSchema>;
 
+/**
+ * Repeat kinds are a closed whitelist like objectives (ADR-038). A daily quest
+ * can be accepted again after each realm reset; every other quest is a
+ * one-time chain step.
+ */
+export const QUEST_REPEAT_KINDS = ['daily'] as const;
+export const questRepeatSchema = z.enum(QUEST_REPEAT_KINDS);
+export type QuestRepeat = z.infer<typeof questRepeatSchema>;
+
 export const questContentSchema = z
   .object({
     id: contentIdSchema,
@@ -357,6 +382,8 @@ export const questContentSchema = z
     giverNpcId: npcIdSchema,
     levelRequirement: z.number().int().min(1).max(100),
     prerequisiteQuestId: contentIdSchema.optional(),
+    /** Daily repeat; absent means a one-time quest. */
+    repeat: questRepeatSchema.optional(),
     objective: questObjectiveSchema,
     rewards: questRewardsSchema,
   })

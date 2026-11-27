@@ -130,6 +130,22 @@ export type GameScreenProps = {
   onExit: () => void;
 };
 
+/** Realm reset instant, shown in the player's own clock. */
+function dailyResetLabel(quest: QuestView): string | null {
+  if (quest.repeat !== 'daily') {
+    return null;
+  }
+  if (quest.nextResetAt === undefined) {
+    return '每日重置';
+  }
+  const time = new Date(quest.nextResetAt).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return `每日 ${time} 重置`;
+}
+
 export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatDraft, setChatDraft] = useState('');
@@ -592,8 +608,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                       data-quest-id={quest.questId}
                       data-status={quest.status}
                       data-progress={quest.progress}
+                      data-repeat={quest.repeat ?? 'once'}
                     >
-                      <span className="quest-tracker-title">{quest.title}</span>
+                      <span className="quest-tracker-title">
+                        {quest.repeat === 'daily' ? (
+                          <span className="quest-repeat-tag">日常</span>
+                        ) : null}
+                        {quest.title}
+                      </span>
                       <span className="quest-tracker-meta">
                         {quest.status === 'completed'
                           ? `可交付 · 回到${quest.giverNpcName}`
@@ -1381,15 +1403,28 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   data-status={quest.status}
                   data-progress={quest.progress}
                   data-near={nearby ? 'true' : 'false'}
+                  data-repeat={quest.repeat ?? 'once'}
                 >
                   <div className="quest-row-heading">
-                    <strong>{quest.title}</strong>
+                    <strong>
+                      {quest.repeat === 'daily' ? (
+                        <span className="quest-repeat-tag" data-testid="quest-repeat">
+                          日常
+                        </span>
+                      ) : null}
+                      {quest.title}
+                    </strong>
                     <span>Lv.{quest.levelRequirement}</span>
                   </div>
                   <p className="quest-description">{quest.description}</p>
                   <p className="quest-objective" data-testid="quest-objective">
                     {quest.objective.monsterName} {quest.progress}/{quest.objective.count}
                   </p>
+                  {dailyResetLabel(quest) === null ? null : (
+                    <p className="quest-repeat-note" data-testid="quest-reset">
+                      {dailyResetLabel(quest)}
+                    </p>
+                  )}
                   <p className="quest-rewards">
                     经验 {quest.rewards.exp} · 金币 {quest.rewards.gold}
                     {quest.rewards.items.map((item) => (
@@ -1438,7 +1473,9 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                       <span className="quest-progress-state">进行中</span>
                     ) : null}
                     {quest.status === 'claimed' ? (
-                      <span className="quest-progress-state done">已完成</span>
+                      <span className="quest-progress-state done">
+                        {quest.repeat === 'daily' ? '今日已完成' : '已完成'}
+                      </span>
                     ) : null}
                     {(canAccept || canClaim) && !nearby ? (
                       <span className="quest-distance-hint">走近{quest.giverNpcName}</span>

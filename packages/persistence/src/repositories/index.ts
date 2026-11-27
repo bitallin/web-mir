@@ -89,6 +89,7 @@ export {
   findCharacterQuestForUpdate,
   insertCharacterQuest,
   listCharacterQuests,
+  listCharacterQuestsForPeriod,
   markCharacterQuestClaimed,
 } from './quests';
 

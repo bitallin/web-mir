@@ -387,6 +387,14 @@ function validateQuests(bundle: ContentBundle, issues: ContentIssue[]): void {
     if (!npcIds.has(quest.giverNpcId)) {
       issue(issues, 'error', `${path}.giverNpcId`, `发布 NPC "${quest.giverNpcId}" 不在任何地图中`);
     }
+    if (quest.repeat === 'daily') {
+      if (bundle.rules?.dailyReset === undefined) {
+        issue(issues, 'error', `${path}.repeat`, '每日任务需要 rules.dailyReset 描述重置时间');
+      }
+      if (quest.prerequisiteQuestId !== undefined) {
+        issue(issues, 'error', `${path}.prerequisiteQuestId`, '每日任务不能设置前置任务');
+      }
+    }
     if (quest.prerequisiteQuestId !== undefined) {
       if (quest.prerequisiteQuestId === quest.id) {
         issue(issues, 'error', `${path}.prerequisiteQuestId`, '任务不能以自己为前置');
@@ -456,6 +464,17 @@ function validateQuests(bundle: ContentBundle, issues: ContentIssue[]): void {
 
     if (quest.rewards.exp === 0 && quest.rewards.gold === 0 && quest.rewards.items.length === 0) {
       issue(issues, 'warning', `${path}.rewards`, '任务没有任何奖励');
+    }
+  }
+
+  // A daily quest is claimed again every day, so it cannot be the "claimed"
+  // prerequisite of a one-time chain step (ADR-038).
+  for (const [key, quest] of Object.entries(quests)) {
+    if (quest.prerequisiteQuestId === undefined) {
+      continue;
+    }
+    if (quests[quest.prerequisiteQuestId]?.repeat === 'daily') {
+      issue(issues, 'error', `quests.${key}.prerequisiteQuestId`, '一次性任务不能以每日任务为前置');
     }
   }
 

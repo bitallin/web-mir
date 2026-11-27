@@ -2493,6 +2493,33 @@ body {
   color: var(--ok);
 }
 
+.quest-repeat-tag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 4px;
+  border: 1px solid rgba(215, 170, 88, 0.5);
+  border-radius: 2px;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 15px;
+  vertical-align: 1px;
+}
+
+.quest-row-heading .quest-repeat-tag,
+.quest-tracker-title .quest-repeat-tag {
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.quest-repeat-note {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
 .quest-distance-hint {
   color: var(--warn);
   font-size: 11px;

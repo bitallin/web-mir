@@ -272,9 +272,19 @@ describe('content validation', () => {
     });
   });
 
+  it('ships the realm daily reset time with the base rules', () => {
+    expect(BASE_CONTENT_BUNDLE.rules?.dailyReset).toEqual({ hour: 5, utcOffsetMinutes: 480 });
+  });
+
   it('keeps releases without a rules section death-free (EL-004)', () => {
     const legacy = clone(BASE_CONTENT_BUNDLE);
     delete legacy.rules;
+    // Daily quests arrived after the rules section; a release without rules
+    // also predates them (ADR-038).
+    if (legacy.quests !== undefined) {
+      delete legacy.quests.quest_daily_slime_cleanup;
+      delete legacy.quests.quest_daily_wolf_hunt;
+    }
     const result = validateContentBundle(legacy);
     expect(result.valid).toBe(true);
     expect(result.bundle?.rules).toBeUndefined();
@@ -287,7 +297,10 @@ describe('content validation', () => {
   it('rejects out-of-range death penalty values', () => {
     const result = validateContentBundle(
       withMutation((bundle) => {
-        bundle.rules = { deathPenalty: { xpLossPermille: 1_001, protectBelowLevel: 0 } };
+        bundle.rules = {
+          ...bundle.rules,
+          deathPenalty: { xpLossPermille: 1_001, protectBelowLevel: 0 },
+        };
       }),
     );
     expect(result.valid).toBe(false);
@@ -297,7 +310,10 @@ describe('content validation', () => {
   it('warns when a death penalty would be harsh or disabled', () => {
     const harsh = validateContentBundle(
       withMutation((bundle) => {
-        bundle.rules = { deathPenalty: { xpLossPermille: 400, protectBelowLevel: 1 } };
+        bundle.rules = {
+          ...bundle.rules,
+          deathPenalty: { xpLossPermille: 400, protectBelowLevel: 1 },
+        };
       }),
     );
     expect(harsh.valid).toBe(true);
@@ -310,7 +326,10 @@ describe('content validation', () => {
 
     const disabled = validateContentBundle(
       withMutation((bundle) => {
-        bundle.rules = { deathPenalty: { xpLossPermille: 0, protectBelowLevel: 10 } };
+        bundle.rules = {
+          ...bundle.rules,
+          deathPenalty: { xpLossPermille: 0, protectBelowLevel: 10 },
+        };
       }),
     );
     expect(disabled.valid).toBe(true);
@@ -476,6 +495,62 @@ describe('quest validation', () => {
     });
     const result = validateContentBundle(withoutQuests);
     expect(result.valid).toBe(true);
+  });
+
+  it('rejects a daily quest without a reset rule', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        if (bundle.rules !== undefined) {
+          delete bundle.rules.dailyReset;
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.path === 'quests.quest_daily_slime_cleanup.repeat' &&
+          issue.message.includes('dailyReset'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a daily quest with a prerequisite', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_daily_slime_cleanup'];
+        if (quest !== undefined) {
+          quest.prerequisiteQuestId = 'quest_slime_cleanup';
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.path === 'quests.quest_daily_slime_cleanup.prerequisiteQuestId' &&
+          issue.message.includes('每日任务'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects a chain step gated by a daily quest', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_slime_cleanup'];
+        if (quest !== undefined) {
+          quest.prerequisiteQuestId = 'quest_daily_slime_cleanup';
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.path === 'quests.quest_slime_cleanup.prerequisiteQuestId' &&
+          issue.message.includes('每日任务'),
+      ),
+    ).toBe(true);
   });
 });
 

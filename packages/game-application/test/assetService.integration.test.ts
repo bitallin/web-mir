@@ -1090,6 +1090,7 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     expect(accepted.deduplicated).toBe(false);
     expect(accepted.record).toEqual({
       questId: 'quest_slime_cleanup',
+      periodKey: '',
       status: 'active',
       progress: 0,
     });
@@ -1156,7 +1157,9 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     });
 
     const records = await service.loadQuestRecords(character.id);
-    expect(records).toEqual([{ questId: 'quest_slime_cleanup', status: 'completed', progress: 3 }]);
+    expect(records).toEqual([
+      { questId: 'quest_slime_cleanup', periodKey: '', status: 'completed', progress: 3 },
+    ]);
   });
 
   it('claims a completed quest with rewards committed exactly once', async () => {
@@ -1260,6 +1263,93 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
       questId: 'quest_slime_cleanup',
     });
     expect(claimed.record.status).toBe('claimed');
+  });
+
+  it('resets a daily quest at the realm hour and keeps periods isolated', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    let dailyClock = new Date('2026-11-27T12:00:00.000Z'); // 20:00 at +08:00
+    const daily = new AssetService(db, { now: () => dailyClock, rng: () => 0 });
+
+    const accepted = await daily.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_daily_slime_cleanup',
+    });
+    expect(accepted.record).toMatchObject({
+      questId: 'quest_daily_slime_cleanup',
+      periodKey: '2026-11-27',
+      status: 'active',
+      progress: 0,
+    });
+
+    await expect(
+      daily.acceptQuest({
+        characterId: character.id,
+        commandId: randomUUID(),
+        questId: 'quest_daily_slime_cleanup',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_UNAVAILABLE' });
+
+    for (let index = 0; index < 5; index += 1) {
+      await daily.grantKillReward({
+        characterId: character.id,
+        mapId: 'starter_wilds',
+        reference: `daily-kill-${randomUUID()}`,
+        monsterTemplateId: 'wild_slime',
+        x: 7_500,
+        y: 15_500,
+      });
+    }
+    expect(await daily.loadQuestRecords(character.id)).toEqual([
+      {
+        questId: 'quest_daily_slime_cleanup',
+        periodKey: '2026-11-27',
+        status: 'completed',
+        progress: 5,
+      },
+    ]);
+
+    const claimed = await daily.claimQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_daily_slime_cleanup',
+    });
+    expect(claimed.goldGained).toBe(15);
+    await expect(
+      daily.claimQuest({
+        characterId: character.id,
+        commandId: randomUUID(),
+        questId: 'quest_daily_slime_cleanup',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_ALREADY_CLAIMED' });
+
+    // 21:00Z is the 05:00 +08:00 reset: yesterday's row disappears from play.
+    dailyClock = new Date('2026-11-27T21:00:00.000Z');
+    expect(await daily.loadQuestRecords(character.id)).toEqual([]);
+
+    const again = await daily.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_daily_slime_cleanup',
+    });
+    expect(again.record).toMatchObject({ periodKey: '2026-11-28', progress: 0 });
+
+    await daily.grantKillReward({
+      characterId: character.id,
+      mapId: 'starter_wilds',
+      reference: `daily-kill-${randomUUID()}`,
+      monsterTemplateId: 'wild_slime',
+      x: 7_500,
+      y: 15_500,
+    });
+    expect(await daily.loadQuestRecords(character.id)).toEqual([
+      {
+        questId: 'quest_daily_slime_cleanup',
+        periodKey: '2026-11-28',
+        status: 'active',
+        progress: 1,
+      },
+    ]);
   });
 
   it('rolls the claim back when the reward cannot fit in the bag', async () => {

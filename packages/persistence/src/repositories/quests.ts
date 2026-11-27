@@ -1,8 +1,9 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, or, sql } from 'drizzle-orm';
 
 import type { DbExecutor } from '../client';
 import { characterQuests, type CharacterQuest } from '../schema/index';
 
+/** Full history, including daily rows from earlier periods. */
 export async function listCharacterQuests(
   executor: DbExecutor,
   characterId: string,
@@ -14,28 +15,57 @@ export async function listCharacterQuests(
     .orderBy(asc(characterQuests.acceptedAt));
 }
 
+/**
+ * One-time quests plus the daily rows of the current period (ADR-038). Older
+ * daily periods stay in the table as history but never surface to the player.
+ */
+export async function listCharacterQuestsForPeriod(
+  executor: DbExecutor,
+  characterId: string,
+  periodKey: string,
+): Promise<CharacterQuest[]> {
+  return executor
+    .select()
+    .from(characterQuests)
+    .where(
+      and(
+        eq(characterQuests.characterId, characterId),
+        or(eq(characterQuests.periodKey, ''), eq(characterQuests.periodKey, periodKey)),
+      ),
+    )
+    .orderBy(asc(characterQuests.acceptedAt));
+}
+
 export async function findCharacterQuestForUpdate(
   executor: DbExecutor,
   characterId: string,
   questId: string,
+  periodKey: string,
 ): Promise<CharacterQuest | undefined> {
   const [row] = await executor
     .select()
     .from(characterQuests)
-    .where(and(eq(characterQuests.characterId, characterId), eq(characterQuests.questId, questId)))
+    .where(
+      and(
+        eq(characterQuests.characterId, characterId),
+        eq(characterQuests.questId, questId),
+        eq(characterQuests.periodKey, periodKey),
+      ),
+    )
     .for('update');
   return row;
 }
 
 export async function insertCharacterQuest(
   executor: DbExecutor,
-  input: { characterId: string; questId: string; now: Date },
+  input: { characterId: string; questId: string; periodKey: string; now: Date },
 ): Promise<CharacterQuest | undefined> {
   const [row] = await executor
     .insert(characterQuests)
     .values({
       characterId: input.characterId,
       questId: input.questId,
+      periodKey: input.periodKey,
       status: 'active',
       progress: 0,
       acceptedAt: input.now,
@@ -54,6 +84,7 @@ export async function advanceCharacterQuest(
   input: {
     characterId: string;
     questId: string;
+    periodKey: string;
     progress: number;
     completed: boolean;
     now: Date;
@@ -72,6 +103,7 @@ export async function advanceCharacterQuest(
       and(
         eq(characterQuests.characterId, input.characterId),
         eq(characterQuests.questId, input.questId),
+        eq(characterQuests.periodKey, input.periodKey),
         eq(characterQuests.status, 'active'),
       ),
     )
@@ -81,7 +113,7 @@ export async function advanceCharacterQuest(
 
 export async function markCharacterQuestClaimed(
   executor: DbExecutor,
-  input: { characterId: string; questId: string; now: Date },
+  input: { characterId: string; questId: string; periodKey: string; now: Date },
 ): Promise<CharacterQuest | undefined> {
   const [row] = await executor
     .update(characterQuests)
@@ -95,6 +127,7 @@ export async function markCharacterQuestClaimed(
       and(
         eq(characterQuests.characterId, input.characterId),
         eq(characterQuests.questId, input.questId),
+        eq(characterQuests.periodKey, input.periodKey),
         eq(characterQuests.status, 'completed'),
       ),
     )
