@@ -95,9 +95,20 @@ export class MonsterVisual {
   }
 
   labelRect(): LabelRect {
-    const width = this.nameText.width;
-    const height = this.nameText.height;
-    return { x: this.current.x - width / 2, y: this.current.y - 62 - height, width, height };
+    // The plate lives inside the scaled container, so its screen footprint is
+    // the scaled text size and offset from the ground anchor.
+    const width = this.nameText.width * this.baseScale;
+    const height = this.nameText.height * this.baseScale;
+    return {
+      x: this.current.x - width / 2,
+      y: this.current.y - 62 * this.baseScale - height,
+      width,
+      height,
+    };
+  }
+
+  isBoss(): boolean {
+    return this.boss;
   }
 
   labelText(): string {

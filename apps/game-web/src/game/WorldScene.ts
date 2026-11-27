@@ -49,7 +49,14 @@ const CAMERA_LIFT_PX = 200;
 const PLAYER_COLORS = [0x9fc4e0, 0xe0b087, 0xa8d6a1, 0xcf9fe0, 0xe0d18f, 0x8fd0d0];
 const MIN_ONE_SHOT_MS = 180;
 const LABEL_REFRESH_MS = 100;
-const LABEL_PRIORITY = { self: 1000, target: 900, npc: 700, player: 500, monster: 400 } as const;
+const LABEL_PRIORITY = {
+  self: 1000,
+  target: 900,
+  boss: 800,
+  npc: 700,
+  player: 500,
+  monster: 400,
+} as const;
 
 type UnitPoint = { x: number; y: number };
 
@@ -858,7 +865,11 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         continue;
       }
       const priority =
-        monsterId === this.selectedTargetId ? LABEL_PRIORITY.target : LABEL_PRIORITY.monster;
+        monsterId === this.selectedTargetId
+          ? LABEL_PRIORITY.target
+          : visual.isBoss()
+            ? LABEL_PRIORITY.boss
+            : LABEL_PRIORITY.monster;
       candidates.push({
         id: `monster:${monsterId}`,
         priority,
