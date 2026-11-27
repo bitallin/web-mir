@@ -3148,7 +3148,9 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=600000 LOAD_OUTPUT=... pnpm l
 
 ### 提交
 
-- 待填写（`feat(alpha-03): add parties and shared kill experience`）。
+- `6c1c1c0` `feat(alpha-03): add parties and shared kill experience`
+  （39 个文件：契约/内容/应用/服务端/客户端、18 条测试、组队 E2E、
+  ADR/报告/证据与状态文档）。
 
 ### 下一步计划
 
