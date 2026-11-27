@@ -4278,3 +4278,89 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
 - `cc7d0f2` `feat(alpha-03): add eight-way movement and keyboard controls`
   （契约、寻路/模拟/战斗、服务端 `move.stop`、客户端键盘与预测、单元/集成/
   E2E、ADR-043、切片报告、状态、日志、债务与经验、容量与 8584 证据）。
+
+## 2026-11-27 Alpha 0.3 S4-A：队伍社交（聊天、移交、踢人）
+
+### 目标
+
+补齐 TD-CLI-17 的主要缺口：队伍面板只有名单与「离队」，队伍无法协调。本切片
+交付队伍频道聊天、队长移交与踢人，权限由服务端判定，队伍聊天跨图但仍只发给
+成员。
+
+### 实际改动
+
+1. **契约**
+   - `party.transfer` / `party.kick` 命令与 `PartyKickCommand`、
+     `PartyTransferLeaderCommand` 类型。
+   - `CHAT_CHANNELS = ['map', 'party']`；`chat.send.channel` 可选、默认 `map`；
+     `chat.message.channel` 改为同一枚举。
+   - 拒绝码 `PARTY_NOT_LEADER`、`PARTY_TARGET_NOT_MEMBER`、`PARTY_TARGET_SELF`。
+2. **服务端**
+   - `PartyRegistry.transferLeader` / `kick`：仅队长、目标同队、不能对自己；
+     踢人移除成员并丢弃其邀请，队长不能被踢。
+   - `PartyService`：移交/踢人后按 presence 刷新（被踢者的 Room 也会收到
+     空名单）；`deliverChat` 逐个成员按所在 Room 端口投递；端口新增 `sendChat`。
+   - `WorldMapRoom`：注册新命令；共用 `runPartyCommand` 门禁与
+     `validatePartyManagement`；聊天频道为 `party` 时要求成员身份并走服务投递，
+     仍复用过滤、限频、禁言与去重。
+3. **客户端**
+   - `WorldClient`/`useWorldSession`/调试钩子支持频道与移交/踢人。
+   - 聊天面板「附近 / 队伍」切换、队伍消息标签、非成员禁用队伍频道；离开或
+     被踢后自动回到附近频道。
+   - 队长在成员行看到「移交」「踢出」；非队长不渲染。
+4. **测试**
+   - 契约：移交/踢人命令校验、聊天频道默认与非法频道。
+   - 注册表：权限、目标校验、移交后权限转移、踢人清理邀请、非成员拒绝。
+   - 服务：移交/踢人刷新、被踢者 Room 刷新、聊天按 Room 投递、过图间隙丢消息。
+   - Room 集成：队伍消息隐私（同图陌生人只收到地图消息）、跨图队伍聊天、
+     权限拒绝、踢人后名单清空与队伍频道拒绝。
+   - E2E：双人组队 → 队伍聊天标签 → 移交 → 踢人 → 频道回退。
+
+### 命令与结果
+
+```bash
+pnpm exec prettier --write <changed files>
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm exec playwright test tests/e2e/party.spec.ts
+pnpm exec playwright test
+```
+
+- 格式 / lint / 类型 / 构建：通过。
+- 单元/集成：83 文件、**613 测试**通过（新增 13 条）。
+- 队伍 E2E：2/2 通过（新用例 8.8 秒）。
+- 全量 E2E：**50/50 通过**（5.8 分钟）。
+- 开发栈：84–87 于 17:11 重启到本切片代码，4 个服务健康 200，内容
+  `2026.11.27.7` 刷新无错误。
+
+### 遇到的问题及解决方法
+
+1. **客户端类型收窄**：队伍面板的 JSX 条件里直接访问 `state.party.leaderId`
+   在回调作用域内被 TypeScript 视为可能为 null；改为在组件体先计算
+   `partyLeaderId`，渲染只比较该值。
+2. **8584 浏览器复验不可用**：沙箱内 Chromium 无法跨命令访问开发栈监听端口
+   （同一命令内启动的临时 HTTP 服务可访问，curl 健康检查正常）；双人浏览器
+   证据改用全量 E2E（服务与浏览器由同一测试命令启动），开发栈保留给人工试玩。
+3. **历史截图抖动**：全量 E2E 会重新生成历史阶段截图；验证后按惯例恢复旧的
+   已提交文件，只保留本切片新增的 `party-social/` 证据。
+
+### 尚未解决
+
+- 队伍仍是进程内状态（TD-SRV-11）；队伍聊天无离线消息/历史。
+- 被踢者没有定向提示；按名字邀请与世界内队伍标记仍开放（TD-CLI-17 剩余）。
+- 未复跑 50 人容量回归（本切片不改变 tick 热路径）。
+- 远端 CI 仍待确认；8584 人工试玩待进行。
+
+### 下一步计划
+
+1. 世界内到达目标标记（TD-CLI-24）。
+2. 按名字邀请与队伍标记（TD-CLI-17 剩余）。
+3. 3 人副本实例先写 ADR；正式美术与八方向角色帧。
+
+### 提交
+
+- `800f389` `feat(alpha-03): add party chat, leader transfer, and kick`
+  （契约、注册表/服务/Room、客户端、单元/集成/E2E、ADR-044、切片报告、
+  计划与债务、证据截图）。
