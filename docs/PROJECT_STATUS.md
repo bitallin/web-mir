@@ -719,6 +719,8 @@ assets:generate` 同时生成角色与图标；三张地图已按新 manifest �
   （`reach-quests/load-50p2a.json`）；资产不变量 7/7 为 0。
 - 发布：`2026.11.27.7`（checksum `2a33b8ef…`，新增 2）已激活；Game Server
   日志确认刷新；8584 实测接取→自动探索→交付，金币 50 → 55。
+- 提交：`cef5d08`（E2E 稳定性）、`e8cedfb`（到达任务功能）、`f0066f1`
+  （状态与日志）；均已推送 `origin/main`。
 - 未完成：每日东境巡逻的完整人工试玩；世界内目标标记（TD-CLI-24）；远端 CI；
   正式美术（TD-CLI-13）。
 
