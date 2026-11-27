@@ -5,6 +5,7 @@ import type {
   CombatEvent,
   CommandAck,
   InventorySnapshot,
+  TilePoint,
 } from '@web-legend/contracts';
 import type { QuestRecordState } from '@web-legend/game-domain';
 
@@ -17,6 +18,9 @@ export type AutoAttackState = {
   nextAttackAt: number;
   /** Combat-world time (ms) before which the approach must not be repathed. */
   nextRepathAt: number;
+  /** Destination tile of the current approach path; a repath is only needed
+   * when the target leaves it or the path runs out. */
+  pathTargetTile: TilePoint | null;
 };
 
 /**

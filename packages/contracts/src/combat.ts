@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { deathPenaltyRuleSchema } from './content';
+import { tilePointSchema } from './map';
 
 /**
  * Combat wire contract shared by the game server and the browser. The browser
@@ -139,6 +140,15 @@ export const combatTargetChangedSchema = z
     attackIntervalMs: z.number().int().positive(),
     nextAttackAt: z.number().nonnegative(),
     serverTime: z.number().nonnegative(),
+    /**
+     * Authoritative approach path while auto-attack closes distance. The
+     * browser predicts along it exactly like a move ack; absent when the
+     * player is already in range or the attack stopped.
+     */
+    path: z.array(tilePointSchema).max(256).optional(),
+    startX: z.number().int().nonnegative().optional(),
+    startY: z.number().int().nonnegative().optional(),
+    speedUnitsPerSecond: z.number().int().positive().optional(),
   })
   .strict();
 

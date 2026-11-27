@@ -639,6 +639,7 @@ class WorldSession {
           }
         },
         onCombatTargetChanged: (state) => {
+          this.bridge.applyCombatTargetChanged(state);
           this.updateState((previous) => ({
             ...previous,
             autoAttack: state,
@@ -1133,6 +1134,7 @@ class WorldSession {
           frame: '',
         },
       selfId: () => this.options.character.id,
+      selfUnitPosition: () => this.bridge.selfUnitPosition(),
       playerAppearance: (playerId) => this.bridge.playerAppearance(playerId),
       activeTelegraphs: () => this.bridge.activeTelegraphs(),
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),

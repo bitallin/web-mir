@@ -21,6 +21,7 @@ declare global {
       playerScreenPoint: (playerId: string) => { x: number; y: number } | null;
       selfAppearance: () => { textureKey: string; clip: string; frame: string };
       selfId: () => string;
+      selfUnitPosition: () => { x: number; y: number } | null;
       playerAppearance: (
         playerId: string,
       ) => { textureKey: string; clip: string; frame: string } | null;

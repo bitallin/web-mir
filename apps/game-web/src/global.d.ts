@@ -37,6 +37,8 @@ declare global {
       /** Which class sheet and clip the local player is rendering. */
       selfAppearance: () => PlayerAppearance;
       selfId: () => string;
+      /** Client-predicted position in 1000-unit tiles, sampled by movement E2E. */
+      selfUnitPosition: () => { x: number; y: number } | null;
       playerAppearance: (playerId: string) => PlayerAppearance | null;
       activeTelegraphs: () => TelegraphView[];
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;

@@ -1576,6 +1576,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       phase: 'engaged',
       nextAttackAt: 0,
       nextRepathAt: 0,
+      pathTargetTile: null,
     };
     this.notifyTargetChanged(session, 'engaged');
     this.metrics.recordAcceptedCommand();
@@ -1714,16 +1715,31 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         if (auto.phase !== 'approaching') {
           auto.phase = 'approaching';
           auto.nextAttackAt = 0;
-          this.notifyTargetChanged(session, 'approaching');
+          auto.nextRepathAt = 0;
+          auto.pathTargetTile = null;
         }
-        if (this.combat.elapsedMs >= auto.nextRepathAt) {
+        // Repath only when the target leaves its tile or the current path ran
+        // out. Recomputing every interval made the player step back to the
+        // current tile center on each tick (they were mid-tile), which read as
+        // a stutter while chasing a stationary target.
+        const playerPath = this.simulation.getPlayer(session.playerId);
+        const pathExhausted = playerPath === undefined || playerPath.waypoints.length === 0;
+        const targetTile = tileOfUnits(target);
+        const targetMoved =
+          auto.pathTargetTile === null ||
+          auto.pathTargetTile.x !== targetTile.x ||
+          auto.pathTargetTile.y !== targetTile.y;
+        const canRepath = pathExhausted || this.combat.elapsedMs >= auto.nextRepathAt;
+        if ((pathExhausted || targetMoved) && canRepath) {
           auto.nextRepathAt = this.combat.elapsedMs + AUTO_ATTACK_REPATH_INTERVAL_MS;
-          const path = findPath(this.map.runtime.grid, tileOfUnits(player), tileOfUnits(target));
+          const path = findPath(this.map.runtime.grid, tileOfUnits(player), targetTile);
           if (path === null) {
             this.stopAutoAttack(session, 'out_of_range');
             continue;
           }
           this.simulation.setPath(session.playerId, path);
+          auto.pathTargetTile = targetTile;
+          this.notifyTargetChanged(session, 'approaching', auto.targetId, path);
         }
         continue;
       }
@@ -1797,6 +1813,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     session: SessionRecord,
     reason: CombatTargetChangeReason,
     targetId: string | null = session.autoAttack?.targetId ?? null,
+    approachPath?: readonly TilePoint[],
   ): void {
     const profile = this.combat.getProfile(session.playerId);
     if (profile === undefined) {
@@ -1805,6 +1822,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const auto = session.autoAttack;
     const nextAttackAt =
       auto === null ? 0 : Date.now() + Math.max(0, auto.nextAttackAt - this.combat.elapsedMs);
+    const player = this.simulation.getPlayer(session.playerId);
     const message: CombatTargetChanged = {
       targetId,
       autoAttack: auto !== null,
@@ -1812,6 +1830,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       attackIntervalMs: profile.attackIntervalMs,
       nextAttackAt,
       serverTime: Date.now(),
+      ...(approachPath === undefined
+        ? {}
+        : {
+            path: [...approachPath],
+            startX: player?.x ?? 0,
+            startY: player?.y ?? 0,
+            speedUnitsPerSecond: player?.speedUnitsPerSecond ?? PLAYER_SPEED_UNITS_PER_SECOND,
+          }),
     };
     try {
       session.client.send(

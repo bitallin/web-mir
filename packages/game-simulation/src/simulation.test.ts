@@ -152,7 +152,7 @@ describe('WorldSimulation', () => {
     expect(tileOfUnits(simulation.getPlayer('p1') ?? { x: 0, y: 0 })).toEqual({ x: 13, y: 1 });
   });
 
-  it('prepends the current tile center when retargeted mid-tile and stays axis-aligned', () => {
+  it('retargets mid-tile through a detour without entering blocked tiles', () => {
     const grid = openGrid();
     const simulation = new WorldSimulation(grid);
     simulation.addPlayer({ id: 'p1', displayName: 'Alice', spawn: { x: 1, y: 1 }, colorIndex: 0 });
@@ -175,6 +175,57 @@ describe('WorldSimulation', () => {
     }
 
     expect(tileOfUnits(simulation.getPlayer('p1') ?? { x: 0, y: 0 })).toEqual({ x: 1, y: 3 });
+  });
+
+  it('keeps walking forward when a new path continues the same direction', () => {
+    const grid = openGrid();
+    const simulation = new WorldSimulation(grid);
+    simulation.addPlayer({ id: 'p1', displayName: 'Alice', spawn: { x: 1, y: 1 }, colorIndex: 0 });
+    simulation.setPath('p1', findPath(grid, { x: 1, y: 1 }, { x: 6, y: 1 }) ?? []);
+
+    // 350ms at 4 tiles/s leaves the player 400 units past tile 2's center.
+    advance(simulation, 7);
+    expect(simulation.getPlayer('p1')?.x).toBe(2_900);
+
+    simulation.setPath('p1', findPath(grid, { x: 2, y: 1 }, { x: 6, y: 1 }) ?? []);
+    advance(simulation, 1);
+
+    expect(simulation.getPlayer('p1')?.x).toBe(3_100);
+    expect(simulation.getPlayer('p1')?.y).toBe(1 * TILE_UNITS + TILE_UNITS / 2);
+  });
+
+  it('turns inside the next tile instead of stepping back to the current center', () => {
+    const grid = openGrid();
+    const simulation = new WorldSimulation(grid);
+    simulation.addPlayer({ id: 'p1', displayName: 'Alice', spawn: { x: 1, y: 1 }, colorIndex: 0 });
+    simulation.setPath('p1', findPath(grid, { x: 1, y: 1 }, { x: 6, y: 1 }) ?? []);
+
+    // 350ms east leaves the player 400 units past tile 2's center.
+    advance(simulation, 7);
+    expect(simulation.getPlayer('p1')?.x).toBe(2_900);
+
+    simulation.setPath('p1', findPath(grid, { x: 2, y: 1 }, { x: 2, y: 3 }) ?? []);
+    advance(simulation, 1);
+
+    expect(simulation.getPlayer('p1')?.x).toBe(2_900);
+    expect(simulation.getPlayer('p1')?.y).toBe(1_700);
+  });
+
+  it('never retreats when the same path is re-applied every repath interval', () => {
+    const grid = openGrid();
+    const simulation = new WorldSimulation(grid);
+    simulation.addPlayer({ id: 'p1', displayName: 'Alice', spawn: { x: 1, y: 1 }, colorIndex: 0 });
+    simulation.setPath('p1', findPath(grid, { x: 1, y: 1 }, { x: 6, y: 1 }) ?? []);
+
+    let last = simulation.getPlayer('p1')?.x ?? 0;
+    for (let interval = 0; interval < 5; interval += 1) {
+      advance(simulation, 7);
+      const current = simulation.getPlayer('p1');
+      expect(current?.x).toBeGreaterThanOrEqual(last);
+      last = current?.x ?? last;
+      const tile = current === undefined ? { x: 1, y: 1 } : tileOfUnits(current);
+      simulation.setPath('p1', findPath(grid, tile, { x: 6, y: 1 }) ?? []);
+    }
   });
 
   it('is deterministic for the same inputs', () => {

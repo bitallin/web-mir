@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
 import {
   PLAYER_SPEED_UNITS_PER_SECOND,
-  TILE_UNITS,
   type CharacterAnimations,
   type CharacterClip,
   type CombatEvent,
+  type CombatTargetChanged,
   type CommandAck,
   type TilePoint,
 } from '@web-legend/contracts';
@@ -21,6 +21,7 @@ import {
 import { resolveVisibleLabels, type LabelCandidate, type LabelRect } from './labelLayout';
 import { LootVisual } from './LootVisual';
 import { MonsterVisual } from './MonsterVisual';
+import { buildPredictionWaypoints } from './movementPrediction';
 import {
   FALLBACK_ANIMATIONS,
   animationFor,
@@ -75,13 +76,6 @@ function lerp(from: number, to: number, factor: number): number {
 
 function toVector2(points: readonly { x: number; y: number }[]): Phaser.Math.Vector2[] {
   return points.map((point) => new Phaser.Math.Vector2(point.x, point.y));
-}
-
-function tileCenterUnits(tile: TilePoint): UnitPoint {
-  return {
-    x: tile.x * TILE_UNITS + TILE_UNITS / 2,
-    y: tile.y * TILE_UNITS + TILE_UNITS / 2,
-  };
 }
 
 /** NPC labels are static texts with origin (0.5, 1), not children of a container. */
@@ -530,8 +524,39 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     if (this.predicted === null) {
       this.predicted = { x: ack.startX, y: ack.startY };
     }
-    this.path = this.buildWaypoints(this.predicted, ack.path);
+    this.path = buildPredictionWaypoints(this.predicted, ack.path);
     this.drawPath(ack.path);
+  }
+
+  /**
+   * Auto-attack approach paths arrive on `combat.target.changed`. Without them
+   * the client had no prediction for a chase and only followed 10Hz snapshots,
+   * which read as stepwise movement; applying the authoritative path restores
+   * the same smooth prediction as a manual click.
+   */
+  applyAutoAttackState(state: CombatTargetChanged): void {
+    if (state.reason === 'approaching' && state.path !== undefined) {
+      this.speed = state.speedUnitsPerSecond ?? this.speed;
+      if (this.predicted === null) {
+        this.predicted = { x: state.startX ?? 0, y: state.startY ?? 0 };
+      }
+      this.path = buildPredictionWaypoints(this.predicted, state.path);
+      this.drawPath(state.path);
+      return;
+    }
+    // Once in range the server stops the approach; the client must stop
+    // predicting a path that would carry it past the target. On 'engaged' the
+    // next tick replaces a manual path with the approach path, so keeping the
+    // old path briefly avoids a frame of snapshot lerp pulling backwards.
+    if (state.reason === 'attacking' || !state.autoAttack) {
+      this.path = [];
+      this.pathGraphics.clear();
+    }
+  }
+
+  /** Client-predicted position in unit coordinates; E2E samples smoothness. */
+  selfUnitPosition(): { x: number; y: number } | null {
+    return this.predicted === null ? null : { x: this.predicted.x, y: this.predicted.y };
   }
 
   screenPointForTile(tile: TilePoint): ScreenPoint {
@@ -1123,23 +1148,6 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     if (this.path.length === 0) {
       this.pathGraphics.clear();
     }
-  }
-
-  /** Mirrors the server rule: move to the current tile center before turning. */
-  private buildWaypoints(start: UnitPoint, path: readonly TilePoint[]): UnitPoint[] {
-    const currentTile = {
-      x: Math.floor(start.x / TILE_UNITS),
-      y: Math.floor(start.y / TILE_UNITS),
-    };
-    const center = tileCenterUnits(currentTile);
-    const waypoints: UnitPoint[] = [];
-    if (start.x !== center.x || start.y !== center.y) {
-      waypoints.push(center);
-    }
-    for (const node of path) {
-      waypoints.push(tileCenterUnits(node));
-    }
-    return waypoints.filter((point) => point.x !== start.x || point.y !== start.y);
   }
 
   private drawMap(): void {

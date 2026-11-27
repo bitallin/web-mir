@@ -52,11 +52,6 @@ export function tileOfUnits(position: UnitPoint): TilePoint {
   };
 }
 
-function isTileCenter(position: UnitPoint, tile: TilePoint): boolean {
-  const center = tileCenter(tile);
-  return position.x === center.x && position.y === center.y;
-}
-
 /**
  * Authoritative in-memory world simulation for one map instance. It performs
  * no IO: the room advances it from a fixed-step timer and persists nothing.
@@ -148,9 +143,11 @@ export class WorldSimulation {
 
   /**
    * Replaces the current path. A path is a list of tile centers produced by the
-   * server's pathfinder. When the player is between tiles, the current tile
-   * center is inserted first so every segment stays axis-aligned and cannot cut
-   * a blocked corner.
+   * server's pathfinder. A player retargeted mid-tile normally returns to the
+   * current tile center so every segment stays axis-aligned and cannot cut a
+   * blocked corner; when the new path keeps the same direction of travel the
+   * player continues straight instead, because turning back to the center
+   * would make every repath (auto-attack, repeated clicks) a visible hitch.
    */
   setPath(id: string, path: readonly TilePoint[]): void {
     const player = this.players.get(id);
@@ -165,8 +162,33 @@ export class WorldSimulation {
 
     const waypoints: UnitPoint[] = [];
     const currentTile = tileOfUnits(player);
-    if (!isTileCenter(player, currentTile)) {
-      waypoints.push(tileCenter(currentTile));
+    const center = tileCenter(currentTile);
+    const offsetX = player.x - center.x;
+    const offsetY = player.y - center.y;
+    const first = path[0];
+    if (first === undefined) {
+      // Stopping: finish the current step at the tile center.
+      if (offsetX !== 0 || offsetY !== 0) {
+        waypoints.push(center);
+      }
+    } else if (offsetX !== 0) {
+      if (first.y === currentTile.y) {
+        // Same row: continue (or reverse) straight horizontally.
+      } else if (first.x === currentTile.x) {
+        // Perpendicular turn: keep the current x and turn inside the next
+        // tile, so the player never steps back to the old tile center.
+        waypoints.push({ x: player.x, y: tileCenter(first).y });
+      } else {
+        waypoints.push(center);
+      }
+    } else if (offsetY !== 0) {
+      if (first.x === currentTile.x) {
+        // Same column: continue (or reverse) straight vertically.
+      } else if (first.y === currentTile.y) {
+        waypoints.push({ x: tileCenter(first).x, y: player.y });
+      } else {
+        waypoints.push(center);
+      }
     }
     for (const node of path) {
       waypoints.push(tileCenter(node));

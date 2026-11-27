@@ -1,4 +1,10 @@
-import type { CharacterClip, CombatEvent, CommandAck, TilePoint } from '@web-legend/contracts';
+import type {
+  CharacterClip,
+  CombatEvent,
+  CombatTargetChanged,
+  CommandAck,
+  TilePoint,
+} from '@web-legend/contracts';
 
 import type { WorldSnapshot } from '../net/worldClient';
 import type { ScreenPoint } from './projection';
@@ -37,6 +43,8 @@ export type WorldLabelView = {
 export type WorldSceneHandle = {
   applySnapshot: (data: SceneSnapshot) => void;
   applyAck: (ack: CommandAck) => void;
+  applyAutoAttackState: (state: CombatTargetChanged) => void;
+  selfUnitPosition: () => { x: number; y: number } | null;
   applyCombatEvent: (event: CombatEvent) => void;
   screenPointForTile: (tile: TilePoint) => ScreenPoint;
   monsterScreenPoint: (monsterId: string) => ScreenPoint | null;
@@ -93,6 +101,14 @@ export class WorldBridge {
 
   pushAck(ack: CommandAck): void {
     this.scene?.applyAck(ack);
+  }
+
+  applyCombatTargetChanged(state: CombatTargetChanged): void {
+    this.scene?.applyAutoAttackState(state);
+  }
+
+  selfUnitPosition(): { x: number; y: number } | null {
+    return this.scene?.selfUnitPosition() ?? null;
   }
 
   pushCombatEvent(event: CombatEvent): void {

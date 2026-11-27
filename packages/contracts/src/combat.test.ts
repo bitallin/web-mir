@@ -6,6 +6,7 @@ import {
   combatBasicAttackSchema,
   combatEventSchema,
   combatProfileSchema,
+  combatTargetChangedSchema,
   monsterStateKindFromCode,
   skillCastSchema,
 } from './combat';
@@ -289,6 +290,37 @@ describe('combat events', () => {
       false,
     );
     expect(combatEventSchema.safeParse({ ...base, impactInMs: 900 }).success).toBe(false);
+  });
+});
+
+describe('combat target changes', () => {
+  it('optionally carries the authoritative approach path', () => {
+    const base = {
+      targetId: 'wilds_slime_1',
+      autoAttack: true,
+      reason: 'approaching',
+      attackIntervalMs: 900,
+      nextAttackAt: 0,
+      serverTime: 1,
+    };
+    expect(combatTargetChangedSchema.safeParse(base).success).toBe(true);
+    const withPath = {
+      ...base,
+      path: [
+        { x: 3, y: 2 },
+        { x: 4, y: 2 },
+      ],
+      startX: 2_500,
+      startY: 2_500,
+      speedUnitsPerSecond: 4_000,
+    };
+    expect(combatTargetChangedSchema.safeParse(withPath).success).toBe(true);
+    expect(
+      combatTargetChangedSchema.safeParse({ ...withPath, path: [{ x: -1, y: 0 }] }).success,
+    ).toBe(false);
+    expect(
+      combatTargetChangedSchema.safeParse({ ...withPath, speedUnitsPerSecond: 0 }).success,
+    ).toBe(false);
   });
 });
 
