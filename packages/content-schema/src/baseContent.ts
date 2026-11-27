@@ -1286,6 +1286,24 @@ const RAW_BASE_CONTENT = {
         items: [],
       },
     },
+    quest_town_east_gate: {
+      id: 'quest_town_east_gate',
+      title: '东门巡视',
+      description: '守卫想确认东门是否一切正常。走到主城东门附近（35,15）查看，然后回来报告。',
+      giverNpcId: 'town_guard',
+      levelRequirement: 1,
+      objective: {
+        kind: 'reach',
+        mapId: 'starter_town',
+        tile: { x: 35, y: 15 },
+        radiusTiles: 2,
+      },
+      rewards: {
+        exp: 15,
+        gold: 5,
+        items: [],
+      },
+    },
     quest_wolf_patrol: {
       id: 'quest_wolf_patrol',
       title: '狼群的踪迹',
@@ -1444,6 +1462,26 @@ const RAW_BASE_CONTENT = {
         exp: 120,
         gold: 30,
         items: [{ templateId: 'small_mp_potion', quantity: 1 }],
+      },
+    },
+    quest_daily_ruins_patrol: {
+      id: 'quest_daily_ruins_patrol',
+      title: '每日：东境巡逻',
+      description:
+        '斥候需要知道废墟东侧是否还有活物。前往东境残塔附近（43,20）巡逻，然后回来报告。',
+      giverNpcId: 'ruins_scout',
+      levelRequirement: 8,
+      repeat: 'daily',
+      objective: {
+        kind: 'reach',
+        mapId: 'ruined_fields',
+        tile: { x: 43, y: 20 },
+        radiusTiles: 2,
+      },
+      rewards: {
+        exp: 180,
+        gold: 35,
+        items: [],
       },
     },
     quest_daily_ruins_stock: {

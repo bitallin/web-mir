@@ -237,6 +237,16 @@ export type QuestCommandInput = { characterId: string; commandId: string; questI
 
 export type AcceptQuestOutcome = AssetCommandOutcome & { record: QuestRecordState };
 
+/**
+ * Arrival completion is not an asset change and carries no client command: the
+ * room observes the authoritative position and this transaction records it
+ * idempotently under the character row lock (ADR-042).
+ */
+export type ReachQuestOutcome = {
+  record: QuestRecordState;
+  completedNow: boolean;
+};
+
 export type ClaimQuestOutcome = AssetCommandOutcome & {
   record: QuestRecordState;
   leveledUp: boolean;
@@ -1407,6 +1417,63 @@ export class AssetService {
         deduplicated: false,
         record: questRecordOf(row),
       };
+    });
+  }
+
+  /**
+   * Marks an arrival quest completed once the room has observed the character
+   * inside its target area. Repeated observations are harmless: only an active
+   * row is advanced, under the same character lock as accept and claim.
+   */
+  async completeReachQuest(input: {
+    characterId: string;
+    questId: string;
+  }): Promise<ReachQuestOutcome> {
+    const now = this.now();
+    return this.db.transaction(async (tx) => {
+      const [character] = await tx
+        .select()
+        .from(characters)
+        .where(eq(characters.id, input.characterId))
+        .for('update');
+      if (character === undefined) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
+      const quest = this.content.quests?.[input.questId];
+      if (quest === undefined || quest.objective.kind !== 'reach') {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+      const periodKey = this.periodKeyForQuest(quest, now);
+      if (periodKey === null) {
+        throw new AssetError('QUEST_UNAVAILABLE');
+      }
+
+      const record = await findCharacterQuestForUpdate(
+        tx,
+        input.characterId,
+        input.questId,
+        periodKey,
+      );
+      if (record === undefined) {
+        throw new AssetError('QUEST_NOT_ACTIVE');
+      }
+      if (record.status === 'completed' || record.status === 'claimed') {
+        return { record: questRecordOf(record), completedNow: false };
+      }
+
+      const updated = await advanceCharacterQuest(tx, {
+        characterId: input.characterId,
+        questId: quest.id,
+        periodKey,
+        progress: 1,
+        completed: true,
+        now,
+      });
+      if (updated === undefined) {
+        throw new AssetError('SERVICE_UNAVAILABLE');
+      }
+      return { record: questRecordOf(updated), completedNow: true };
     });
   }
 

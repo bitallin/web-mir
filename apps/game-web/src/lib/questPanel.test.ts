@@ -1,7 +1,12 @@
 import type { QuestStatus, QuestView } from '@web-legend/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { groupQuestsByStatus, nextAvailableQuest, questObjectiveLabel } from './questPanel';
+import {
+  groupQuestsByStatus,
+  nextAvailableQuest,
+  questObjectiveLabel,
+  questObjectiveProgressLabel,
+} from './questPanel';
 
 function quest(questId: string, status: QuestStatus, repeat?: 'daily'): QuestView {
   return {
@@ -25,7 +30,7 @@ function quest(questId: string, status: QuestStatus, repeat?: 'daily'): QuestVie
 }
 
 describe('questObjectiveLabel', () => {
-  it('names the monster or the collected item', () => {
+  it('names the monster, the collected item or the arrival place', () => {
     expect(
       questObjectiveLabel({
         kind: 'kill',
@@ -42,6 +47,35 @@ describe('questObjectiveLabel', () => {
         count: 1,
       }),
     ).toBe('收集 金创药');
+    expect(
+      questObjectiveLabel({
+        kind: 'reach',
+        mapId: 'starter_wilds',
+        mapName: '静语荒野',
+        tile: { x: 40, y: 10 },
+        radiusTiles: 2,
+      }),
+    ).toBe('到达 静语荒野（40,10）');
+  });
+});
+
+describe('questObjectiveProgressLabel', () => {
+  it('shows a ratio for counted objectives and arrival state for reach', () => {
+    expect(
+      questObjectiveProgressLabel(
+        { kind: 'kill', monsterId: 'wild_slime', monsterName: '野地史莱姆', count: 3 },
+        2,
+      ),
+    ).toBe('2/3');
+    const reach = {
+      kind: 'reach',
+      mapId: 'starter_town',
+      mapName: '晨曦主城',
+      tile: { x: 35, y: 15 },
+      radiusTiles: 2,
+    } as const;
+    expect(questObjectiveProgressLabel(reach, 0)).toBe('未到达');
+    expect(questObjectiveProgressLabel(reach, 1)).toBe('已到达');
   });
 });
 

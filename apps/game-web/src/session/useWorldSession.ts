@@ -29,6 +29,7 @@ import { mapBundleFor } from '../game/mapCatalog';
 import { isSfxMuted, SfxPlayer } from '../game/sfx';
 import { WorldBridge } from '../game/worldBridge';
 import { loadFreshTransfers, loadRoomPreference } from '../lib/identity';
+import { questObjectiveProgressLabel } from '../lib/questPanel';
 import { lootIsLocked, lootLockLabel, lootTile, withinPickupRange } from '../lib/lootInteraction';
 import {
   WorldClient,
@@ -632,8 +633,9 @@ class WorldSession {
             ) {
               this.pushNotice(
                 'info',
-                `任务进度：${quest.title} ${String(quest.progress)}/${String(
-                  quest.objective.count,
+                `任务进度：${quest.title} ${questObjectiveProgressLabel(
+                  quest.objective,
+                  quest.progress,
                 )}`,
               );
             }
@@ -656,8 +658,9 @@ class WorldSession {
           ) {
             this.pushNotice(
               'info',
-              `任务进度：${update.quest.title} ${String(update.quest.progress)}/${String(
-                update.quest.objective.count,
+              `任务进度：${update.quest.title} ${questObjectiveProgressLabel(
+                update.quest.objective,
+                update.quest.progress,
               )}`,
             );
           }

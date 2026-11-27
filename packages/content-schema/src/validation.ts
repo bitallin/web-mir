@@ -433,6 +433,40 @@ function validateCollectObjective(
   }
 }
 
+/**
+ * Arrival objectives are resolved against the compiled maps, so a target that
+ * does not exist, falls outside the map or lands on a blocked tile is caught
+ * before publication (ADR-042).
+ */
+function validateReachObjective(quest: QuestContent, path: string, issues: ContentIssue[]): void {
+  if (quest.objective.kind !== 'reach') {
+    return;
+  }
+  const objective = quest.objective;
+  const map = MAP_MANIFESTS.find((entry) => entry.mapId === objective.mapId);
+  if (map === undefined) {
+    issue(issues, 'error', `${path}.objective.mapId`, `目标地图 "${objective.mapId}" 不存在`);
+    return;
+  }
+  if (
+    objective.tile.x < 0 ||
+    objective.tile.y < 0 ||
+    objective.tile.x >= map.width ||
+    objective.tile.y >= map.height
+  ) {
+    issue(
+      issues,
+      'error',
+      `${path}.objective.tile`,
+      `到达目标 (${String(objective.tile.x)},${String(objective.tile.y)}) 超出地图 ${map.width}×${map.height}`,
+    );
+    return;
+  }
+  if (!isMapTileWalkable(map, objective.tile.x, objective.tile.y)) {
+    issue(issues, 'error', `${path}.objective.tile`, '到达目标必须位于可行走格');
+  }
+}
+
 function validateQuests(bundle: ContentBundle, issues: ContentIssue[]): void {
   const quests = bundle.quests;
   if (quests === undefined) {
@@ -509,8 +543,10 @@ function validateQuests(bundle: ContentBundle, issues: ContentIssue[]): void {
           );
         }
       }
-    } else {
+    } else if (quest.objective.kind === 'collect') {
       validateCollectObjective(quest, bundle, path, issues);
+    } else {
+      validateReachObjective(quest, path, issues);
     }
 
     for (const [index, reward] of quest.rewards.items.entries()) {

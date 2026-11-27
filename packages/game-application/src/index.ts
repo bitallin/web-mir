@@ -19,6 +19,7 @@ export type {
   PickupInput,
   PickupOutcome,
   QuestCommandInput,
+  ReachQuestOutcome,
   SellInput,
   ShopBuyOutcome,
   ShopSellOutcome,

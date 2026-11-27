@@ -11,7 +11,7 @@ import {
 import { createMapRuntime } from '@web-legend/map-runtime';
 
 import {
-  findNpcApproachPath,
+  findApproachPath,
   mapsWithAnyMonsterSpawn,
   mapsWithNpc,
   nearestSpawnTileAmong,
@@ -93,7 +93,7 @@ describe('quest routing', () => {
     if (guard === undefined) {
       return;
     }
-    const path = findNpcApproachPath(runtime, guard.tile, { x: 10, y: 10 }, 3);
+    const path = findApproachPath(runtime, guard.tile, { x: 10, y: 10 }, 3);
     expect(path).not.toBeNull();
     if (path === null) {
       return;

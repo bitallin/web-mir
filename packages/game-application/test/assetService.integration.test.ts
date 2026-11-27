@@ -1204,6 +1204,99 @@ describe.runIf(databaseUrl !== undefined)('AssetService with PostgreSQL', () => 
     ]);
   });
 
+  it('records an arrival completion idempotently without paying early', async () => {
+    const character = await createCharacter(db, 'warrior', { gold: 0 });
+    await service.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_town_east_gate',
+    });
+
+    const first = await service.completeReachQuest({
+      characterId: character.id,
+      questId: 'quest_town_east_gate',
+    });
+    expect(first.completedNow).toBe(true);
+    expect(first.record).toEqual({
+      questId: 'quest_town_east_gate',
+      periodKey: '',
+      status: 'completed',
+      progress: 1,
+    });
+    const replay = await service.completeReachQuest({
+      characterId: character.id,
+      questId: 'quest_town_east_gate',
+    });
+    expect(replay.completedNow).toBe(false);
+    expect(replay.record.status).toBe('completed');
+
+    // Only an active arrival quest can be completed; a kill quest is rejected
+    // before its record is touched.
+    await expect(
+      service.completeReachQuest({
+        characterId: character.id,
+        questId: 'quest_slime_cleanup',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_UNAVAILABLE' });
+
+    const before = await service.loadAssets(character.id);
+    const claimed = await service.claimQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_town_east_gate',
+    });
+    expect(claimed.record.status).toBe('claimed');
+    expect(claimed.expGained).toBe(15);
+    expect(claimed.goldGained).toBe(5);
+    expect(claimed.snapshot.gold).toBe(before.snapshot.gold + 5);
+  });
+
+  it('completes a daily arrival quest only in its own period', async () => {
+    const character = await createCharacter(db, 'warrior', { level: 8, gold: 0 });
+    let clock = new Date('2026-11-27T12:00:00.000Z'); // 20:00 at +08:00
+    const daily = new AssetService(db, { now: () => clock, rng: () => 0 });
+
+    const accepted = await daily.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_daily_ruins_patrol',
+    });
+    expect(accepted.record.periodKey).toBe('2026-11-27');
+
+    const first = await daily.completeReachQuest({
+      characterId: character.id,
+      questId: 'quest_daily_ruins_patrol',
+    });
+    expect(first).toMatchObject({
+      completedNow: true,
+      record: { periodKey: '2026-11-27', status: 'completed', progress: 1 },
+    });
+
+    // The next realm day hides yesterday's row; a late observation cannot
+    // complete or revive it.
+    clock = new Date('2026-11-27T21:00:00.000Z');
+    expect(await daily.loadQuestRecords(character.id)).toEqual([]);
+    await expect(
+      daily.completeReachQuest({
+        characterId: character.id,
+        questId: 'quest_daily_ruins_patrol',
+      }),
+    ).rejects.toMatchObject({ code: 'QUEST_NOT_ACTIVE' });
+
+    const again = await daily.acceptQuest({
+      characterId: character.id,
+      commandId: randomUUID(),
+      questId: 'quest_daily_ruins_patrol',
+    });
+    expect(again.record).toMatchObject({ periodKey: '2026-11-28', status: 'active', progress: 0 });
+    const second = await daily.completeReachQuest({
+      characterId: character.id,
+      questId: 'quest_daily_ruins_patrol',
+    });
+    expect(second.completedNow).toBe(true);
+    expect(second.record.periodKey).toBe('2026-11-28');
+  });
+
   it('claims a completed quest with rewards committed exactly once', async () => {
     const character = await createCharacter(db, 'warrior', { gold: 0 });
     await service.acceptQuest({

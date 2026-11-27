@@ -34,7 +34,12 @@ import {
   QUALITY_LABELS,
 } from '../lib/inventoryView';
 import { itemIconFrame, itemIconStyle } from '../lib/itemIcons';
-import { groupQuestsByStatus, nextAvailableQuest, questObjectiveLabel } from '../lib/questPanel';
+import {
+  groupQuestsByStatus,
+  nextAvailableQuest,
+  questObjectiveLabel,
+  questObjectiveProgressLabel,
+} from '../lib/questPanel';
 import type { ConnectionStatus } from '../net/worldClient';
 import { useWorldSession } from '../session/useWorldSession';
 import { Minimap } from './Minimap';
@@ -317,9 +322,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     const giver = navigationQuest?.giverNpcName ?? '任务发布者';
     const via = navigationMap === null ? '' : `（经由${navigationMap}）`;
     if (questNavigation.purpose === 'hunt') {
-      return questNavigation.status === 'waiting'
-        ? `等待目标刷新：${title}`
-        : `自动前往：${title}${via}`;
+      if (questNavigation.status === 'waiting') {
+        return `等待目标刷新：${title}`;
+      }
+      return `自动${navigationQuest?.objective.kind === 'reach' ? '探索' : '前往'}：${title}${via}`;
     }
     if (questNavigation.purpose === 'accept') {
       return questNavigation.status === 'arrived'
@@ -657,7 +663,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                         <span className="quest-tracker-meta">
                           {quest.status === 'completed'
                             ? `可交付 · ${giverMap === undefined ? '' : `${giverMap}·`}${quest.giverNpcName}`
-                            : `${questObjectiveLabel(quest.objective)} ${String(quest.progress)}/${String(quest.objective.count)}`}
+                            : `${questObjectiveLabel(quest.objective)} ${questObjectiveProgressLabel(quest.objective, quest.progress)}`}
                         </span>
                         {questNavigation?.questId === quest.questId ? (
                           <button
@@ -1551,8 +1557,9 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           : `${location.mapName} · ${location.npcName}`}
                       </p>
                       <p className="quest-objective" data-testid="quest-objective">
-                        {`${questObjectiveLabel(quest.objective)} ${String(quest.progress)}/${String(
-                          quest.objective.count,
+                        {`${questObjectiveLabel(quest.objective)} ${questObjectiveProgressLabel(
+                          quest.objective,
+                          quest.progress,
                         )}`}
                       </p>
                       {dailyResetLabel(quest) === null ? null : (
@@ -1648,7 +1655,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                                 navigateQuest(quest.questId, 'hunt');
                               }}
                             >
-                              前往击杀
+                              {quest.objective.kind === 'reach' ? '前往探索' : '前往击杀'}
                             </button>
                           )
                         ) : null}
@@ -1715,7 +1722,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           </ul>
           <p className="shop-hint">
             任意地图都可以打开这里：点「前往接取」会自动走到发布者身边并接取；
-            接取后点「前往击杀」自动寻路、自动战斗；完成后点「回去交付」返回并 自动交付。
+            接取后点「前往击杀」或「前往探索」自动寻路（击杀目标会自动战斗）；
+            完成后点「回去交付」返回并自动交付。
           </p>
         </aside>
       ) : null}

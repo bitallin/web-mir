@@ -108,11 +108,11 @@ export function nearestSpawnTileAmong(
 }
 
 /**
- * Shortest walkable path that ends within `rangeTiles` of the NPC. The NPC tile
- * itself is often blocked, so the helper searches the surrounding tiles and
- * picks the reachable one with the shortest path from the player.
+ * Shortest walkable path that ends within `rangeTiles` of a target tile. Used
+ * for an NPC whose own tile is often blocked, and for arrival objectives whose
+ * radius counts as reached (ADR-042).
  */
-export function findNpcApproachPath(
+export function findApproachPath(
   runtime: MapRuntime,
   npcTile: TilePoint,
   from: TilePoint,

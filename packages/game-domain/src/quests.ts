@@ -28,6 +28,8 @@ export type QuestViewContext = {
   monsters: ContentBundle['monsters'];
   /** NPC display names from the compiled map the player is in. */
   npcNames: ReadonlyMap<string, string>;
+  /** Map id -> display name, used by arrival objectives (ADR-042). */
+  mapNames: ReadonlyMap<string, string>;
   /** Current daily period key; empty when the release has no reset rule. */
   currentPeriodKey: string;
   /** Epoch millis of the next reset when the release declares `rules.dailyReset`. */
@@ -72,7 +74,7 @@ export function nextDailyResetAt(now: Date, rule: DailyResetRule): number {
 
 function objectiveView(
   quest: QuestContent,
-  context: Pick<QuestViewContext, 'items' | 'monsters'>,
+  context: Pick<QuestViewContext, 'items' | 'monsters' | 'mapNames'>,
 ): QuestView['objective'] {
   if (quest.objective.kind === 'kill') {
     return {
@@ -82,12 +84,39 @@ function objectiveView(
       count: quest.objective.count,
     };
   }
+  if (quest.objective.kind === 'collect') {
+    return {
+      kind: 'collect',
+      templateId: quest.objective.templateId,
+      itemName: context.items[quest.objective.templateId]?.name ?? quest.objective.templateId,
+      count: quest.objective.count,
+    };
+  }
   return {
-    kind: 'collect',
-    templateId: quest.objective.templateId,
-    itemName: context.items[quest.objective.templateId]?.name ?? quest.objective.templateId,
-    count: quest.objective.count,
+    kind: 'reach',
+    mapId: quest.objective.mapId,
+    mapName: context.mapNames.get(quest.objective.mapId) ?? quest.objective.mapId,
+    tile: quest.objective.tile,
+    radiusTiles: quest.objective.radiusTiles,
   };
+}
+
+/**
+ * True when the player's authoritative tile is inside an arrival objective's
+ * radius on its map. The room supplies the position; the browser never does.
+ */
+export function reachObjectiveMet(
+  objective: QuestContent['objective'],
+  mapId: string,
+  position: { x: number; y: number },
+): boolean {
+  if (objective.kind !== 'reach' || objective.mapId !== mapId) {
+    return false;
+  }
+  return (
+    Math.hypot(position.x - objective.tile.x, position.y - objective.tile.y) <=
+    objective.radiusTiles
+  );
 }
 
 /** Items held in the bag, capped at the objective so the bar never overfills. */

@@ -9,12 +9,19 @@ import {
   nextDailyResetAt,
   questViewFor,
   questViewsFor,
+  reachObjectiveMet,
   type QuestRecordState,
 } from './quests';
 
 const NPC_NAMES = new Map([
   ['town_guard', '守卫'],
   ['town_merchant', '杂货商'],
+]);
+
+const MAP_NAMES = new Map([
+  ['starter_town', '晨曦主城'],
+  ['starter_wilds', '静语荒野'],
+  ['ruined_fields', '残垣废墟'],
 ]);
 
 const DAILY_RULE: DailyResetRule = { hour: 5, utcOffsetMinutes: 480 };
@@ -29,6 +36,7 @@ function context(
     items: BASE_CONTENT_BUNDLE.items,
     monsters: BASE_CONTENT_BUNDLE.monsters,
     npcNames: NPC_NAMES,
+    mapNames: MAP_NAMES,
     currentPeriodKey,
     inventory,
     ...(nextResetAt === undefined ? {} : { nextResetAt }),
@@ -50,6 +58,7 @@ describe('quest views', () => {
       items: BASE_CONTENT_BUNDLE.items,
       monsters: BASE_CONTENT_BUNDLE.monsters,
       npcNames: NPC_NAMES,
+      mapNames: MAP_NAMES,
       currentPeriodKey: '',
       inventory: new Map(),
     });
@@ -180,6 +189,58 @@ describe('collect progress', () => {
     );
     expect(view.status).toBe('active');
     expect(view.progress).toBe(1);
+  });
+});
+
+describe('arrival objectives', () => {
+  const QUEST_ID = 'quest_town_east_gate';
+
+  function reachQuest() {
+    const quest = context().quests[QUEST_ID];
+    if (quest === undefined) {
+      throw new Error('missing reach quest fixture');
+    }
+    return quest;
+  }
+
+  it('resolves the map name and keeps stored binary progress', () => {
+    const active = questViewFor(reachQuest(), record(QUEST_ID, 'active'), 1, context(), new Map());
+    expect(active.status).toBe('active');
+    expect(active.progress).toBe(0);
+    expect(active.objective).toEqual({
+      kind: 'reach',
+      mapId: 'starter_town',
+      mapName: '晨曦主城',
+      tile: { x: 35, y: 15 },
+      radiusTiles: 2,
+    });
+
+    const completed = questViewFor(
+      reachQuest(),
+      record(QUEST_ID, 'completed', 1),
+      1,
+      context(),
+      new Map(),
+    );
+    expect(completed.status).toBe('completed');
+    expect(completed.progress).toBe(1);
+  });
+
+  it('matches only the right map and radius', () => {
+    const quest = reachQuest();
+    if (quest.objective.kind !== 'reach') {
+      throw new Error('fixture is not a reach quest');
+    }
+    expect(reachObjectiveMet(quest.objective, 'starter_town', { x: 35, y: 15 })).toBe(true);
+    expect(reachObjectiveMet(quest.objective, 'starter_town', { x: 37, y: 15 })).toBe(true);
+    expect(reachObjectiveMet(quest.objective, 'starter_town', { x: 38, y: 15 })).toBe(false);
+    expect(reachObjectiveMet(quest.objective, 'starter_wilds', { x: 35, y: 15 })).toBe(false);
+
+    const killQuest = context().quests['quest_slime_cleanup'];
+    if (killQuest === undefined) {
+      throw new Error('missing kill quest fixture');
+    }
+    expect(reachObjectiveMet(killQuest.objective, 'starter_town', { x: 35, y: 15 })).toBe(false);
   });
 });
 

@@ -129,6 +129,7 @@ import {
   nextDailyResetAt,
   questViewFor,
   questViewsFor,
+  reachObjectiveMet,
   type ChatFilter,
   type CombatCommandResult,
   type CombatStats,
@@ -172,7 +173,7 @@ import { type PartyState } from '../world/partyRegistry';
 import { CommandGuard } from './commandGuard';
 import { SessionRegistry, type QuestNavigationState, type SessionRecord } from './sessionRegistry';
 import {
-  findNpcApproachPath,
+  findApproachPath,
   mapsWithAnyMonsterSpawn,
   mapsWithNpc,
   nearestSpawnTileAmong,
@@ -231,6 +232,9 @@ const LOOT_EXPIRY_CHECK_TICKS = 20;
 const AUTO_PICKUP_INTERVAL_TICKS = 4;
 const AUTO_PICKUP_FULL_BACKOFF_MS = 5_000;
 const AUTO_PICKUP_RETRY_BACKOFF_MS = 2_000;
+/** Arrival objectives read authoritative positions off the tick (ADR-042). */
+const REACH_CHECK_INTERVAL_TICKS = 5;
+const REACH_RETRY_BACKOFF_MS = 2_000;
 /** Database-side loot cleanup; the in-memory view expires every second. */
 const LOOT_DB_PURGE_INTERVAL_MS = 30_000;
 /** Repath towards a moving auto-attack target at most this often. */
@@ -379,6 +383,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private questPeriodKey: string | null = null;
   /** Quest giver display names from every compiled map. */
   private readonly npcNames = new Map<string, string>();
+  /** Map id -> display name for arrival objectives (ADR-042). */
+  private readonly mapNames = new Map<string, string>();
+  private readonly reachInFlight = new Set<string>();
+  private readonly reachBackoffUntil = new Map<string, number>();
   /** Owner drops inside this radius fly into the bag on their own (ADR-041). */
   private autoPickupRangeTiles: number = DEFAULT_AUTO_PICKUP_RANGE_TILES;
   private autoPickupEnabled = true;
@@ -476,6 +484,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     // (the return trip and auto-delivery show the name in the wilds).
     for (const npc of MAP_MANIFESTS.flatMap((map) => map.npcPoints)) {
       this.npcNames.set(npc.id, npc.name);
+    }
+    for (const map of MAP_MANIFESTS) {
+      this.mapNames.set(map.mapId, map.name);
     }
 
     const resetRule = this.content.bundle.rules?.dailyReset;
@@ -1179,6 +1190,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
     if (this.tick % LOOT_EXPIRY_CHECK_TICKS === 0) {
       this.expireLoot();
+    }
+    if (this.tick % REACH_CHECK_INTERVAL_TICKS === 0) {
+      this.reachQuestTick();
     }
 
     for (const player of players) {
@@ -2462,6 +2476,101 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       });
   }
 
+  /**
+   * Arrival quests complete from the authoritative simulation, never from a
+   * client message (ADR-042). The 4 Hz scan is cheap for a small radius and the
+   * commit runs on the asset queue, so the 20 Hz loop never waits on SQL.
+   */
+  private reachQuestTick(): void {
+    const now = Date.now();
+    for (const session of this.registry.all()) {
+      if (session.transferring) {
+        continue;
+      }
+      const player = this.simulation.getPlayer(session.playerId);
+      if (player === undefined || this.combat.getPlayer(session.playerId)?.alive !== true) {
+        continue;
+      }
+      const tile = tileOfUnits(player);
+      for (const record of session.questRecords.values()) {
+        if (record.status !== 'active') {
+          continue;
+        }
+        const quest = this.content.bundle.quests?.[record.questId];
+        if (quest === undefined || quest.objective.kind !== 'reach') {
+          continue;
+        }
+        // A daily row from an earlier period is history; only the current
+        // period's row can complete (ADR-038).
+        if (quest.repeat === 'daily' && record.periodKey !== this.questPeriodKey) {
+          continue;
+        }
+        if (!reachObjectiveMet(quest.objective, this.map.mapId, tile)) {
+          continue;
+        }
+        const key = `${session.playerId}:${record.questId}`;
+        if (this.reachInFlight.has(key)) {
+          continue;
+        }
+        if ((this.reachBackoffUntil.get(key) ?? 0) > now) {
+          continue;
+        }
+        this.completeReachQuest(session, record.questId, key);
+      }
+    }
+  }
+
+  private completeReachQuest(session: SessionRecord, questId: string, key: string): void {
+    const characterId = session.playerId;
+    this.reachInFlight.add(key);
+    void this.enqueueAsset(() => this.assets.completeReachQuest({ characterId, questId }))
+      .then((outcome) => {
+        if (!outcome.completedNow) {
+          return;
+        }
+        this.reachBackoffUntil.delete(key);
+        const current = this.registry.findByPlayerId(characterId);
+        if (current === undefined) {
+          return;
+        }
+        current.questRecords.set(outcome.record.questId, outcome.record);
+        const view = this.sendQuestUpdate(current, outcome.record);
+        if (view !== null) {
+          this.sendSystemNotice(
+            current.client,
+            'info',
+            `任务完成：${view.title}，回到${view.giverNpcName}处交付`,
+          );
+        }
+        if (
+          current.questNavigation?.questId === questId &&
+          current.questNavigation.purpose === 'hunt'
+        ) {
+          this.stopQuestNavigation(current, { status: 'completed' });
+        }
+      })
+      .catch((error: unknown) => {
+        this.reachBackoffUntil.set(key, Date.now() + REACH_RETRY_BACKOFF_MS);
+        // A completed/expired row is an expected race with daily resets and
+        // claims; only unexpected failures deserve a warning.
+        if (
+          error instanceof AssetError &&
+          (error.code === 'QUEST_NOT_ACTIVE' ||
+            error.code === 'QUEST_UNAVAILABLE' ||
+            error.code === 'INVALID_SESSION')
+        ) {
+          return;
+        }
+        this.options.logger.warn(
+          { err: error, roomId: this.roomId, characterId, questId },
+          'reach quest completion failed',
+        );
+      })
+      .finally(() => {
+        this.reachInFlight.delete(key);
+      });
+  }
+
   private enqueueAsset<T>(task: () => Promise<T>): Promise<T> {
     const startedAt = performance.now();
     const run = this.assetQueue.then(task, task);
@@ -3316,10 +3425,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return 'quest_changed';
     }
     const map = this.map.runtime.manifest;
-    const huntTargets = purpose === 'hunt' ? this.huntMonsterIdsFor(quest) : new Set<string>();
+    const reach = quest.objective.kind === 'reach' ? quest.objective : null;
+    const huntTargets =
+      purpose === 'hunt' && reach === null ? this.huntMonsterIdsFor(quest) : new Set<string>();
     const targetMapIds =
       purpose === 'hunt'
-        ? mapsWithAnyMonsterSpawn(MAP_MANIFESTS, huntTargets)
+        ? reach === null
+          ? mapsWithAnyMonsterSpawn(MAP_MANIFESTS, huntTargets)
+          : [reach.mapId]
         : mapsWithNpc(MAP_MANIFESTS, quest.giverNpcId);
     if (targetMapIds.length === 0) {
       return 'no_route';
@@ -3340,6 +3453,21 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     navigation.nextMapId = undefined;
+    if (purpose === 'hunt' && reach !== null) {
+      const currentTile = tileOfUnits(player);
+      if (reachObjectiveMet(reach, map.mapId, currentTile)) {
+        this.simulation.clearPath(session.playerId);
+        navigation.status = 'moving';
+        return null;
+      }
+      const path = findApproachPath(this.map.runtime, reach.tile, currentTile, reach.radiusTiles);
+      if (path === null) {
+        return 'no_route';
+      }
+      this.simulation.setPath(session.playerId, path);
+      navigation.status = 'moving';
+      return null;
+    }
     if (purpose === 'hunt') {
       const targetId = this.nearestVisibleQuestMonsterId(session, huntTargets);
       if (targetId !== null) {
@@ -3375,7 +3503,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       navigation.status = 'arrived';
       return null;
     }
-    const path = findNpcApproachPath(
+    const path = findApproachPath(
       this.map.runtime,
       giver.tile,
       tileOfUnits(player),
@@ -3420,6 +3548,26 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
             session,
             record?.status === 'completed' ? { status: 'completed' } : { reason: 'quest_changed' },
           );
+          continue;
+        }
+        // Arrival objectives walk to a place, not a monster: stop at the
+        // radius and let the room's position scan commit the completion.
+        if (quest.objective.kind === 'reach') {
+          const playerTile = tileOfUnits(player);
+          if (reachObjectiveMet(quest.objective, this.map.mapId, playerTile)) {
+            this.simulation.clearPath(session.playerId);
+            navigation.status = 'moving';
+            continue;
+          }
+          if (!this.questPathExhausted(session)) {
+            continue;
+          }
+          const failure = this.planQuestNavigation(session, quest, 'hunt', navigation);
+          if (failure !== null) {
+            this.stopQuestNavigation(session, { reason: failure });
+            continue;
+          }
+          this.sendQuestNavigation(session, navigation);
           continue;
         }
         // The auto-attack loop owns movement while a target is locked.
@@ -3526,6 +3674,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private huntMonsterIdsFor(quest: QuestContent): Set<string> {
     if (quest.objective.kind === 'kill') {
       return new Set([quest.objective.monsterId]);
+    }
+    if (quest.objective.kind !== 'collect') {
+      return new Set();
     }
     const templateId = quest.objective.templateId;
     const ids = new Set<string>();
@@ -3673,6 +3824,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       items: this.content.bundle.items,
       monsters: this.content.bundle.monsters,
       npcNames: this.npcNames,
+      mapNames: this.mapNames,
       currentPeriodKey: rule === undefined ? '' : dailyPeriodKey(now, rule),
       ...(rule === undefined ? {} : { nextResetAt: nextDailyResetAt(now, rule) }),
       inventory,
@@ -3741,6 +3893,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         items: context.items,
         monsters: context.monsters,
         npcNames: context.npcNames,
+        mapNames: context.mapNames,
         currentPeriodKey: context.currentPeriodKey,
         inventory: context.inventory,
         ...(context.nextResetAt === undefined ? {} : { nextResetAt: context.nextResetAt }),
@@ -4217,6 +4370,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const combatPlayer = this.combat.getPlayer(session.playerId);
     const displayName = session.displayName;
     this.registry.remove(sessionId);
+    const reachPrefix = `${session.playerId}:`;
+    for (const key of this.reachBackoffUntil.keys()) {
+      if (key.startsWith(reachPrefix)) {
+        this.reachBackoffUntil.delete(key);
+      }
+    }
 
     // A map transfer keeps the party (ADR-036): the member is marked offline
     // until the destination room reports presence. A final leave removes the

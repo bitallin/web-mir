@@ -61,6 +61,39 @@ describe('quest views', () => {
     });
     expect(parsed.success).toBe(false);
   });
+
+  it('accepts an arrival objective with a resolved map and tile', () => {
+    const parsed = questViewSchema.safeParse({
+      ...DAILY_VIEW,
+      repeat: undefined,
+      nextResetAt: undefined,
+      objective: {
+        kind: 'reach',
+        mapId: 'starter_wilds',
+        mapName: '静语荒野',
+        tile: { x: 40, y: 10 },
+        radiusTiles: 2,
+      },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects an arrival objective with an out-of-range radius or count', () => {
+    const objective = {
+      kind: 'reach',
+      mapId: 'starter_wilds',
+      mapName: '静语荒野',
+      tile: { x: 40, y: 10 },
+      radiusTiles: 6,
+    };
+    expect(questViewSchema.safeParse({ ...DAILY_VIEW, objective }).success).toBe(false);
+    expect(
+      questViewSchema.safeParse({
+        ...DAILY_VIEW,
+        objective: { ...objective, radiusTiles: 2, count: 1 },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('quest navigation', () => {

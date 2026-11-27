@@ -568,6 +568,68 @@ describe('quest validation', () => {
     expect(result.issues.some((issue) => issue.message.includes('不能同时作为'))).toBe(true);
   });
 
+  it('rejects an arrival objective on a missing map', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_town_east_gate'];
+        if (quest !== undefined && quest.objective.kind === 'reach') {
+          quest.objective.mapId = 'missing_map';
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(
+      result.issues.some(
+        (issue) =>
+          issue.path === 'quests.quest_town_east_gate.objective.mapId' &&
+          issue.message.includes('missing_map'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects an arrival objective on a blocked or out-of-bounds tile', () => {
+    const blocked = RUINED_FIELDS_MAP.layers.collision.findIndex((value) => value !== 0);
+    expect(blocked).toBeGreaterThanOrEqual(0);
+    const blockedTile = {
+      x: blocked % RUINED_FIELDS_MAP.width,
+      y: Math.floor(blocked / RUINED_FIELDS_MAP.width),
+    };
+    const blockedResult = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_daily_ruins_patrol'];
+        if (quest !== undefined && quest.objective.kind === 'reach') {
+          quest.objective.tile = blockedTile;
+        }
+      }),
+    );
+    expect(blockedResult.valid).toBe(false);
+    expect(blockedResult.issues.some((issue) => issue.message.includes('可行走格'))).toBe(true);
+
+    const outsideResult = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_daily_ruins_patrol'];
+        if (quest !== undefined && quest.objective.kind === 'reach') {
+          quest.objective.tile = { x: RUINED_FIELDS_MAP.width, y: 0 };
+        }
+      }),
+    );
+    expect(outsideResult.valid).toBe(false);
+    expect(outsideResult.issues.some((issue) => issue.message.includes('超出地图'))).toBe(true);
+  });
+
+  it('rejects an arrival radius outside the allowed range', () => {
+    const result = validateContentBundle(
+      withMutation((bundle) => {
+        const quest = bundle.quests?.['quest_town_east_gate'];
+        if (quest !== undefined && quest.objective.kind === 'reach') {
+          quest.objective.radiusTiles = 6;
+        }
+      }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.bundle).toBeNull();
+  });
+
   it('rejects a prerequisite loop', () => {
     const result = validateContentBundle(
       withMutation((bundle) => {

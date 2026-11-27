@@ -41,6 +41,7 @@ import {
   insertCharacterQuest,
   itemInstances,
   listCharacterQuests,
+  wallets,
   type Database,
   type DatabaseHandle,
 } from '@web-legend/persistence';
@@ -706,7 +707,7 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     // frontier giver is named from the ruins map even while the player stands
     // in town.
     const chain = snapshots[0]?.quests.filter((quest) => quest.repeat === undefined) ?? [];
-    expect(chain).toHaveLength(11);
+    expect(chain).toHaveLength(12);
     const ruinsQuest = snapshots[0]?.quests.find((quest) => quest.questId === 'quest_ruins_bones');
     expect(ruinsQuest?.giverNpcId).toBe('ruins_scout');
     expect(ruinsQuest?.giverNpcName).toBe('废墟斥候');
@@ -745,6 +746,91 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     await waitUntil(() => rejections.length > 0, 5_000, 'locked quest rejection');
     expect(rejections[0]?.code).toBe('QUEST_UNAVAILABLE');
   });
+
+  it('completes an arrival quest from the authoritative position', async () => {
+    const actor = await createActor(db, 'Reach', {
+      mapId: STARTER_TOWN_MAP_ID,
+      position: tileUnits({ x: 24, y: 12 }),
+    });
+    const room = await createWorld(actor.ticket, STARTER_TOWN_MAP_ID);
+    const snapshots: QuestSnapshot[] = [];
+    const updates: QuestUpdate[] = [];
+    room.onMessage('quest.snapshot', (payload: unknown) => {
+      snapshots.push(questSnapshotSchema.parse(payload));
+    });
+    room.onMessage('quest.update', (payload: unknown) => {
+      updates.push(questUpdateSchema.parse(payload));
+    });
+    await waitUntil(() => snapshots.length > 0, 5_000, 'quest snapshot');
+    const offer = snapshots[0]?.quests.find((quest) => quest.questId === 'quest_town_east_gate');
+    expect(offer?.status).toBe('available');
+    expect(offer?.objective).toMatchObject({
+      kind: 'reach',
+      mapId: STARTER_TOWN_MAP_ID,
+      mapName: '晨曦主城',
+      tile: { x: 35, y: 15 },
+      radiusTiles: 2,
+    });
+
+    room.send('quest.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      questId: 'quest_town_east_gate',
+    });
+    await waitUntil(
+      () => updates.some((update) => update.quest.status === 'active'),
+      5_000,
+      'arrival quest accepted',
+    );
+
+    // Walk into the 2-tile radius; the room observes the simulation position
+    // and commits the completion without any client message beyond movement.
+    room.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 1,
+      targetTileX: 35,
+      targetTileY: 15,
+    });
+    await waitUntil(
+      () => updates.some((update) => update.quest.status === 'completed'),
+      20_000,
+      'arrival quest completed',
+    );
+    const completed = updates.find((update) => update.quest.status === 'completed');
+    expect(completed?.quest.progress).toBe(1);
+
+    // Return to the giver and claim; the reward commits exactly once.
+    room.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 2,
+      targetTileX: 24,
+      targetTileY: 12,
+    });
+    await waitUntil(
+      () => Math.abs((room.state.players.get(actor.character.id)?.x ?? 0) - 24_500) < 1_500,
+      20_000,
+      'arrival quest return walk',
+    );
+    room.send('quest.claim', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 3,
+      questId: 'quest_town_east_gate',
+    });
+    await waitUntil(
+      () => updates.some((update) => update.quest.status === 'claimed'),
+      5_000,
+      'arrival quest claimed',
+    );
+    const [wallet] = await db
+      .select({ balance: wallets.balance })
+      .from(wallets)
+      .where(eq(wallets.characterId, actor.character.id));
+    expect(wallet?.balance).toBe(5);
+  }, 45_000);
 
   it('serves a collect quest from bag counts and consumes the items on turn-in', async () => {
     const actor = await createActor(db, 'Gather', {

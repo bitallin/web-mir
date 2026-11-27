@@ -87,6 +87,7 @@ export {
   nextDailyResetAt,
   questViewFor,
   questViewsFor,
+  reachObjectiveMet,
   requireQuest,
 } from './quests';
 export type { QuestCatalog, QuestKillProgress, QuestRecordState, QuestViewContext } from './quests';

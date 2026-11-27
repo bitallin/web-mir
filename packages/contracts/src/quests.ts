@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-import { contentIdSchema, questRepeatSchema } from './content';
+import { contentIdSchema, QUEST_REACH_RADIUS_MAX, questRepeatSchema } from './content';
+import { tilePointSchema } from './map';
 import { mapIdSchema } from './mapRuntime';
 
 /**
@@ -17,7 +18,7 @@ export const QUEST_STATUSES = ['locked', 'available', 'active', 'completed', 'cl
 export const questStatusSchema = z.enum(QUEST_STATUSES);
 export type QuestStatus = z.infer<typeof questStatusSchema>;
 
-export const QUEST_OBJECTIVE_KINDS = ['kill', 'collect'] as const;
+export const QUEST_OBJECTIVE_KINDS = ['kill', 'collect', 'reach'] as const;
 
 export const questKillObjectiveViewSchema = z
   .object({
@@ -37,13 +38,25 @@ export const questCollectObjectiveViewSchema = z
   })
   .strict();
 
+export const questReachObjectiveViewSchema = z
+  .object({
+    kind: z.literal('reach'),
+    mapId: mapIdSchema,
+    mapName: z.string().min(1).max(64),
+    tile: tilePointSchema,
+    radiusTiles: z.number().int().min(1).max(QUEST_REACH_RADIUS_MAX),
+  })
+  .strict();
+
 export const questObjectiveViewSchema = z.discriminatedUnion('kind', [
   questKillObjectiveViewSchema,
   questCollectObjectiveViewSchema,
+  questReachObjectiveViewSchema,
 ]);
 
 export type QuestKillObjectiveView = z.infer<typeof questKillObjectiveViewSchema>;
 export type QuestCollectObjectiveView = z.infer<typeof questCollectObjectiveViewSchema>;
+export type QuestReachObjectiveView = z.infer<typeof questReachObjectiveViewSchema>;
 export type QuestObjectiveView = z.infer<typeof questObjectiveViewSchema>;
 
 export const questRewardItemViewSchema = z
@@ -83,7 +96,8 @@ export const questViewSchema = z
     status: questStatusSchema,
     /**
      * Recorded progress: kills for a kill objective, items currently in the bag
-     * for a collect objective. Always 0 for locked/available quests.
+     * for a collect objective, 0 or 1 for an arrival objective. Always 0 for
+     * locked/available quests.
      */
     progress: z.number().int().min(0).max(999),
     objective: questObjectiveViewSchema,

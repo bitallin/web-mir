@@ -23,9 +23,29 @@ const SECTIONS: readonly Omit<QuestSection, 'quests'>[] = [
   { key: 'done', title: '已领取', status: 'claimed' },
 ];
 
-/** Human label for an objective: monster name or "收集 <item>" (ADR-040). */
+/**
+ * Human label for an objective: monster name, "收集 <item>" or the arrival
+ * destination with its map and tile (ADR-040 / ADR-042).
+ */
 export function questObjectiveLabel(objective: QuestView['objective']): string {
-  return objective.kind === 'kill' ? objective.monsterName : `收集 ${objective.itemName}`;
+  if (objective.kind === 'kill') {
+    return objective.monsterName;
+  }
+  if (objective.kind === 'collect') {
+    return `收集 ${objective.itemName}`;
+  }
+  return `到达 ${objective.mapName}（${objective.tile.x},${objective.tile.y}）`;
+}
+
+/** Progress text; arrival objectives are binary rather than counted. */
+export function questObjectiveProgressLabel(
+  objective: QuestView['objective'],
+  progress: number,
+): string {
+  if (objective.kind === 'reach') {
+    return progress >= 1 ? '已到达' : '未到达';
+  }
+  return `${String(progress)}/${String(objective.count)}`;
 }
 
 export function groupQuestsByStatus(quests: readonly QuestView[]): QuestSection[] {

@@ -1,0 +1,482 @@
+{
+  "runAt": "2026-11-27T12:28:16.617Z",
+  "options": {
+    "players": 50,
+    "attackers": 10,
+    "durationMs": 120000,
+    "moveIntervalMs": 500,
+    "attackIntervalMs": 1000,
+    "gameWebPort": 84,
+    "gameServerPort": 87,
+    "controlApiPort": 86,
+    "databaseUrl": "[redacted]",
+    "output": "/data/nlp/ligen/web-mir/docs/phase-reports/alpha-03/reach-quests/load-50p2a.json",
+    "assertGoals": true,
+    "minAcceptRate": 0.7
+  },
+  "joined": 50,
+  "clientAccepted": 13760,
+  "clientRejected": 128,
+  "acceptRate": 0.9907834101382489,
+  "rejectedByCode": {
+    "COOLDOWN": 55,
+    "TARGET_DEAD": 73
+  },
+  "reconnectRate": 0,
+  "inboundBytesPerPlayer": 34931.54,
+  "room": {
+    "roomId": "Jp9GpJm1U",
+    "mapId": "starter_wilds",
+    "instanceId": "1",
+    "contentVersion": "2026.11.27.7",
+    "players": 50,
+    "wsSentBytes": 89529119,
+    "wsPatchBytes": 40456643,
+    "wsReceivedBytes": 1746577,
+    "wsConnections": 50,
+    "wsDisconnects": 0,
+    "wsReconnects": 0,
+    "acceptedCommands": 14272,
+    "rejectedCommands": 128,
+    "rejectionsByCode": {
+      "COOLDOWN": 55,
+      "TARGET_DEAD": 73
+    },
+    "chatMessages": 0,
+    "chatFiltered": 0,
+    "chatMuted": 0,
+    "transfers": 0,
+    "combatCommands": 512,
+    "combatEvents": 2339,
+    "monsterKills": 168,
+    "playerDeaths": 0,
+    "pvpKills": 0,
+    "assetCommands": 0,
+    "assetFailures": 0,
+    "lootSpawned": 217,
+    "lootPickedUp": 217,
+    "goldGranted": 896,
+    "expGranted": 3186,
+    "tick": {
+      "samples": 240,
+      "p50Ms": 1.26,
+      "p95Ms": 3.35,
+      "p99Ms": 3.93,
+      "maxMs": 4.63
+    },
+    "assetTx": {
+      "samples": 240,
+      "p50Ms": 24.69,
+      "p95Ms": 48.79,
+      "p99Ms": 71.63
+    }
+  },
+  "samples": [
+    {
+      "at": "2026-11-27T12:26:30.601Z",
+      "room": {
+        "roomId": "Jp9GpJm1U",
+        "mapId": "starter_wilds",
+        "instanceId": "1",
+        "contentVersion": "2026.11.27.7",
+        "players": 50,
+        "wsSentBytes": 13060719,
+        "wsPatchBytes": 4388745,
+        "wsReceivedBytes": 224134,
+        "wsConnections": 50,
+        "wsDisconnects": 0,
+        "wsReconnects": 0,
+        "acceptedCommands": 1843,
+        "rejectedCommands": 17,
+        "rejectionsByCode": {
+          "COOLDOWN": 15,
+          "TARGET_DEAD": 2
+        },
+        "chatMessages": 0,
+        "chatFiltered": 0,
+        "chatMuted": 0,
+        "transfers": 0,
+        "combatCommands": 96,
+        "combatEvents": 504,
+        "monsterKills": 27,
+        "playerDeaths": 0,
+        "pvpKills": 0,
+        "assetCommands": 0,
+        "assetFailures": 0,
+        "lootSpawned": 35,
+        "lootPickedUp": 35,
+        "goldGranted": 157,
+        "expGranted": 551,
+        "tick": {
+          "samples": 240,
+          "p50Ms": 1.23,
+          "p95Ms": 3.89,
+          "p99Ms": 5.68,
+          "maxMs": 7.22
+        },
+        "assetTx": {
+          "samples": 62,
+          "p50Ms": 28.51,
+          "p95Ms": 84.77,
+          "p99Ms": 102.34
+        }
+      }
+    },
+    {
+      "at": "2026-11-27T12:26:45.604Z",
+      "room": {
+        "roomId": "Jp9GpJm1U",
+        "mapId": "starter_wilds",
+        "instanceId": "1",
+        "contentVersion": "2026.11.27.7",
+        "players": 50,
+        "wsSentBytes": 24615598,
+        "wsPatchBytes": 9445834,
+        "wsReceivedBytes": 441332,
+        "wsConnections": 50,
+        "wsDisconnects": 0,
+        "wsReconnects": 0,
+        "acceptedCommands": 3622,
+        "rejectedCommands": 38,
+        "rejectionsByCode": {
+          "COOLDOWN": 20,
+          "TARGET_DEAD": 18
+        },
+        "chatMessages": 0,
+        "chatFiltered": 0,
+        "chatMuted": 0,
+        "transfers": 0,
+        "combatCommands": 153,
+        "combatEvents": 806,
+        "monsterKills": 48,
+        "playerDeaths": 0,
+        "pvpKills": 0,
+        "assetCommands": 0,
+        "assetFailures": 0,
+        "lootSpawned": 56,
+        "lootPickedUp": 56,
+        "goldGranted": 259,
+        "expGranted": 885,
+        "tick": {
+          "samples": 240,
+          "p50Ms": 1.47,
+          "p95Ms": 4.09,
+          "p99Ms": 4.77,
+          "maxMs": 5.54
+        },
+        "assetTx": {
+          "samples": 102,
+          "p50Ms": 28.98,
+          "p95Ms": 66.62,
+          "p99Ms": 90.97
+        }
+      }
+    },
+    {
+      "at": "2026-11-27T12:27:00.611Z",
+      "room": {
+        "roomId": "Jp9GpJm1U",
+        "mapId": "starter_wilds",
+        "instanceId": "1",
+        "contentVersion": "2026.11.27.7",
+        "players": 50,
+        "wsSentBytes": 34283408,
+        "wsPatchBytes": 14534506,
+        "wsReceivedBytes": 659446,
+        "wsConnections": 50,
+        "wsDisconnects": 0,
+        "wsReconnects": 0,
+        "acceptedCommands": 5411,
+        "rejectedCommands": 49,
+        "rejectionsByCode": {
+          "COOLDOWN": 23,
+          "TARGET_DEAD": 26
+        },
+        "chatMessages": 0,
+        "chatFiltered": 0,
+        "chatMuted": 0,
+        "transfers": 0,
+        "combatCommands": 192,
+        "combatEvents": 977,
+        "monsterKills": 61,
+        "playerDeaths": 0,
+        "pvpKills": 0,
+        "assetCommands": 0,
+        "assetFailures": 0,
+        "lootSpawned": 73,
+        "lootPickedUp": 73,
+        "goldGranted": 317,
+        "expGranted": 1107,
+        "tick": {
+          "samples": 240,
+          "p50Ms": 1.57,
+          "p95Ms": 3.92,
+          "p99Ms": 4.35,
+          "maxMs": 5.42
+        },
+        "assetTx": {
+          "samples": 132,
+          "p50Ms": 27.87,
+          "p95Ms": 62.79,
+          "p99Ms": 90.97
+        }
+      }
+    },
+    {
+      "at": "2026-11-27T12:27:15.600Z",
+      "room": {
+        "roomId": "Jp9GpJm1U",
+        "mapId": "starter_wilds",
+        "instanceId": "1",
+        "contentVersion": "2026.11.27.7",
+        "players": 50,
+        "wsSentBytes": 45029402,
+        "wsPatchBytes": 19726198,
+        "wsReceivedBytes": 877804,
+        "wsConnections": 50,
+        "wsDisconnects": 0,
+        "wsReconnects": 0,
+        "acceptedCommands": 7196,
+        "rejectedCommands": 64,
+        "rejectionsByCode": {
+          "COOLDOWN": 27,
+          "TARGET_DEAD": 37
+        },
+        "chatMessages": 0,
+        "chatFiltered": 0,
+        "chatMuted": 0,
+        "transfers": 0,
+        "combatCommands": 248,
+        "combatEvents": 1211,
+        "monsterKills": 79,
+        "playerDeaths": 0,
+        "pvpKills": 0,
+        "assetCommands": 0,
+        "assetFailures": 0,
+        "lootSpawned": 97,
+        "lootPickedUp": 97,
+        "goldGranted": 420,
+        "expGranted": 1490,
+        "tick": {
+          "samples": 240,
+          "p50Ms": 1.36,
+          "p95Ms": 3.53,
+          "p99Ms": 4.35,
+          "maxMs": 4.62
+        },
+        "assetTx": {
+          "samples": 175,
+          "p50Ms": 27.45,
+          "p95Ms": 59.62,
+          "p99Ms": 90.97
+        }
+      }
+    },
+    {
+      "at": "2026-11-27T12:27:30.610Z",
+      "room": {
+        "roomId": "Jp9GpJm1U",
+        "mapId": "starter_wilds",
+        "instanceId": "1",
+        "contentVersion": "2026.11.27.7",
+        "players": 50,
+        "wsSentBytes": 56469020,
+        "wsPatchBytes": 25166982,
+        "wsReceivedBytes": 1096694,
+        "wsConnections": 50,
+        "wsDisconnects": 0,
+        "wsReconnects": 0,
+        "acceptedCommands": 8977,
+        "rejectedCommands": 83,
+        "rejectionsByCode": {
+          "COOLDOWN": 31,
+          "TARGET_DEAD": 52
+        },
+        "chatMessages": 0,
+        "chatFiltered": 0,
+        "chatMuted": 0,
+        "transfers": 0,
+        "combatCommands": 308,
+        "combatEvents": 1472,
+        "monsterKills": 96,
+        "playerDeaths": 0,
+        "pvpKills": 0,
+        "assetCommands": 0,
+        "assetFailures": 0,
+        "lootSpawned": 122,
+        "lootPickedUp": 122,
+        "goldGranted": 504,
+        "expGranted": 1800,
+        "tick": {
+          "samples": 240,
+          "p50Ms": 1.45,
+          "p95Ms": 3.94,
+          "p99Ms": 4.61,
+          "maxMs": 6.23
+        },
+        "assetTx": {
+          "samples": 217,
+          "p50Ms": 27,
+          "p95Ms": 57.42,
+          "p99Ms": 89.53
+        }
+      }
+    },
+    {
+      "at": "2026-11-27T12:27:45.620Z",
+      "room": {
+        "roomId": "Jp9GpJm1U",
+        "mapId": "starter_wilds",
+        "instanceId": "1",
+        "contentVersion": "2026.11.27.7",
+        "players": 50,
+        "wsSentBytes": 67665875,
+        "wsPatchBytes": 30091903,
+        "wsReceivedBytes": 1315821,
+        "wsConnections": 50,
+        "wsDisconnects": 0,
+        "wsReconnects": 0,
+        "acceptedCommands": 10765,
+        "rejectedCommands": 95,
+        "rejectionsByCode": {
+          "COOLDOWN": 36,
+          "TARGET_DEAD": 59
+        },
+        "chatMessages": 0,
+        "chatFiltered": 0,
+        "chatMuted": 0,
+        "transfers": 0,
+        "combatCommands": 387,
+        "combatEvents": 1782,
+        "monsterKills": 122,
+        "playerDeaths": 0,
+        "pvpKills": 0,
+        "assetCommands": 0,
+        "assetFailures": 0,
+        "lootSpawned": 159,
+        "lootPickedUp": 159,
+        "goldGranted": 661,
+        "expGranted": 2357,
+        "tick": {
+          "samples": 240,
+          "p50Ms": 1.2,
+          "p95Ms": 3.23,
+          "p99Ms": 3.96,
+          "maxMs": 4.78
+        },
+        "assetTx": {
+          "samples": 240,
+          "p50Ms": 25.77,
+          "p95Ms": 47.04,
+          "p99Ms": 57.58
+        }
+      }
+    },
+    {
+      "at": "2026-11-27T12:28:00.621Z",
+      "room": {
+        "roomId": "Jp9GpJm1U",
+        "mapId": "starter_wilds",
+        "instanceId": "1",
+        "contentVersion": "2026.11.27.7",
+        "players": 50,
+        "wsSentBytes": 78416387,
+        "wsPatchBytes": 35138603,
+        "wsReceivedBytes": 1534853,
+        "wsConnections": 50,
+        "wsDisconnects": 0,
+        "wsReconnects": 0,
+        "acceptedCommands": 12548,
+        "rejectedCommands": 112,
+        "rejectionsByCode": {
+          "COOLDOWN": 44,
+          "TARGET_DEAD": 68
+        },
+        "chatMessages": 0,
+        "chatFiltered": 0,
+        "chatMuted": 0,
+        "transfers": 0,
+        "combatCommands": 451,
+        "combatEvents": 2057,
+        "monsterKills": 148,
+        "playerDeaths": 0,
+        "pvpKills": 0,
+        "assetCommands": 0,
+        "assetFailures": 0,
+        "lootSpawned": 190,
+        "lootPickedUp": 190,
+        "goldGranted": 784,
+        "expGranted": 2779,
+        "tick": {
+          "samples": 240,
+          "p50Ms": 1.26,
+          "p95Ms": 3.27,
+          "p99Ms": 4.04,
+          "maxMs": 5.92
+        },
+        "assetTx": {
+          "samples": 240,
+          "p50Ms": 24.7,
+          "p95Ms": 46.27,
+          "p99Ms": 52.12
+        }
+      }
+    }
+  ],
+  "runtime": [
+    {
+      "at": "2026-11-27T12:26:30.638Z",
+      "eventLoopP99Ms": 20.808,
+      "rssBytes": 174358528,
+      "cpuUserSeconds": 8.418,
+      "dbProbeSeconds": 0
+    },
+    {
+      "at": "2026-11-27T12:26:45.612Z",
+      "eventLoopP99Ms": 21.086,
+      "rssBytes": 220839936,
+      "cpuUserSeconds": 10.452,
+      "dbProbeSeconds": 0.001
+    },
+    {
+      "at": "2026-11-27T12:27:00.619Z",
+      "eventLoopP99Ms": 21.84,
+      "rssBytes": 283672576,
+      "cpuUserSeconds": 12.442,
+      "dbProbeSeconds": 0.001
+    },
+    {
+      "at": "2026-11-27T12:27:15.605Z",
+      "eventLoopP99Ms": 21.922,
+      "rssBytes": 335306752,
+      "cpuUserSeconds": 14.006,
+      "dbProbeSeconds": 0.001
+    },
+    {
+      "at": "2026-11-27T12:27:30.616Z",
+      "eventLoopP99Ms": 22.053,
+      "rssBytes": 367919104,
+      "cpuUserSeconds": 15.677,
+      "dbProbeSeconds": 0.001
+    },
+    {
+      "at": "2026-11-27T12:27:45.625Z",
+      "eventLoopP99Ms": 22.2,
+      "rssBytes": 376774656,
+      "cpuUserSeconds": 17.726,
+      "dbProbeSeconds": 0.001
+    },
+    {
+      "at": "2026-11-27T12:28:00.627Z",
+      "eventLoopP99Ms": 22.446,
+      "rssBytes": 377876480,
+      "cpuUserSeconds": 19.506,
+      "dbProbeSeconds": 0.001
+    }
+  ],
+  "runtimeMax": {
+    "eventLoopP99Ms": 22.446,
+    "rssBytes": 377876480,
+    "dbProbeSeconds": 0.001
+  }
+}

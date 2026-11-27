@@ -12,7 +12,7 @@ import { applyExperience } from './progression';
  * stand outside the chain and are pinned explicitly so new content stays
  * intentional.
  */
-const SIDE_QUESTS = ['quest_supply_delivery'] as const;
+const SIDE_QUESTS = ['quest_supply_delivery', 'quest_town_east_gate'] as const;
 
 const EXPECTED_CHAIN = [
   'quest_slime_cleanup',

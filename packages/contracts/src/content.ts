@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import { characterClassSchema, type CharacterClass } from './character';
 import { equipmentSlotSchema, itemKindSchema, itemQualitySchema } from './economy';
+import { tilePointSchema } from './map';
+import { mapIdSchema } from './mapRuntime';
 
 /**
  * Declarative content bundle shared by the admin editor, the Control API and
@@ -378,9 +380,27 @@ export const questCollectObjectiveSchema = z
   })
   .strict();
 
+/** Largest arrival radius the server will accept for a reach objective (ADR-042). */
+export const QUEST_REACH_RADIUS_MAX = 5 as const;
+
+/**
+ * Arrival objective: the character must stand inside `radiusTiles` of `tile` on
+ * `mapId`. The room observes the authoritative position and commits completion
+ * itself; the player never reports coordinates (ADR-042).
+ */
+export const questReachObjectiveSchema = z
+  .object({
+    kind: z.literal('reach'),
+    mapId: mapIdSchema,
+    tile: tilePointSchema,
+    radiusTiles: z.number().int().min(1).max(QUEST_REACH_RADIUS_MAX),
+  })
+  .strict();
+
 export const questObjectiveSchema = z.discriminatedUnion('kind', [
   questKillObjectiveSchema,
   questCollectObjectiveSchema,
+  questReachObjectiveSchema,
 ]);
 export type QuestObjective = z.infer<typeof questObjectiveSchema>;
 
