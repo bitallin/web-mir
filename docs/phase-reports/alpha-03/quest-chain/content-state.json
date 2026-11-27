@@ -1,0 +1,80 @@
+{
+  "activeRelease": {
+    "id": "01a21c34-b2cb-7d4d-bb0c-d3fe5b3cad4a",
+    "version": "2026.11.27.4",
+    "schemaVersion": 1,
+    "checksum": "5e22537cf01ab606b7cfaf55d91dc2dcdc01238ac891a937ba9c297123c6f80a",
+    "createdBy": "01a21109-eca6-7b26-a980-84b42af1374d",
+    "createdByUsername": "admin",
+    "createdAt": "2026-11-27T08:52:25.410Z",
+    "note": "新增 7 步主线（蛛巢、石甲守卫、废墟四步与灰烬魔像），并接入废墟斥候发布者",
+    "changeSummary": { "added": 7, "removed": 0, "changed": 1 },
+    "active": true
+  },
+  "previousRelease": {
+    "id": "01a21bbf-778c-7c7e-8b45-2b7359545b6e",
+    "version": "2026.11.27.3",
+    "schemaVersion": 1,
+    "checksum": "1cd1199a2b2ccb0f92f080f4ff5171e00074095884c0f4b778b3b10615389022",
+    "createdBy": "01a21109-eca6-7b26-a980-84b42af1374d",
+    "createdByUsername": "admin",
+    "createdAt": "2026-11-27T06:44:22.534Z",
+    "note": "新增两个每日任务与 rules.dailyReset（05:00 +08:00）",
+    "changeSummary": { "added": 3, "removed": 0, "changed": 0 },
+    "active": false
+  },
+  "lastActivation": {
+    "id": "01a21c34-cade-7733-81ca-cde0b891c9d8",
+    "realmId": "01a20c45-b9b8-70c7-9ab5-072b267901e9",
+    "releaseId": "01a21c34-b2cb-7d4d-bb0c-d3fe5b3cad4a",
+    "releaseVersion": "2026.11.27.4",
+    "activatedBy": "01a21109-eca6-7b26-a980-84b42af1374d",
+    "activatedByUsername": "admin",
+    "reason": "Alpha 0.3 S3-C 十步主线任务链",
+    "createdAt": "2026-11-27T08:52:31.580Z"
+  },
+  "drafts": [
+    {
+      "section": "classes",
+      "updatedAt": "2026-11-26T16:58:48.141Z",
+      "updatedByUsername": "admin",
+      "dirty": false
+    },
+    {
+      "section": "skills",
+      "updatedAt": "2026-11-26T16:58:48.157Z",
+      "updatedByUsername": "admin",
+      "dirty": false
+    },
+    {
+      "section": "monsters",
+      "updatedAt": "2026-11-27T05:22:02.957Z",
+      "updatedByUsername": "admin",
+      "dirty": false
+    },
+    {
+      "section": "items",
+      "updatedAt": "2026-11-27T05:22:02.993Z",
+      "updatedByUsername": "admin",
+      "dirty": false
+    },
+    {
+      "section": "lootTables",
+      "updatedAt": "2026-11-27T05:22:03.014Z",
+      "updatedByUsername": "admin",
+      "dirty": false
+    },
+    {
+      "section": "rules",
+      "updatedAt": "2026-11-27T06:44:18.849Z",
+      "updatedByUsername": "admin",
+      "dirty": false
+    },
+    {
+      "section": "quests",
+      "updatedAt": "2026-11-27T08:51:42.217Z",
+      "updatedByUsername": "admin",
+      "dirty": false
+    }
+  ]
+}

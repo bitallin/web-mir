@@ -3771,3 +3771,98 @@ PLAYWRIGHT_WORKERS=1 pnpm test:e2e
 
 - `5dc6e96` `feat(alpha-03): open quests from every map`
   （12 个文件：契约、导航 accept、全局面板、地点解析、1 条集成、1 个 E2E）。
+
+## 2026-11-27 Alpha 0.3 S3-C：十步主线任务链与废墟斥候
+
+### 目标
+
+主线在 5 级结束后没有后续目标，5–12 级只能刷怪；10 级后的废墟与首领缺少
+叙事入口。本切片把主线从 3 步扩展到 10 步，覆盖三张地图与全部怪物层级，
+在废墟入口新增发布者，并让任务面板在任务量增加后仍然可读。
+
+### 实际改动
+
+1. **内容**
+   - 新增 7 步主线：蛛巢清理（毒牙蜘蛛 4）、石甲守卫（石甲守卫 2）、枯骨之路
+     （骷髅武士 5）、腐化之源（腐化术士 4）、石像鬼的守望（废墟石像鬼 1）、
+     肃清亡者（骷髅武士 8）、灰烬魔像（首领 1）。
+   - `quest_alpha_wolf` 的前置改为 `quest_stone_guard`，使新步骤进入主线；
+     奖励经验 60 → 1500、金币 20 → 400，包含大药水、材料与灰烬之心。
+2. **地图与契约**
+   - `MAP_NPC_ROLES` 增加 `scout`；`map-runtime` 编译器改为使用契约枚举校验
+     NPC 角色（新增非法角色测试）。
+   - `ruined_fields` 的 `npc_points` 新增 `ruins_scout`「废墟斥候」@ (7,20)，
+     远离入口刷点与既有 E2E 路径；`pnpm maps:compile` 重新生成编译产物。
+3. **客户端**
+   - 新增 `lib/questPanel.ts`：`groupQuestsByStatus`（可交付 → 进行中 →
+     可接取 → 尚未解锁 → 已领取，隐藏空组、组内保留服务器顺序）与
+     `nextAvailableQuest`（一次性主线优先，再按等级）。
+   - 任务面板按分组渲染，标题显示数量并吸顶；引导提示改用 `nextAvailableQuest`。
+4. **测试**
+   - 领域：`questChain.test.ts` 验证 10 步线性链、发布者前五步守卫/后五步
+     斥候、等级不递减，并模拟“只靠本链击杀与奖励”从 1 级完成。
+   - 应用：真实 PostgreSQL 全链测试，依次接取/击杀/交付 10 步，断言奖励与
+     10 条金币账本恰一次。
+   - 服务端：主城快照包含 10 条一次性任务，斥候名字解析正确且状态 locked。
+   - 浏览器：`tests/e2e/questChain.spec.ts` 验证「可接取 2 / 尚未解锁 10」、
+     废墟斥候地点与主线优先提示。
+5. **发布与验证**
+   - 重启开发栈加载新编译地图；draft 200、validate 200（0 issue）、publish
+     201、activate 200；内容 `2026.11.27.4`（checksum `5e22537c…`）。
+   - 50 人 × 2 分钟 sanity 50/50、接受率 99.1%、174 击杀、0 资产失败、
+     tick p95 4.79ms / p99 5.65ms；重启后资产不变量 7/7 为 0；无数据库迁移。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+PLAYWRIGHT_WORKERS=1 pnpm test:e2e
+pnpm verify:invariants
+```
+
+- 格式/lint/类型/构建：通过。
+- 单元/集成：**551 测试**通过（新增 10 条）。
+- 全量 E2E：**46/46 通过**（串行全量，10.8 分钟）。
+- 容量 sanity：50/50、99.1%、174 击杀、0 资产失败、tick p95 4.79ms。
+- 资产不变量：7 项全部 0 违例。
+- 内容发布：draft 200、validate 200（valid=true, 0 issue）、publish 201、
+  activate 200；Game Server 日志确认内容刷新。
+
+### 遇到的问题及解决方法
+
+1. **校验报“发布 NPC 不在任何地图中”**：地图 NPC 属于编译代码，运行中的
+   Control API 仍持有旧地图；重启开发栈后同一草稿 0 issue。沉淀 EL-040。
+2. **任务面板在 12 条任务时可读性下降**：按状态分组，可操作任务排在锁定
+   任务之前；分组标题吸顶并显示数量。
+3. **引导提示先指向每日任务**：`nextAvailableQuest` 优先一次性主线；E2E
+   断言提示为「可接任务：清理史莱姆」。
+4. **地图编译产物格式**：`pnpm maps:compile` 后需要再跑 Prettier 才能通过
+   `format:check`，编译内容本身不变。
+5. **压测脚本 teardown 挂起**：一名 mover 走进传送门被传到主城后，SDK 对已
+   结束的 Room 调用 `leave()` 永不返回；报告已写出但进程不退出。改为有界等待
+   5 秒并关闭仍打开的连接；10 人 smoke 与 50 人复跑均 `EXIT:0`（EL-041）。
+
+### 尚未解决
+
+- 任务仍只有击杀目标；没有放弃、任务日志、收集/到达、组队共享与 NPC 头顶
+  感叹号。
+- 第 10 步依赖世界首领，单人或低峰时段可能需要等待/争夺。
+- 任务面板没有搜索/筛选（TD-CLI-20）；任务继续增长时需要。
+- 经验曲线让后期玩家高于任务等级要求，升级节奏待试玩反馈。
+- 自动战斗只用普攻（TD-CLI-19）；远程接取仍是真实旅程。
+
+### 提交
+
+- `9f68bcc` `feat(alpha-03): extend the main quest chain into the ruins`
+- `697edec` `fix(alpha-03): bound the load scenario teardown`
+- `docs(alpha-03): record the ten-step quest chain`
+
+### 下一步计划
+
+1. 8584 试玩十步主线：前五步在野外，8 级以上到废墟找斥候接取后五步。
+2. S3-D 优先任务目标类型扩展（收集/到达）；副本实例先写 ADR。
+3. 确认远端 CI；正式美术仍为 TD-CLI-13。
