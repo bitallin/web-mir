@@ -18,6 +18,7 @@ import {
   monsterStateKindFromCode,
   partyInviteViewSchema,
   partySnapshotSchema,
+  questNavigationSchema,
   questSnapshotSchema,
   questUpdateSchema,
   sessionKickedSchema,
@@ -40,6 +41,8 @@ import {
   type MonsterStateKind,
   type PartyInviteView,
   type PartySnapshot,
+  type QuestNavigation,
+  type QuestNavigationPurpose,
   type QuestSnapshot,
   type QuestUpdate,
   type SessionKicked,
@@ -133,6 +136,7 @@ export type WorldClientCallbacks = {
   onShopCatalog: (catalog: ShopCatalog) => void;
   onQuestSnapshot: (snapshot: QuestSnapshot) => void;
   onQuestUpdate: (update: QuestUpdate) => void;
+  onQuestNavigation: (navigation: QuestNavigation) => void;
   onPartySnapshot: (snapshot: PartySnapshot) => void;
   onPartyInvite: (invite: PartyInviteView) => void;
   onAssetResult: (result: AssetResult) => void;
@@ -151,6 +155,8 @@ export type WorldClientOptions = {
   /** Fetches a fresh one-time ticket from the Control API for every new join. */
   requestTicket: () => Promise<string>;
   roomPreference?: RoomPreference;
+  /** Development-only: create a new room for every transfer (see identity.ts). */
+  freshTransfers?: boolean;
   callbacks: WorldClientCallbacks;
 };
 
@@ -456,6 +462,24 @@ export class WorldClient {
     return true;
   }
 
+  /** Returns the command id, or null when the room cannot accept the intent. */
+  sendQuestNavigate(questId: string, purpose: QuestNavigationPurpose): string | null {
+    const room = this.room;
+    if (room === null || this.stopped || this.transferring) {
+      return null;
+    }
+    const commandId = createUuid();
+    room.send(CLIENT_MESSAGES.questNavigate, {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId,
+      clientSequence: this.sequence,
+      questId,
+      purpose,
+    });
+    this.sequence += 1;
+    return commandId;
+  }
+
   sendPartyInvite(targetPlayerId: string): boolean {
     return this.sendPartyCommand(CLIENT_MESSAGES.partyInvite, { targetPlayerId });
   }
@@ -522,8 +546,12 @@ export class WorldClient {
 
     try {
       // The destination is fixed by the server; a development room preference
-      // must not send the character back to the previous room.
-      await this.joinFresh({ mode: 'joinOrCreate' });
+      // must not send the character back to the previous room. Automation can
+      // opt into a fresh destination instance so its combat never competes
+      // with another scenario in the shared wilds room.
+      await this.joinFresh(
+        this.options.freshTransfers === true ? { mode: 'create' } : { mode: 'joinOrCreate' },
+      );
     } finally {
       this.transferring = false;
     }
@@ -716,6 +744,15 @@ export class WorldClient {
         const parsed = questUpdateSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onQuestUpdate(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.questNavigation, (payload: unknown) => {
+        const parsed = questNavigationSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onQuestNavigation(parsed.data);
         }
       }),
     );

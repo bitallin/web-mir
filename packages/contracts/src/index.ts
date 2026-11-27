@@ -273,11 +273,19 @@ export type {
 } from './content';
 
 export {
+  QUEST_NAVIGATION_PURPOSES,
+  QUEST_NAVIGATION_REASONS,
+  QUEST_NAVIGATION_STATUSES,
   QUEST_NPC_RANGE_TILES,
   QUEST_OBJECTIVE_KINDS,
   QUEST_STATUSES,
   questAcceptSchema,
   questClaimSchema,
+  questNavigateSchema,
+  questNavigationPurposeSchema,
+  questNavigationReasonSchema,
+  questNavigationSchema,
+  questNavigationStatusSchema,
   questObjectiveViewSchema,
   questRewardItemViewSchema,
   questRewardsViewSchema,
@@ -289,6 +297,11 @@ export {
 export type {
   QuestAccept,
   QuestClaim,
+  QuestNavigate,
+  QuestNavigation,
+  QuestNavigationPurpose,
+  QuestNavigationReason,
+  QuestNavigationStatus,
   QuestObjectiveView,
   QuestRewardItemView,
   QuestRewardsView,

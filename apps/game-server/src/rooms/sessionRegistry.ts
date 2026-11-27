@@ -24,6 +24,23 @@ export type AutoAttackState = {
 };
 
 /**
+ * One-click quest guidance owned by the room (ADR-039). The browser submits
+ * the intent; this state drives server-authoritative movement, target choice
+ * and the arrival hand-off.
+ */
+export type QuestNavigationState = {
+  questId: string;
+  purpose: 'hunt' | 'return';
+  status: 'moving' | 'waiting' | 'arrived';
+  /** Combat-world time (ms) before which the next target search is skipped. */
+  nextSearchAt: number;
+  /** Next map hop when the destination lies beyond a portal. */
+  nextMapId?: string | undefined;
+  /** Last status/map sent, so the tick only emits transitions. */
+  lastSentKey: string | null;
+};
+
+/**
  * Per-connection state owned by the room. Extracted from `WorldMapRoom` so the
  * session lifecycle (join, reconnect, moderation, leave) has one owner that can
  * be tested without a live Colyseus room (TD-SRV-01).
@@ -44,6 +61,10 @@ export type SessionRecord = {
   recentAutoCommands: Map<string, true>;
   /** Server-owned auto-attack loop; null when the player is not attacking. */
   autoAttack: AutoAttackState | null;
+  /** Server-owned one-click quest guidance; null when idle. */
+  questNavigation: QuestNavigationState | null;
+  /** Quest navigation command ids already applied by this session. */
+  recentQuestCommands: Map<string, true>;
   /** Last committed private asset state, merged with live vitals on send. */
   assetSnapshot: InventorySnapshot;
   /** Committed quest rows, keyed by content quest id (ADR-034). */

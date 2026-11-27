@@ -29,6 +29,7 @@ export const CLIENT_MESSAGES = {
   shopSell: 'shop.sell',
   questAccept: 'quest.accept',
   questClaim: 'quest.claim',
+  questNavigate: 'quest.navigate',
   partyInvite: 'party.invite',
   partyAccept: 'party.accept',
   partyDecline: 'party.decline',
@@ -53,6 +54,7 @@ export const SERVER_MESSAGES = {
   shopCatalog: 'shop.catalog',
   questSnapshot: 'quest.snapshot',
   questUpdate: 'quest.update',
+  questNavigation: 'quest.navigation',
   partySnapshot: 'party.snapshot',
   partyInvite: 'party.invite',
 } as const;

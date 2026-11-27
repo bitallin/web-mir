@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { contentIdSchema, questRepeatSchema } from './content';
+import { mapIdSchema } from './mapRuntime';
 
 /**
  * Quest wire contract. The server owns progression and rewards: the browser
@@ -114,3 +115,69 @@ export const questClaimSchema = z
   .strict();
 
 export type QuestClaim = z.infer<typeof questClaimSchema>;
+
+/**
+ * One-click quest guidance (ADR-039). The client only states the intent; the
+ * server owns the route, the target choice and the actual movement.
+ */
+export const QUEST_NAVIGATION_PURPOSES = ['hunt', 'return', 'stop'] as const;
+export const questNavigationPurposeSchema = z.enum(QUEST_NAVIGATION_PURPOSES);
+export type QuestNavigationPurpose = z.infer<typeof questNavigationPurposeSchema>;
+
+export const questNavigateSchema = z
+  .object({
+    ...questCommandBase,
+    questId: contentIdSchema,
+    purpose: questNavigationPurposeSchema,
+  })
+  .strict();
+
+export type QuestNavigate = z.infer<typeof questNavigateSchema>;
+
+export const QUEST_NAVIGATION_STATUSES = [
+  'moving',
+  'waiting',
+  'arrived',
+  'stopped',
+  'completed',
+] as const;
+export const questNavigationStatusSchema = z.enum(QUEST_NAVIGATION_STATUSES);
+export type QuestNavigationStatus = z.infer<typeof questNavigationStatusSchema>;
+
+export const QUEST_NAVIGATION_REASONS = [
+  'manual',
+  'player_dead',
+  'target_gone',
+  'out_of_range',
+  'no_route',
+  'quest_changed',
+] as const;
+export const questNavigationReasonSchema = z.enum(QUEST_NAVIGATION_REASONS);
+export type QuestNavigationReason = z.infer<typeof questNavigationReasonSchema>;
+
+/**
+ * Server-authoritative navigation state for the current quest intent. `mapId`
+ * is the next map hop when the destination is beyond a portal; the browser
+ * only renders it.
+ */
+export const questNavigationSchema = z
+  .object({
+    questId: contentIdSchema,
+    purpose: z.enum(['hunt', 'return']),
+    status: questNavigationStatusSchema,
+    mapId: mapIdSchema.optional(),
+    reason: questNavigationReasonSchema.optional(),
+    serverTime: z.number().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.reason !== undefined && value.status !== 'stopped') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reason'],
+        message: 'only a stopped guidance carries a reason',
+      });
+    }
+  });
+
+export type QuestNavigation = z.infer<typeof questNavigationSchema>;

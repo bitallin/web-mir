@@ -12,6 +12,9 @@ import type {
   LootClaimed,
   PartyInviteView,
   PartyView,
+  QuestNavigation,
+  QuestNavigationPurpose,
+  QuestNavigationReason,
   QuestView,
   SessionKicked,
   ShopCatalog,
@@ -25,7 +28,7 @@ import { createWorldGame } from '../game/createWorldGame';
 import { mapBundleFor } from '../game/mapCatalog';
 import { isSfxMuted, SfxPlayer } from '../game/sfx';
 import { WorldBridge } from '../game/worldBridge';
-import { loadRoomPreference } from '../lib/identity';
+import { loadFreshTransfers, loadRoomPreference } from '../lib/identity';
 import {
   WorldClient,
   type ConnectionStatus,
@@ -84,6 +87,8 @@ export type SessionState = {
   shopRequest: { npcId: string; seq: number } | null;
   /** Quest state delivered by the server, already resolved for display. */
   quests: QuestView[];
+  /** Server-owned one-click quest guidance, if any (ADR-039). */
+  questNavigation: QuestNavigation | null;
   /** A nearby quest-giver click; GameScreen opens the quest panel. */
   questRequest: { npcId: string; seq: number } | null;
   /** Server-owned party roster; null when the player is not in a party. */
@@ -109,6 +114,23 @@ export type WorldSessionOptions = {
 const MAX_CHAT_MESSAGES = 120;
 const MAX_SYSTEM_MESSAGES = 60;
 const MAX_COMBAT_LOG = 12;
+
+function questNavigationStopMessage(reason: QuestNavigationReason): string {
+  switch (reason) {
+    case 'player_dead':
+      return '角色倒下，自动流程已停止';
+    case 'no_route':
+      return '找不到前往目标的路，自动流程已停止';
+    case 'out_of_range':
+      return '目标超出范围，自动流程已停止';
+    case 'target_gone':
+      return '目标已消失，自动流程已停止';
+    case 'quest_changed':
+      return '任务状态已变化，自动流程已停止';
+    case 'manual':
+      return '自动流程已停止';
+  }
+}
 
 function initialState(character: CharacterView): SessionState {
   return {
@@ -136,6 +158,7 @@ function initialState(character: CharacterView): SessionState {
     shopCatalog: null,
     shopRequest: null,
     quests: [],
+    questNavigation: null,
     questRequest: null,
     party: null,
     partyInvite: null,
@@ -329,6 +352,12 @@ class WorldSession {
   private shopCatalog: ShopCatalog | null = null;
   private shopRequestSequence = 0;
   private questRequestSequence = 0;
+  /** Client-side intent re-issued after a map transfer or a reconnect. */
+  private autoQuest: { questId: string; purpose: 'hunt' | 'return' } | null = null;
+  private autoQuestSentMapId: string | null = null;
+  private autoQuestPending: string | null = null;
+  private autoClaimSent = false;
+  private pendingNavCommandId: string | null = null;
   private quests: QuestView[] = [];
   private party: PartyView | null = null;
   private partyInvite: PartyInviteView | null = null;
@@ -382,6 +411,7 @@ class WorldSession {
       mapId: this.mapId,
       requestTicket: this.options.requestTicket,
       roomPreference: loadRoomPreference(),
+      freshTransfers: loadFreshTransfers(),
       callbacks: {
         onSnapshot: (snapshot) => {
           this.bridge.pushSnapshot({ snapshot, selfId: characterId });
@@ -414,6 +444,10 @@ class WorldSession {
           }));
         },
         onStatus: (status, detail) => {
+          if (status === 'reconnecting') {
+            // The room drops guidance on disconnect; re-issue it after join.
+            this.autoQuestSentMapId = null;
+          }
           this.updateState((previous) => ({
             ...previous,
             status,
@@ -421,6 +455,9 @@ class WorldSession {
             // A successful (re)join clears a previous moderator disconnect.
             ...(status === 'connected' ? { kicked: null } : {}),
           }));
+          if (status === 'connected') {
+            this.sendAutoQuestIntent();
+          }
         },
         onRoom: (roomId) => {
           this.updateState((previous) => ({ ...previous, roomId }));
@@ -435,6 +472,21 @@ class WorldSession {
           }
         },
         onRejected: (rejected) => {
+          if (this.autoQuestPending !== null) {
+            this.autoQuestPending = null;
+          }
+          if (
+            this.pendingNavCommandId !== null &&
+            rejected.commandId === this.pendingNavCommandId
+          ) {
+            this.pendingNavCommandId = null;
+            this.cancelAutoQuestLocally();
+          } else if (this.autoClaimSent) {
+            // The arrival hand-off failed (bag full, moved away, ...); stop
+            // automation and let the player claim from the panel.
+            this.autoClaimSent = false;
+            this.cancelAutoQuestLocally();
+          }
           this.pushNotice('warning', rejected.message);
         },
         onChat: (message) => {
@@ -534,15 +586,94 @@ class WorldSession {
         onQuestSnapshot: (snapshot) => {
           this.quests = snapshot.quests;
           this.updateState((previous) => ({ ...previous, quests: snapshot.quests }));
+          this.sendAutoQuestIntent();
         },
         onQuestUpdate: (update) => {
-          const exists = this.quests.some((quest) => quest.questId === update.quest.questId);
-          this.quests = exists
-            ? this.quests.map((quest) =>
-                quest.questId === update.quest.questId ? update.quest : quest,
-              )
-            : [...this.quests, update.quest];
-          this.updateState((previous) => ({ ...previous, quests: this.quests }));
+          const previous = this.quests.find((quest) => quest.questId === update.quest.questId);
+          this.quests =
+            previous === undefined
+              ? [...this.quests, update.quest]
+              : this.quests.map((quest) =>
+                  quest.questId === update.quest.questId ? update.quest : quest,
+                );
+          this.updateState((prev) => ({ ...prev, quests: this.quests }));
+
+          if (
+            update.quest.status === 'active' &&
+            update.quest.progress > (previous?.progress ?? 0)
+          ) {
+            this.pushNotice(
+              'info',
+              `任务进度：${update.quest.title} ${String(update.quest.progress)}/${String(
+                update.quest.objective.count,
+              )}`,
+            );
+          }
+          if (previous?.status !== 'completed' && update.quest.status === 'completed') {
+            this.pushNotice(
+              'info',
+              `任务完成：${update.quest.title}，点击「回去交付」自动返回${update.quest.giverNpcName}`,
+            );
+          }
+          if (previous?.status !== 'claimed' && update.quest.status === 'claimed') {
+            const rewardParts = [
+              update.quest.rewards.exp > 0 ? `经验 ${String(update.quest.rewards.exp)}` : '',
+              update.quest.rewards.gold > 0 ? `金币 ${String(update.quest.rewards.gold)}` : '',
+              ...update.quest.rewards.items.map((item) => `${item.name}×${String(item.quantity)}`),
+            ].filter((part) => part.length > 0);
+            this.pushNotice(
+              'info',
+              `任务已交付：${update.quest.title}${
+                rewardParts.length === 0 ? '' : `（${rewardParts.join('，')}）`
+              }`,
+            );
+          }
+          if (update.quest.status === 'active' && this.autoQuestPending === update.quest.questId) {
+            this.autoQuestPending = null;
+            this.navigateQuest(update.quest.questId, 'hunt');
+          }
+          if (this.autoQuest?.questId === update.quest.questId) {
+            if (update.quest.status === 'completed' && this.autoQuest.purpose === 'hunt') {
+              // The player decides when to return; the server stops the hunt.
+              this.autoQuest = null;
+              this.autoQuestSentMapId = null;
+              this.pendingNavCommandId = null;
+            } else if (update.quest.status === 'claimed') {
+              this.cancelAutoQuestLocally();
+            }
+          }
+        },
+        onQuestNavigation: (navigation) => {
+          if (navigation.status === 'arrived' && navigation.purpose === 'return') {
+            const quest = this.quests.find((entry) => entry.questId === navigation.questId);
+            if (quest !== undefined && quest.status === 'completed' && !this.autoClaimSent) {
+              this.autoClaimSent = true;
+              this.claimQuest(navigation.questId);
+              this.pushNotice('info', `已到达${quest.giverNpcName}，正在交付…`);
+            }
+            this.updateState((prev) => ({ ...prev, questNavigation: navigation }));
+            return;
+          }
+          if (navigation.status === 'stopped') {
+            const hadIntent = this.autoQuest !== null;
+            this.autoQuest = null;
+            this.autoQuestSentMapId = null;
+            this.pendingNavCommandId = null;
+            this.autoClaimSent = false;
+            this.updateState((prev) => ({ ...prev, questNavigation: null }));
+            if (hadIntent && navigation.reason !== undefined && navigation.reason !== 'manual') {
+              this.pushNotice('warning', questNavigationStopMessage(navigation.reason));
+            }
+            return;
+          }
+          if (navigation.status === 'completed') {
+            this.autoQuest = null;
+            this.autoQuestSentMapId = null;
+            this.pendingNavCommandId = null;
+            this.updateState((prev) => ({ ...prev, questNavigation: null }));
+            return;
+          }
+          this.updateState((prev) => ({ ...prev, questNavigation: navigation }));
         },
         onPartySnapshot: (snapshot) => {
           this.party = snapshot.party;
@@ -661,6 +792,7 @@ class WorldSession {
     }
     if (this.client?.sendMove(tile) === true) {
       this.commandCount += 1;
+      this.cancelAutoQuestLocally();
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
   }
@@ -670,6 +802,7 @@ class WorldSession {
     const sent = this.client?.sendEngage(targetId) ?? false;
     if (sent) {
       this.commandCount += 1;
+      this.cancelAutoQuestLocally();
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
       if (import.meta.env.DEV) {
         const debug = window.__webLegendDebug;
@@ -685,6 +818,7 @@ class WorldSession {
     const sent = this.client?.sendAutoAttackStop() ?? false;
     if (sent) {
       this.commandCount += 1;
+      this.cancelAutoQuestLocally();
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
     return sent;
@@ -794,10 +928,13 @@ class WorldSession {
   }
 
   /** Asks the server to accept a quest at its giver; the server re-checks range. */
-  acceptQuest(questId: string): boolean {
+  acceptQuest(questId: string, huntAfter = false): boolean {
     const sent = this.client?.sendQuestAccept(questId) ?? false;
     if (sent) {
       this.commandCount += 1;
+      if (huntAfter) {
+        this.autoQuestPending = questId;
+      }
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
     return sent;
@@ -811,6 +948,71 @@ class WorldSession {
       this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
     }
     return sent;
+  }
+
+  /**
+   * Starts server-authored quest guidance (ADR-039): the server walks the
+   * character to the target or giver, and the browser only renders the state.
+   */
+  navigateQuest(questId: string, purpose: QuestNavigationPurpose): boolean {
+    if (purpose === 'stop') {
+      const sent = this.client?.sendQuestNavigate(questId, 'stop') ?? null;
+      this.cancelAutoQuestLocally();
+      return sent !== null;
+    }
+    const commandId = this.client?.sendQuestNavigate(questId, purpose) ?? null;
+    if (commandId === null) {
+      return false;
+    }
+    this.autoQuest = { questId, purpose };
+    this.autoQuestSentMapId = this.mapId;
+    this.autoClaimSent = false;
+    this.pendingNavCommandId = commandId;
+    this.updateState((previous) => ({
+      ...previous,
+      questNavigation: { questId, purpose, status: 'moving', serverTime: Date.now() },
+    }));
+    return true;
+  }
+
+  stopQuestNavigation(): boolean {
+    const intent = this.autoQuest;
+    if (intent === null) {
+      return false;
+    }
+    return this.navigateQuest(intent.questId, 'stop');
+  }
+
+  private cancelAutoQuestLocally(): void {
+    const wasActive =
+      this.autoQuest !== null ||
+      this.autoQuestPending !== null ||
+      this.autoQuestSentMapId !== null ||
+      this.pendingNavCommandId !== null;
+    this.autoQuest = null;
+    this.autoQuestSentMapId = null;
+    this.autoQuestPending = null;
+    this.autoClaimSent = false;
+    this.pendingNavCommandId = null;
+    if (wasActive) {
+      this.updateState((previous) =>
+        previous.questNavigation === null ? previous : { ...previous, questNavigation: null },
+      );
+    }
+  }
+
+  /** Re-issues the client's intent once the new room is joined. */
+  private sendAutoQuestIntent(): void {
+    const intent = this.autoQuest;
+    if (intent === null || this.autoQuestSentMapId === this.mapId) {
+      return;
+    }
+    const commandId = this.client?.sendQuestNavigate(intent.questId, intent.purpose) ?? null;
+    if (commandId === null) {
+      return;
+    }
+    this.autoQuestSentMapId = this.mapId;
+    this.pendingNavCommandId = commandId;
   }
 
   /** Invites a visible player; the server re-checks distance, party size and state. */
@@ -911,6 +1113,7 @@ class WorldSession {
   }
 
   async leave(): Promise<void> {
+    this.cancelAutoQuestLocally();
     const client = this.client;
     this.client = null;
     if (client !== null) {
@@ -1051,6 +1254,10 @@ class WorldSession {
     this.quests = [];
     this.party = null;
     this.partyInvite = null;
+    // The guidance intent survives the transfer; the new room gets it again.
+    this.autoQuestSentMapId = null;
+    this.autoClaimSent = false;
+    this.pendingNavCommandId = null;
     if (this.partyInviteTimer !== null) {
       window.clearTimeout(this.partyInviteTimer);
       this.partyInviteTimer = null;
@@ -1079,6 +1286,15 @@ class WorldSession {
       shopCatalog: null,
       shopRequest: null,
       quests: [],
+      questNavigation:
+        this.autoQuest === null
+          ? null
+          : {
+              questId: this.autoQuest.questId,
+              purpose: this.autoQuest.purpose,
+              status: 'moving',
+              serverTime: Date.now(),
+            },
       questRequest: null,
       party: null,
       partyInvite: null,
@@ -1148,8 +1364,11 @@ class WorldSession {
         this.shopBuy(merchantId, templateId, quantity),
       sellToShop: (merchantId, itemId, quantity) => this.shopSell(merchantId, itemId, quantity),
       acceptQuest: (questId) => this.acceptQuest(questId),
+      acceptQuestAndHunt: (questId) => this.acceptQuest(questId, true),
       claimQuest: (questId) => this.claimQuest(questId),
+      navigateQuest: (questId, purpose) => this.navigateQuest(questId, purpose),
       questState: () => this.quests,
+      questNavigationState: () => this.autoQuest,
       inviteToParty: (playerId) => this.inviteToParty(playerId),
       acceptPartyInvite: () => this.acceptPartyInvite(),
       declinePartyInvite: () => this.declinePartyInvite(),
@@ -1189,7 +1408,10 @@ export type WorldSessionControls = {
   shopBuy: (merchantId: string, templateId: string, quantity: number) => boolean;
   shopSell: (merchantId: string, itemId: string, quantity: number) => boolean;
   acceptQuest: (questId: string) => boolean;
+  acceptQuestAndHunt: (questId: string) => boolean;
   claimQuest: (questId: string) => boolean;
+  navigateQuest: (questId: string, purpose: QuestNavigationPurpose) => boolean;
+  stopQuestNavigation: () => boolean;
   inviteToParty: (targetPlayerId: string) => boolean;
   acceptPartyInvite: () => boolean;
   declinePartyInvite: () => boolean;
@@ -1279,8 +1501,21 @@ export function useWorldSession(
     (questId: string) => sessionRef.current?.acceptQuest(questId) ?? false,
     [],
   );
+  const acceptQuestAndHunt = useCallback(
+    (questId: string) => sessionRef.current?.acceptQuest(questId, true) ?? false,
+    [],
+  );
   const claimQuest = useCallback(
     (questId: string) => sessionRef.current?.claimQuest(questId) ?? false,
+    [],
+  );
+  const navigateQuest = useCallback(
+    (questId: string, purpose: QuestNavigationPurpose) =>
+      sessionRef.current?.navigateQuest(questId, purpose) ?? false,
+    [],
+  );
+  const stopQuestNavigation = useCallback(
+    () => sessionRef.current?.stopQuestNavigation() ?? false,
     [],
   );
   const inviteToParty = useCallback(
@@ -1313,7 +1548,10 @@ export function useWorldSession(
     shopBuy,
     shopSell,
     acceptQuest,
+    acceptQuestAndHunt,
     claimQuest,
+    navigateQuest,
+    stopQuestNavigation,
     inviteToParty,
     acceptPartyInvite,
     declinePartyInvite,

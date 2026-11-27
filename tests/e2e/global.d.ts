@@ -91,6 +91,16 @@ declare global {
         gold: number;
         items: { itemId: string; templateId: string; name: string; quantity: number }[];
       } | null;
+      acceptQuest: (questId: string) => boolean;
+      acceptQuestAndHunt: (questId: string) => boolean;
+      claimQuest: (questId: string) => boolean;
+      navigateQuest: (questId: string, purpose: 'hunt' | 'return' | 'stop') => boolean;
+      questState: () => {
+        questId: string;
+        status: 'locked' | 'available' | 'active' | 'completed' | 'claimed';
+        progress: number;
+      }[];
+      questNavigationState: () => { questId: string; purpose: 'hunt' | 'return' } | null;
       lastMoveIntentAt?: number;
       lastAckAt?: number;
       lastSnapshotAt?: number;

@@ -178,7 +178,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     shopBuy,
     shopSell,
     acceptQuest,
+    acceptQuestAndHunt,
     claimQuest,
+    navigateQuest,
+    stopQuestNavigation,
     inviteToParty,
     acceptPartyInvite,
     declinePartyInvite,
@@ -276,7 +279,15 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const quests = state.quests;
   const mapNpcs = mapBundle.manifest.npcPoints;
   const mapQuests = useMemo(
-    () => quests.filter((quest) => mapNpcs.some((npc) => npc.id === quest.giverNpcId)),
+    () =>
+      quests.filter(
+        (quest) =>
+          mapNpcs.some((npc) => npc.id === quest.giverNpcId) ||
+          // Active and completed quests stay visible across maps so guidance
+          // and the return trip do not depend on standing next to the giver.
+          quest.status === 'active' ||
+          quest.status === 'completed',
+      ),
     [quests, mapNpcs],
   );
   const panelQuests = useMemo(
@@ -294,6 +305,29 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     [quests],
   );
   const availableQuest = mapQuests.find((quest) => quest.status === 'available') ?? null;
+  const questNavigation = state.questNavigation;
+  const navigationQuest =
+    questNavigation === null
+      ? undefined
+      : quests.find((quest) => quest.questId === questNavigation.questId);
+  const navigationMap =
+    questNavigation?.mapId === undefined ? null : mapNameFor(questNavigation.mapId);
+  const questNavLabel = ((): string | null => {
+    if (questNavigation === null) {
+      return null;
+    }
+    const title = navigationQuest?.title ?? '任务';
+    const giver = navigationQuest?.giverNpcName ?? '任务发布者';
+    const via = navigationMap === null ? '' : `（经由${navigationMap}）`;
+    if (questNavigation.purpose === 'hunt') {
+      return questNavigation.status === 'waiting'
+        ? `等待目标刷新：${title}`
+        : `自动前往：${title}${via}`;
+    }
+    return questNavigation.status === 'arrived'
+      ? `已到达${giver}，正在交付…`
+      : `自动返回：${giver}${via}`;
+  })();
   const questNpcName = (npcId: string): string =>
     mapNpcs.find((npc) => npc.id === npcId)?.name ?? '任务发布者';
   const canUseQuestGiver = (quest: QuestView): boolean => {
@@ -621,14 +655,72 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           ? `可交付 · 回到${quest.giverNpcName}`
                           : `${quest.objective.monsterName} ${String(quest.progress)}/${String(quest.objective.count)}`}
                       </span>
+                      {questNavigation?.questId === quest.questId ? (
+                        <button
+                          type="button"
+                          className="quest-tracker-action"
+                          data-testid="quest-tracker-nav-stop"
+                          onClick={() => {
+                            stopQuestNavigation();
+                          }}
+                        >
+                          停止
+                        </button>
+                      ) : quest.status === 'completed' ? (
+                        <button
+                          type="button"
+                          className="quest-tracker-action"
+                          data-testid="quest-tracker-return"
+                          data-quest-id={quest.questId}
+                          onClick={() => {
+                            navigateQuest(quest.questId, 'return');
+                          }}
+                        >
+                          去交付
+                        </button>
+                      ) : quest.objective.kind === 'kill' ? (
+                        <button
+                          type="button"
+                          className="quest-tracker-action"
+                          data-testid="quest-tracker-hunt"
+                          data-quest-id={quest.questId}
+                          onClick={() => {
+                            navigateQuest(quest.questId, 'hunt');
+                          }}
+                        >
+                          前往
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
               </div>
             ) : availableQuest !== null ? (
               <p className="quest-hint" data-testid="quest-hint">
-                可接任务：{availableQuest.title}（找{availableQuest.giverNpcName}）
+                可接任务：{availableQuest.title}（找{availableQuest.giverNpcName}
+                接取，接取后可一键前往）
               </p>
+            ) : null}
+            {questNavigation !== null && questNavLabel !== null ? (
+              <div
+                className="quest-nav-banner"
+                data-testid="quest-nav-banner"
+                data-status={questNavigation.status}
+                data-purpose={questNavigation.purpose}
+                data-quest-id={questNavigation.questId}
+                aria-live="polite"
+              >
+                <span>{questNavLabel}</span>
+                <button
+                  type="button"
+                  data-testid="quest-nav-stop"
+                  onClick={() => {
+                    stopQuestNavigation();
+                  }}
+                >
+                  停止
+                </button>
+              </div>
             ) : null}
           </section>
 
@@ -1393,7 +1485,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             {panelQuests.map((quest) => {
               const nearby = canUseQuestGiver(quest);
               const canAccept = quest.status === 'available';
-              const canClaim = quest.status === 'completed';
+              const canClaim = quest.status === 'completed' && nearby;
+              const navActive = questNavigation?.questId === quest.questId;
+              const canHunt = quest.status === 'active' && quest.objective.kind === 'kill';
+              const canReturn = quest.status === 'completed' && !nearby;
               return (
                 <li
                   key={quest.questId}
@@ -1444,24 +1539,88 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   ) : null}
                   <div className="quest-actions">
                     {canAccept ? (
-                      <button
-                        type="button"
-                        data-testid="quest-accept"
-                        data-quest-id={quest.questId}
-                        disabled={!nearby}
-                        onClick={() => {
-                          acceptQuest(quest.questId);
-                        }}
-                      >
-                        接取
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          data-testid="quest-accept"
+                          data-quest-id={quest.questId}
+                          disabled={!nearby}
+                          onClick={() => {
+                            acceptQuest(quest.questId);
+                          }}
+                        >
+                          接取
+                        </button>
+                        {quest.objective.kind === 'kill' ? (
+                          <button
+                            type="button"
+                            data-testid="quest-accept-hunt"
+                            data-quest-id={quest.questId}
+                            disabled={!nearby}
+                            onClick={() => {
+                              acceptQuestAndHunt(quest.questId);
+                            }}
+                          >
+                            接取并前往
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {canHunt ? (
+                      navActive ? (
+                        <button
+                          type="button"
+                          data-testid="quest-hunt-stop"
+                          data-quest-id={quest.questId}
+                          onClick={() => {
+                            stopQuestNavigation();
+                          }}
+                        >
+                          停止自动
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="quest-hunt"
+                          data-quest-id={quest.questId}
+                          onClick={() => {
+                            navigateQuest(quest.questId, 'hunt');
+                          }}
+                        >
+                          前往击杀
+                        </button>
+                      )
+                    ) : null}
+                    {canReturn ? (
+                      navActive ? (
+                        <button
+                          type="button"
+                          data-testid="quest-return-stop"
+                          data-quest-id={quest.questId}
+                          onClick={() => {
+                            stopQuestNavigation();
+                          }}
+                        >
+                          停止自动
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="quest-return"
+                          data-quest-id={quest.questId}
+                          onClick={() => {
+                            navigateQuest(quest.questId, 'return');
+                          }}
+                        >
+                          回去交付
+                        </button>
+                      )
                     ) : null}
                     {canClaim ? (
                       <button
                         type="button"
                         data-testid="quest-claim"
                         data-quest-id={quest.questId}
-                        disabled={!nearby}
                         onClick={() => {
                           claimQuest(quest.questId);
                         }}
@@ -1470,14 +1629,16 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                       </button>
                     ) : null}
                     {quest.status === 'active' ? (
-                      <span className="quest-progress-state">进行中</span>
+                      <span className="quest-progress-state">
+                        {navActive ? '自动进行中' : '进行中'}
+                      </span>
                     ) : null}
                     {quest.status === 'claimed' ? (
                       <span className="quest-progress-state done">
                         {quest.repeat === 'daily' ? '今日已完成' : '已完成'}
                       </span>
                     ) : null}
-                    {(canAccept || canClaim) && !nearby ? (
+                    {canAccept && !nearby ? (
                       <span className="quest-distance-hint">走近{quest.giverNpcName}</span>
                     ) : null}
                   </div>
@@ -1486,7 +1647,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             })}
             {panelQuests.length === 0 ? <li className="empty">这里暂时没有任务</li> : null}
           </ul>
-          <p className="shop-hint">任务进度与奖励由服务器结算，离开地图或重登后仍会保留。</p>
+          <p className="shop-hint">
+            接取后点「前往击杀」：角色自动寻路、自动战斗；完成后点「回去交付」返回
+            {questNpcId === null ? '守卫' : questNpcName(questNpcId)}并自动交付。
+          </p>
         </aside>
       ) : null}
 

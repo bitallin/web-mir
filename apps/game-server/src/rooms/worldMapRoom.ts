@@ -46,6 +46,8 @@ import {
   playerRespawnPointOf,
   questAcceptSchema,
   questClaimSchema,
+  questNavigateSchema,
+  questNavigationSchema,
   questSnapshotSchema,
   questUpdateSchema,
   sessionTransferSchema,
@@ -81,6 +83,9 @@ import {
   type PartyMemberView,
   type PartySnapshot,
   type PartyView,
+  type QuestContent,
+  type QuestNavigation,
+  type QuestNavigationReason,
   type QuestSnapshot,
   type QuestUpdate,
   type QuestView,
@@ -92,6 +97,7 @@ import {
   type SystemNotice,
   type TilePoint,
 } from '@web-legend/contracts';
+import { MAP_MANIFESTS } from '@web-legend/contracts/maps';
 import {
   LootState,
   MonsterState,
@@ -163,7 +169,14 @@ import { createTokenBucket } from '../world/rateLimiter';
 import { PartyService } from '../world/partyService';
 import { type PartyState } from '../world/partyRegistry';
 import { CommandGuard } from './commandGuard';
-import { SessionRegistry, type SessionRecord } from './sessionRegistry';
+import { SessionRegistry, type QuestNavigationState, type SessionRecord } from './sessionRegistry';
+import {
+  findNpcApproachPath,
+  mapsWithMonsterSpawns,
+  mapsWithNpc,
+  nearestSpawnTile,
+  nextPortalToward,
+} from '../world/questRouting';
 import { StateViewPublisher } from './stateViewPublisher';
 
 export type WorldMapRoomOptions = {
@@ -220,6 +233,10 @@ const REWARD_RETRY_ATTEMPTS = 3;
 const PARTY_INVITE_SWEEP_INTERVAL_MS = 1_000;
 /** Daily quest rollover is announced within half a minute of the realm reset. */
 const QUEST_PERIOD_SWEEP_INTERVAL_MS = 30_000;
+/** Pause before retargeting after a quest kill so the reward transaction commits. */
+const QUEST_RETARGET_DELAY_MS = 400;
+/** How long a hunt waits at a spawn area when no target is visible. */
+const QUEST_NAV_WAIT_MS = 1_000;
 
 /**
  * Leases outlive a single tick and are refreshed in the background. A crashed
@@ -439,7 +456,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       ...(options.economyRng === undefined ? {} : { rng: options.economyRng }),
     });
 
-    for (const npc of this.map.runtime.manifest.npcPoints) {
+    // Quest views must name the giver even when the player is on another map
+    // (the return trip and auto-delivery show the name in the wilds).
+    for (const npc of MAP_MANIFESTS.flatMap((map) => map.npcPoints)) {
       this.npcNames.set(npc.id, npc.name);
     }
 
@@ -533,6 +552,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     });
     this.onMessage<unknown>(CLIENT_MESSAGES.questClaim, (client, message) => {
       this.handleQuestClaim(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.questNavigate, (client, message) => {
+      this.handleQuestNavigate(client, message);
     });
     this.onMessage<unknown>(CLIENT_MESSAGES.partyInvite, (client, message) => {
       this.handlePartyInvite(client, message);
@@ -716,6 +738,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       recentAssets: new Map(),
       recentAutoCommands: new Map(),
       autoAttack: null,
+      questNavigation: null,
+      recentQuestCommands: new Map(),
       assetSnapshot: {
         ...snapshot,
         level: combatPlayer.level,
@@ -888,8 +912,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     this.metrics.recordWsDisconnect();
-    // Auto-attack never survives a disconnect; the client must re-engage.
+    // Auto-attack and quest guidance never survive a disconnect; the client
+    // re-issues its intent after reconnecting.
     session.autoAttack = null;
+    session.questNavigation = null;
     this.setConnected(session.playerId, false);
     this.simulation.clearPath(session.playerId);
     // A dropped player must not be killed by monsters during the grace window.
@@ -1127,6 +1153,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const positions = new Map(players.map((player) => [player.id, { x: player.x, y: player.y }]));
     const combatEvents = this.combat.step(stepMs, positions);
     this.applyCombatEvents(combatEvents);
+    this.updateQuestNavigation();
     this.updateAutoAttacks();
 
     this.syncPlayers(players);
@@ -1148,6 +1175,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       if (portal !== undefined) {
         session.transferring = true;
         session.transferTargetMapId = portal.targetMapId;
+        this.stopQuestNavigation(session, { silent: true, clearPath: false });
         this.simulation.clearPath(player.id);
         void this.beginTransfer(session, portal, player);
       }
@@ -1468,6 +1496,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     // A manual move is an explicit cancel: it must win over the approach path
     // the auto-attack loop would otherwise re-apply on the next tick.
     this.stopAutoAttack(session, 'stopped', false);
+    this.stopQuestNavigation(session, { silent: true, clearPath: false });
     session.lastSequence = command.clientSequence;
 
     const ack: CommandAck = {
@@ -1556,6 +1585,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     session.lastSequence = parsed.data.clientSequence;
     this.rememberAutoCommand(session, parsed.data.commandId);
     this.stopAutoAttack(session, 'stopped');
+    this.stopQuestNavigation(session, { silent: true });
     this.metrics.recordAcceptedCommand();
   }
 
@@ -1578,6 +1608,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
 
+    this.stopQuestNavigation(session, { silent: true, clearPath: false });
     session.lastSequence = command.clientSequence;
     this.rememberAutoCommand(session, command.commandId);
     // Switching targets always restarts the approach; the tick decides whether
@@ -1813,6 +1844,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   ): void {
     if (session.autoAttack === null) {
       return;
+    }
+    if (reason === 'target_dead' && session.questNavigation !== null) {
+      // Let the kill reward (and quest progress) commit before picking the
+      // next target, otherwise the last needed kill can start one extra hunt.
+      session.questNavigation.nextSearchAt = this.combat.elapsedMs + QUEST_RETARGET_DELAY_MS;
     }
     session.autoAttack = null;
     if (clearPath) {
@@ -2974,6 +3010,417 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         }
       },
     );
+  }
+
+  /**
+   * One-click quest guidance (ADR-039). The browser states the intent; the
+   * room decides the route, picks targets and owns every movement step.
+   */
+  private handleQuestNavigate(client: Client, raw: unknown): void {
+    const parsed = questNavigateSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    const session = this.registry.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, {}, 'INVALID_SESSION');
+      return;
+    }
+    if (session.transferring) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'INVALID_SESSION',
+      );
+      return;
+    }
+    const gate = this.guard.check(
+      session,
+      command,
+      session.recentQuestCommands.has(command.commandId),
+    );
+    if (gate.kind === 'reject') {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        gate.code,
+      );
+      return;
+    }
+    if (gate.kind === 'duplicate') {
+      if (session.questNavigation !== null) {
+        this.sendQuestNavigation(session, session.questNavigation, true);
+      }
+      return;
+    }
+
+    if (command.purpose === 'stop') {
+      session.lastSequence = command.clientSequence;
+      this.rememberQuestCommand(session, command.commandId);
+      this.stopQuestNavigation(session, { reason: 'manual' });
+      this.metrics.recordAcceptedCommand();
+      return;
+    }
+
+    const alive = this.requireAlive(session);
+    if (alive !== null) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        alive,
+      );
+      return;
+    }
+    const quest = this.content.bundle.quests?.[command.questId];
+    if (quest === undefined) {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'QUEST_UNAVAILABLE',
+      );
+      return;
+    }
+    const record = session.questRecords.get(command.questId);
+    if (command.purpose === 'hunt') {
+      if (record === undefined || record.status !== 'active') {
+        this.sendRejection(
+          client,
+          { commandId: command.commandId, clientSequence: command.clientSequence },
+          'QUEST_NOT_ACTIVE',
+        );
+        return;
+      }
+    } else if (record?.status === 'claimed') {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'QUEST_ALREADY_CLAIMED',
+      );
+      return;
+    } else if (record?.status !== 'completed') {
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        'QUEST_NOT_COMPLETE',
+      );
+      return;
+    }
+
+    this.stopQuestNavigation(session, { silent: true, clearPath: false });
+    this.stopAutoAttack(session, 'stopped', false);
+    const navigation: QuestNavigationState = {
+      questId: command.questId,
+      purpose: command.purpose,
+      status: 'moving',
+      nextSearchAt: 0,
+      lastSentKey: null,
+    };
+    const failure = this.planQuestNavigation(session, quest, command.purpose, navigation);
+    if (failure !== null) {
+      session.questNavigation = navigation;
+      this.stopQuestNavigation(session, { silent: true, clearPath: true });
+      this.sendRejection(
+        client,
+        { commandId: command.commandId, clientSequence: command.clientSequence },
+        failure === 'no_route' ? 'UNREACHABLE' : 'QUEST_UNAVAILABLE',
+      );
+      return;
+    }
+    session.questNavigation = navigation;
+    session.lastSequence = command.clientSequence;
+    this.rememberQuestCommand(session, command.commandId);
+    this.sendQuestNavigation(session, navigation, true);
+    this.metrics.recordAcceptedCommand();
+  }
+
+  private rememberQuestCommand(session: SessionRecord, commandId: string): void {
+    this.guard.remember(session.recentQuestCommands, commandId, true);
+  }
+
+  /**
+   * Plans the next leg of a quest route. Returns a failure reason instead of
+   * throwing so the command handler can answer with a rejection code.
+   */
+  private planQuestNavigation(
+    session: SessionRecord,
+    quest: QuestContent,
+    purpose: 'hunt' | 'return',
+    navigation: QuestNavigationState,
+  ): QuestNavigationReason | null {
+    const player = this.combat.getPlayer(session.playerId);
+    if (player === undefined) {
+      return 'quest_changed';
+    }
+    const map = this.map.runtime.manifest;
+    const targetMapIds =
+      purpose === 'hunt'
+        ? mapsWithMonsterSpawns(MAP_MANIFESTS, quest.objective.monsterId)
+        : mapsWithNpc(MAP_MANIFESTS, quest.giverNpcId);
+    if (targetMapIds.length === 0) {
+      return 'no_route';
+    }
+    if (!targetMapIds.includes(map.mapId)) {
+      const hop = nextPortalToward(MAP_MANIFESTS, map.mapId, new Set(targetMapIds));
+      if (hop === null) {
+        return 'no_route';
+      }
+      const path = findPath(this.map.runtime.grid, tileOfUnits(player), hop.portalTile);
+      if (path === null) {
+        return 'no_route';
+      }
+      this.simulation.setPath(session.playerId, path);
+      navigation.status = 'moving';
+      navigation.nextMapId = hop.mapId;
+      return null;
+    }
+
+    navigation.nextMapId = undefined;
+    if (purpose === 'hunt') {
+      const targetId = this.nearestVisibleQuestMonsterId(session, quest.objective.monsterId);
+      if (targetId !== null) {
+        this.startQuestAutoAttack(session, targetId);
+        navigation.status = 'moving';
+        return null;
+      }
+      const spawn = nearestSpawnTile(map, quest.objective.monsterId, tileOfUnits(player));
+      if (spawn === null) {
+        return 'no_route';
+      }
+      const path = findPath(this.map.runtime.grid, tileOfUnits(player), spawn);
+      if (path === null) {
+        return 'no_route';
+      }
+      if (path.length > 0) {
+        this.simulation.setPath(session.playerId, path);
+        navigation.status = 'moving';
+      } else {
+        this.simulation.clearPath(session.playerId);
+        navigation.status = 'waiting';
+        navigation.nextSearchAt = this.combat.elapsedMs + QUEST_NAV_WAIT_MS;
+      }
+      return null;
+    }
+
+    const giver = map.npcPoints.find((npc) => npc.id === quest.giverNpcId);
+    if (giver === undefined) {
+      return 'no_route';
+    }
+    if (this.tileDistanceTo(player, giver.tile) <= QUEST_NPC_RANGE_TILES) {
+      this.simulation.clearPath(session.playerId);
+      navigation.status = 'arrived';
+      return null;
+    }
+    const path = findNpcApproachPath(
+      this.map.runtime,
+      giver.tile,
+      tileOfUnits(player),
+      QUEST_NPC_RANGE_TILES,
+    );
+    if (path === null) {
+      return 'no_route';
+    }
+    this.simulation.setPath(session.playerId, path);
+    navigation.status = 'moving';
+    return null;
+  }
+
+  private updateQuestNavigation(): void {
+    for (const session of this.registry.all()) {
+      const navigation = session.questNavigation;
+      if (navigation === null) {
+        continue;
+      }
+      if (session.transferring) {
+        this.stopQuestNavigation(session, { silent: true, clearPath: false });
+        continue;
+      }
+      const player = this.combat.getPlayer(session.playerId);
+      if (player === undefined) {
+        this.stopQuestNavigation(session, { reason: 'target_gone' });
+        continue;
+      }
+      if (!player.alive) {
+        this.stopQuestNavigation(session, { reason: 'player_dead' });
+        continue;
+      }
+      const quest = this.content.bundle.quests?.[navigation.questId];
+      if (quest === undefined) {
+        this.stopQuestNavigation(session, { reason: 'quest_changed' });
+        continue;
+      }
+      const record = session.questRecords.get(navigation.questId);
+      if (navigation.purpose === 'hunt') {
+        if (record === undefined || record.status !== 'active') {
+          this.stopQuestNavigation(
+            session,
+            record?.status === 'completed' ? { status: 'completed' } : { reason: 'quest_changed' },
+          );
+          continue;
+        }
+        // The auto-attack loop owns movement while a target is locked.
+        if (session.autoAttack !== null) {
+          continue;
+        }
+        if (this.combat.elapsedMs < navigation.nextSearchAt) {
+          continue;
+        }
+        const targetId = this.nearestVisibleQuestMonsterId(session, quest.objective.monsterId);
+        if (targetId !== null) {
+          this.startQuestAutoAttack(session, targetId);
+          navigation.status = 'moving';
+          this.sendQuestNavigation(session, navigation);
+          continue;
+        }
+        if (!this.questPathExhausted(session)) {
+          continue;
+        }
+        const failure = this.planQuestNavigation(session, quest, 'hunt', navigation);
+        if (failure !== null) {
+          this.stopQuestNavigation(session, { reason: failure });
+          continue;
+        }
+        this.sendQuestNavigation(session, navigation);
+        continue;
+      }
+
+      if (record?.status === 'claimed') {
+        this.stopQuestNavigation(session, { silent: true, clearPath: true });
+        continue;
+      }
+      if (record?.status !== 'completed') {
+        this.stopQuestNavigation(session, { reason: 'quest_changed' });
+        continue;
+      }
+      const giver = this.map.runtime.manifest.npcPoints.find((npc) => npc.id === quest.giverNpcId);
+      if (giver !== undefined && this.tileDistanceTo(player, giver.tile) <= QUEST_NPC_RANGE_TILES) {
+        if (navigation.status !== 'arrived') {
+          this.simulation.clearPath(session.playerId);
+          navigation.status = 'arrived';
+          navigation.nextMapId = undefined;
+          this.sendQuestNavigation(session, navigation);
+        }
+        continue;
+      }
+      if (navigation.status === 'arrived') {
+        navigation.status = 'moving';
+      }
+      if (!this.questPathExhausted(session)) {
+        continue;
+      }
+      const failure = this.planQuestNavigation(session, quest, 'return', navigation);
+      if (failure !== null) {
+        this.stopQuestNavigation(session, { reason: failure });
+        continue;
+      }
+      this.sendQuestNavigation(session, navigation);
+    }
+  }
+
+  private nearestVisibleQuestMonsterId(session: SessionRecord, monsterId: string): string | null {
+    const player = this.simulation.getPlayer(session.playerId);
+    if (player === undefined) {
+      return null;
+    }
+    let bestId: string | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const monster of this.combat.listMonsters()) {
+      if (monster.templateId !== monsterId || monster.state === 'dead') {
+        continue;
+      }
+      if (!session.visible.has(monster.id)) {
+        continue;
+      }
+      const distance = (monster.x - player.x) ** 2 + (monster.y - player.y) ** 2;
+      if (distance < bestDistance) {
+        bestId = monster.id;
+        bestDistance = distance;
+      }
+    }
+    return bestId;
+  }
+
+  private startQuestAutoAttack(session: SessionRecord, targetId: string): void {
+    this.simulation.clearPath(session.playerId);
+    session.autoAttack = {
+      targetId,
+      phase: 'engaged',
+      nextAttackAt: 0,
+      nextRepathAt: 0,
+      pathTargetTile: null,
+    };
+    this.notifyTargetChanged(session, 'engaged');
+  }
+
+  private questPathExhausted(session: SessionRecord): boolean {
+    const player = this.simulation.getPlayer(session.playerId);
+    return player === undefined || player.waypoints.length === 0;
+  }
+
+  private tileDistanceTo(player: { x: number; y: number }, tile: TilePoint): number {
+    const current = tileOfUnits(player);
+    return Math.hypot(current.x - tile.x, current.y - tile.y);
+  }
+
+  private sendQuestNavigation(
+    session: SessionRecord,
+    navigation: QuestNavigationState,
+    force = false,
+  ): void {
+    const key = `${navigation.status}:${navigation.nextMapId ?? ''}`;
+    if (!force && navigation.lastSentKey === key) {
+      return;
+    }
+    navigation.lastSentKey = key;
+    const message: QuestNavigation = {
+      questId: navigation.questId,
+      purpose: navigation.purpose,
+      status: navigation.status,
+      ...(navigation.nextMapId === undefined ? {} : { mapId: navigation.nextMapId }),
+      serverTime: Date.now(),
+    };
+    const parsed = questNavigationSchema.safeParse(message);
+    if (!parsed.success) {
+      this.options.logger.warn(
+        { roomId: this.roomId, questId: navigation.questId },
+        'quest navigation failed validation',
+      );
+      return;
+    }
+    session.client.send(SERVER_MESSAGES.questNavigation, parsed.data);
+  }
+
+  private stopQuestNavigation(
+    session: SessionRecord,
+    options: {
+      reason?: QuestNavigationReason;
+      status?: 'stopped' | 'completed';
+      silent?: boolean;
+      clearPath?: boolean;
+    } = {},
+  ): void {
+    const navigation = session.questNavigation;
+    if (navigation === null) {
+      return;
+    }
+    session.questNavigation = null;
+    this.stopAutoAttack(session, 'stopped', options.clearPath ?? true);
+    if (options.silent === true) {
+      return;
+    }
+    const message: QuestNavigation = {
+      questId: navigation.questId,
+      purpose: navigation.purpose,
+      status: options.status ?? 'stopped',
+      ...(options.reason === undefined ? {} : { reason: options.reason }),
+      serverTime: Date.now(),
+    };
+    const parsed = questNavigationSchema.safeParse(message);
+    if (!parsed.success) {
+      return;
+    }
+    session.client.send(SERVER_MESSAGES.questNavigation, parsed.data);
   }
 
   private validateQuestNpc(session: SessionRecord, questId: string): CommandRejectionCode | null {

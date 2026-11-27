@@ -3,6 +3,7 @@ import type {
   InventorySnapshot,
   PartyInviteView,
   PartyView,
+  QuestNavigationPurpose,
   QuestView,
 } from '@web-legend/contracts';
 
@@ -51,8 +52,11 @@ declare global {
       buyFromShop: (merchantId: string, templateId: string, quantity: number) => boolean;
       sellToShop: (merchantId: string, itemId: string, quantity: number) => boolean;
       acceptQuest: (questId: string) => boolean;
+      acceptQuestAndHunt: (questId: string) => boolean;
       claimQuest: (questId: string) => boolean;
+      navigateQuest: (questId: string, purpose: QuestNavigationPurpose) => boolean;
       questState: () => QuestView[];
+      questNavigationState: () => { questId: string; purpose: 'hunt' | 'return' } | null;
       inviteToParty: (playerId: string) => boolean;
       acceptPartyInvite: () => boolean;
       declinePartyInvite: () => boolean;

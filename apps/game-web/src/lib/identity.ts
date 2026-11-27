@@ -22,6 +22,18 @@ export function loadRoomPreference(search = window.location.search): RoomPrefere
   return { mode: 'joinOrCreate' };
 }
 
+/**
+ * Development-only: `?freshTransfer=1` also creates a new room for each map
+ * transfer. Automation that drives real combat needs a wilds room where no
+ * other scenario is competing for the same spawns.
+ */
+export function loadFreshTransfers(search = window.location.search): boolean {
+  if (!import.meta.env.DEV) {
+    return false;
+  }
+  return new URLSearchParams(search).get('freshTransfer') === '1';
+}
+
 const RECONNECT_STORAGE = 'web-legend.reconnect-token';
 
 type StoredReconnect = {

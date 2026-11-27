@@ -2520,6 +2520,48 @@ body {
   font-size: 10px;
 }
 
+.quest-nav-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(215, 170, 88, 0.45);
+  border-radius: 3px;
+  background: rgba(20, 24, 30, 0.92);
+  color: var(--parchment);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.quest-nav-banner span {
+  flex: 1;
+  min-width: 0;
+}
+
+.quest-nav-banner button {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid rgba(215, 170, 88, 0.5);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--gold);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.quest-tracker-action {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid rgba(215, 170, 88, 0.45);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--gold);
+  font-size: 10px;
+  cursor: pointer;
+}
+
 .quest-distance-hint {
   color: var(--warn);
   font-size: 11px;

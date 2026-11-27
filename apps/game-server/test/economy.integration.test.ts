@@ -13,6 +13,7 @@ import {
   commandRejectedSchema,
   inventorySnapshotSchema,
   lootClaimedSchema,
+  questNavigationSchema,
   questSnapshotSchema,
   questUpdateSchema,
   shopCatalogSchema,
@@ -24,6 +25,7 @@ import {
   type ContentBundle,
   type InventorySnapshot,
   type LootClaimed,
+  type QuestNavigation,
   type QuestSnapshot,
   type QuestUpdate,
   type ShopCatalog,
@@ -722,6 +724,77 @@ describe.runIf(databaseUrl !== undefined)('world_map economy', () => {
     });
     await waitUntil(() => rejections.length > 0, 5_000, 'locked quest rejection');
     expect(rejections[0]?.code).toBe('QUEST_UNAVAILABLE');
+  });
+
+  it('starts and stops server-authored quest guidance', async () => {
+    // (24,12) is inside the guard's interaction range.
+    const actor = await createActor(db, 'Nav', {
+      mapId: STARTER_TOWN_MAP_ID,
+      position: tileUnits({ x: 24, y: 12 }),
+    });
+    const room = await createWorld(actor.ticket, STARTER_TOWN_MAP_ID);
+    const updates: QuestUpdate[] = [];
+    const navigations: QuestNavigation[] = [];
+    room.onMessage('quest.update', (payload: unknown) => {
+      updates.push(questUpdateSchema.parse(payload));
+    });
+    room.onMessage('quest.navigation', (payload: unknown) => {
+      navigations.push(questNavigationSchema.parse(payload));
+    });
+    await waitUntil(
+      () => room.state.players.get(actor.character.id) !== undefined,
+      5_000,
+      'player joined',
+    );
+
+    room.send('quest.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 0,
+      questId: 'quest_daily_slime_cleanup',
+    });
+    await waitUntil(
+      () =>
+        updates.some(
+          (update) =>
+            update.quest.questId === 'quest_daily_slime_cleanup' &&
+            update.quest.status === 'active',
+        ),
+      5_000,
+      'daily accepted',
+    );
+
+    room.send('quest.navigate', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 1,
+      questId: 'quest_daily_slime_cleanup',
+      purpose: 'hunt',
+    });
+    await waitUntil(() => navigations.length > 0, 5_000, 'navigation started');
+    // From town the target is in the wilds, so the first hop is that portal.
+    expect(navigations[0]).toMatchObject({
+      questId: 'quest_daily_slime_cleanup',
+      purpose: 'hunt',
+      status: 'moving',
+      mapId: STARTER_WILDS_MAP_ID,
+    });
+
+    room.send('quest.navigate', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: 2,
+      questId: 'quest_daily_slime_cleanup',
+      purpose: 'stop',
+    });
+    await waitUntil(
+      () => navigations.some((navigation) => navigation.status === 'stopped'),
+      5_000,
+      'navigation stopped',
+    );
+    expect(navigations.findLast((navigation) => navigation.status === 'stopped')?.reason).toBe(
+      'manual',
+    );
   });
 
   it('rejects quest commands away from the giver', async () => {

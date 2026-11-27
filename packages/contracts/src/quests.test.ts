@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { questViewSchema } from './quests';
+import { questNavigateSchema, questNavigationSchema, questViewSchema } from './quests';
 
 const DAILY_VIEW = {
   questId: 'quest_daily_slime_cleanup',
@@ -31,5 +31,56 @@ describe('quest views', () => {
   it('rejects a negative reset time', () => {
     const parsed = questViewSchema.safeParse({ ...DAILY_VIEW, nextResetAt: -1 });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('quest navigation', () => {
+  const command = {
+    protocolVersion: 1,
+    commandId: '0190a2b0-0000-7000-8000-000000000000',
+    clientSequence: 4,
+    questId: 'quest_daily_slime_cleanup',
+    purpose: 'hunt',
+  };
+
+  it('accepts hunt, return and stop intents', () => {
+    for (const purpose of ['hunt', 'return', 'stop'] as const) {
+      expect(questNavigateSchema.safeParse({ ...command, purpose }).success).toBe(true);
+    }
+  });
+
+  it('rejects an unknown navigation purpose or extra fields', () => {
+    expect(questNavigateSchema.safeParse({ ...command, purpose: 'teleport' }).success).toBe(false);
+    expect(questNavigateSchema.safeParse({ ...command, target: 'x' }).success).toBe(false);
+  });
+
+  it('describes server navigation with an optional map hop and reason', () => {
+    expect(
+      questNavigationSchema.safeParse({
+        questId: command.questId,
+        purpose: 'hunt',
+        status: 'moving',
+        mapId: 'starter_wilds',
+        serverTime: 1,
+      }).success,
+    ).toBe(true);
+    expect(
+      questNavigationSchema.safeParse({
+        questId: command.questId,
+        purpose: 'return',
+        status: 'stopped',
+        reason: 'player_dead',
+        serverTime: 1,
+      }).success,
+    ).toBe(true);
+    expect(
+      questNavigationSchema.safeParse({
+        questId: command.questId,
+        purpose: 'hunt',
+        status: 'moving',
+        reason: 'player_dead',
+        serverTime: 1,
+      }).success,
+    ).toBe(false);
   });
 });
