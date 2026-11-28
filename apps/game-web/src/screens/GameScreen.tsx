@@ -40,6 +40,7 @@ import {
   questObjectiveLabel,
   questObjectiveProgressLabel,
 } from '../lib/questPanel';
+import { reachMarkersFor } from '../lib/reachMarkers';
 import type { ConnectionStatus } from '../net/worldClient';
 import { useWorldSession } from '../session/useWorldSession';
 import { Minimap } from './Minimap';
@@ -329,6 +330,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   );
   const questSections = useMemo(() => groupQuestsByStatus(panelQuests), [panelQuests]);
   const availableQuest = useMemo(() => nextAvailableQuest(quests), [quests]);
+  const questMarkers = useMemo(() => reachMarkersFor(quests, state.mapId), [quests, state.mapId]);
   const availableLocation = availableQuest === null ? null : locateNpc(availableQuest.giverNpcId);
   const questNavigation = state.questNavigation;
   const navigationQuest =
@@ -1096,6 +1098,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             players={state.players}
             monsters={state.monsters}
             loot={state.loot}
+            questMarkers={questMarkers}
           />
           <div className="panel-heading">
             <h2>附近玩家</h2>

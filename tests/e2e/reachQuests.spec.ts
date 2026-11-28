@@ -90,15 +90,46 @@ test('an arrival quest completes on the authoritative position', async ({ browse
     () => window.__webLegendDebug?.inventoryState()?.gold ?? 0,
   );
 
-  await row.getByTestId('quest-accept-hunt').click();
+  await row.getByTestId('quest-accept').click();
+  await expect(row).toHaveAttribute('data-status', 'active', { timeout: 10_000 });
+  await page.getByTestId('quest-close').click();
+
+  // The world and minimap mark where to go while the objective is open, and
+  // the server still owns the arrival check (TD-CLI-24).
+  const minimap = page.getByTestId('minimap');
+  await expect(minimap).toHaveAttribute('data-quest-markers', '1', { timeout: 10_000 });
+  await expect(minimap).toHaveAttribute('data-quest-tiles', '35,15');
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          (questId) => window.__webLegendDebug?.questMarkerScreenPoint(questId) ?? null,
+          QUEST_ID,
+        ),
+      { timeout: 5_000 },
+    )
+    .not.toBeNull();
+  await page.screenshot({ path: join(ARTIFACT_DIR, 'reach-marker.png') });
+
+  const tracker = page.locator(`[data-testid="quest-tracker-row"][data-quest-id="${QUEST_ID}"]`);
+  await tracker.getByTestId('quest-tracker-hunt').click();
   const banner = page.getByTestId('quest-nav-banner');
   await expect(banner).toBeVisible({ timeout: 10_000 });
   await expect(banner).toHaveAttribute('data-purpose', 'hunt');
   await expect(banner).toContainText('自动探索');
-
-  const tracker = page.locator(`[data-testid="quest-tracker-row"][data-quest-id="${QUEST_ID}"]`);
   await expect(tracker).toHaveAttribute('data-status', 'completed', { timeout: 30_000 });
   await expect(tracker).toHaveAttribute('data-progress', '1');
+  await expect(minimap).toHaveAttribute('data-quest-markers', '0');
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(
+          (questId) => window.__webLegendDebug?.questMarkerScreenPoint(questId) ?? null,
+          QUEST_ID,
+        ),
+      { timeout: 5_000 },
+    )
+    .toBeNull();
   await page.screenshot({ path: join(ARTIFACT_DIR, 'reach-completed.png') });
 
   // One click back hands the quest in on arrival; rewards are paid once.

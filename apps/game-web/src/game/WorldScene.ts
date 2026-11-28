@@ -40,6 +40,7 @@ import {
 } from './playerAnimation';
 import type {
   PlayerAppearance,
+  ReachMarkerView,
   SceneSnapshot,
   TelegraphView,
   WorldBridge,
@@ -349,6 +350,9 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private readonly recentLootPositions = new Map<string, { x: number; y: number; at: number }>();
   private readonly telegraphs = new Map<string, TelegraphVisual>();
   private readonly npcLabels = new Map<string, Phaser.GameObjects.Text>();
+  private questMarkersState: ReachMarkerView[] = [];
+  private questMarkerObjects: Phaser.GameObjects.Container[] = [];
+  private readonly questMarkerPoints = new Map<string, ScreenPoint>();
   private labelClock = 0;
   private lootClock = 0;
   private pathGraphics!: Phaser.GameObjects.Graphics;
@@ -400,6 +404,9 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
     this.lootVisuals.clear();
     this.telegraphs.clear();
     this.npcLabels.clear();
+    this.questMarkersState = [];
+    this.questMarkerObjects = [];
+    this.questMarkerPoints.clear();
     this.labelClock = 0;
     this.selfId = null;
     this.selectedTargetId = null;
@@ -870,6 +877,98 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
         radiusTiles: telegraph.radiusTiles,
         remainingMs: Math.max(0, telegraph.expiresAt - now),
       }));
+  }
+
+  /**
+   * Arrival objectives are drawn as a low-interference ground ring with a
+   * small floating diamond; the server still owns arrival, so the client only
+   * mirrors the active quest list it was given (TD-CLI-24).
+   */
+  setQuestMarkers(markers: readonly ReachMarkerView[]): void {
+    this.questMarkersState = markers.map((marker) => ({
+      ...marker,
+      tile: { x: marker.tile.x, y: marker.tile.y },
+    }));
+    this.drawQuestMarkers();
+  }
+
+  /** Test-only readback so E2E can prove the marker is rendered. */
+  questMarkers(): ReachMarkerView[] {
+    return this.questMarkersState.map((marker) => ({
+      ...marker,
+      tile: { x: marker.tile.x, y: marker.tile.y },
+    }));
+  }
+
+  questMarkerScreenPoint(questId: string): ScreenPoint | null {
+    return this.questMarkerPoints.get(questId) ?? null;
+  }
+
+  private drawQuestMarkers(): void {
+    for (const object of this.questMarkerObjects) {
+      object.destroy(true);
+    }
+    this.questMarkerObjects = [];
+    this.questMarkerPoints.clear();
+
+    for (const marker of this.questMarkersState) {
+      const center = this.projection.tileCenter(marker.tile);
+      const width = Math.max(TILE_WIDTH, marker.radiusTiles * TILE_WIDTH);
+      const height = Math.max(TILE_HEIGHT, marker.radiusTiles * TILE_HEIGHT);
+
+      const ring = this.add.graphics();
+      ring.fillStyle(0xe5c15a, 0.1);
+      ring.fillEllipse(0, 0, width, height);
+      ring.lineStyle(2, 0xe5c15a, 0.72);
+      ring.strokeEllipse(0, 0, width, height);
+
+      const pillar = this.add.graphics();
+      pillar.fillStyle(0xf2d16b, 0.09);
+      pillar.fillRect(-2, -108, 4, 108);
+
+      const diamond = this.add.graphics();
+      diamond.fillStyle(0xf2d16b, 0.95);
+      diamond.lineStyle(1, 0x6b5317, 0.9);
+      diamond.beginPath();
+      diamond.moveTo(0, -112);
+      diamond.lineTo(7, -103);
+      diamond.lineTo(0, -94);
+      diamond.lineTo(-7, -103);
+      diamond.closePath();
+      diamond.fillPath();
+      diamond.strokePath();
+
+      const label = this.add
+        .text(0, -120, marker.title, {
+          fontFamily: DISPLAY_FONT,
+          fontSize: '13px',
+          color: '#f2d16b',
+          stroke: '#0b0d10',
+          strokeThickness: 3,
+        })
+        .setOrigin(0.5, 1);
+
+      const container = this.add.container(center.x, center.y, [ring, pillar, diamond, label]);
+      container.setDepth(center.y - 2);
+      this.tweens.add({
+        targets: ring,
+        alpha: { from: 0.72, to: 0.28 },
+        duration: 900,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+      this.tweens.add({
+        targets: [diamond, label],
+        y: '-=4',
+        duration: 700,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+      this.questMarkerObjects.push(container);
+      this.questMarkerPoints.set(marker.questId, center);
+    }
   }
 
   restart(): void {

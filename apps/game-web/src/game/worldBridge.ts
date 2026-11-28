@@ -31,6 +31,14 @@ export type TelegraphView = {
   remainingMs: number;
 };
 
+/** A pending arrival objective drawn in the world (TD-CLI-24). */
+export type ReachMarkerView = {
+  questId: string;
+  title: string;
+  tile: TilePoint;
+  radiusTiles: number;
+};
+
 /** A world-space name plate after decluttering; used by E2E and diagnostics. */
 export type WorldLabelView = {
   id: string;
@@ -57,6 +65,9 @@ export type WorldSceneHandle = {
   npcScreenPoint: (npcId: string) => ScreenPoint | null;
   lootScreenPoint: (dropId: string) => ScreenPoint | null;
   lootIconFrame: (dropId: string) => number | null;
+  setQuestMarkers: (markers: readonly ReachMarkerView[]) => void;
+  questMarkerScreenPoint: (questId: string) => ScreenPoint | null;
+  questMarkers: () => ReachMarkerView[];
   labels: () => WorldLabelView[];
   selectEntity: (entityId: string) => void;
   restart: () => void;
@@ -69,6 +80,7 @@ export type WorldSceneHandle = {
 export class WorldBridge {
   private scene: WorldSceneHandle | null = null;
   private latestSnapshot: SceneSnapshot | null = null;
+  private latestQuestMarkers: readonly ReachMarkerView[] = [];
   private attachCount = 0;
 
   onMoveRequest: ((tile: TilePoint) => void) | null = null;
@@ -85,6 +97,7 @@ export class WorldBridge {
     if (this.latestSnapshot !== null) {
       scene.applySnapshot(this.latestSnapshot);
     }
+    scene.setQuestMarkers(this.latestQuestMarkers);
   }
 
   detach(scene: WorldSceneHandle): void {
@@ -96,6 +109,7 @@ export class WorldBridge {
   /** Drops the last snapshot when the map instance changes. */
   reset(): void {
     this.latestSnapshot = null;
+    this.latestQuestMarkers = [];
   }
 
   pushSnapshot(data: SceneSnapshot): void {
@@ -181,6 +195,19 @@ export class WorldBridge {
 
   lootIconFrame(dropId: string): number | null {
     return this.scene?.lootIconFrame(dropId) ?? null;
+  }
+
+  setQuestMarkers(markers: readonly ReachMarkerView[]): void {
+    this.latestQuestMarkers = markers;
+    this.scene?.setQuestMarkers(markers);
+  }
+
+  questMarkerScreenPoint(questId: string): ScreenPoint | null {
+    return this.scene?.questMarkerScreenPoint(questId) ?? null;
+  }
+
+  questMarkers(): ReachMarkerView[] {
+    return this.scene?.questMarkers() ?? [];
   }
 
   labels(): WorldLabelView[] {

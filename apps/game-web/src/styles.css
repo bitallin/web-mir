@@ -2314,6 +2314,12 @@ body {
   background: #c9a227;
 }
 
+.legend-quest::before {
+  border-radius: 0;
+  background: #e5c15a;
+  transform: rotate(45deg);
+}
+
 .players-panel li {
   grid-template-columns: 10px minmax(0, 1fr) auto auto auto;
 }

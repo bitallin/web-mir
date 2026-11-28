@@ -33,6 +33,7 @@ import { isSfxMuted, SfxPlayer } from '../game/sfx';
 import { WorldBridge } from '../game/worldBridge';
 import { loadFreshTransfers, loadRoomPreference } from '../lib/identity';
 import { questObjectiveProgressLabel } from '../lib/questPanel';
+import { reachMarkersFor } from '../lib/reachMarkers';
 import { lootIsLocked, lootLockLabel, lootTile, withinPickupRange } from '../lib/lootInteraction';
 import {
   WorldClient,
@@ -625,6 +626,7 @@ class WorldSession {
           // gets the same progress/completion feedback (ADR-040).
           const previous = new Map(this.quests.map((quest) => [quest.questId, quest]));
           this.quests = snapshot.quests;
+          this.syncReachMarkers();
           this.updateState((state) => ({ ...state, quests: snapshot.quests }));
           for (const quest of snapshot.quests) {
             const before = previous.get(quest.questId);
@@ -660,6 +662,7 @@ class WorldSession {
               : this.quests.map((quest) =>
                   quest.questId === update.quest.questId ? update.quest : quest,
                 );
+          this.syncReachMarkers();
           this.updateState((prev) => ({ ...prev, quests: this.quests }));
 
           if (
@@ -1578,6 +1581,12 @@ class WorldSession {
     game?.destroy(true);
     this.bridge.reset();
     this.game = createWorldGame(this.container, this.bridge, mapBundleFor(mapId));
+    this.syncReachMarkers();
+  }
+
+  /** Mirrors the active arrival objectives into the scene and minimap. */
+  private syncReachMarkers(): void {
+    this.bridge.setQuestMarkers(reachMarkersFor(this.quests, this.mapId));
   }
 
   private installDebugHooks(): void {
@@ -1617,6 +1626,8 @@ class WorldSession {
       playerAppearance: (playerId) => this.bridge.playerAppearance(playerId),
       activeTelegraphs: () => this.bridge.activeTelegraphs(),
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),
+      questMarkers: () => this.bridge.questMarkers(),
+      questMarkerScreenPoint: (questId) => this.bridge.questMarkerScreenPoint(questId),
       interactNpc: (npcId) => this.interactNpc(npcId),
       sendChat: (text, channel, targetPlayerId) => this.sendChat(text, channel, targetPlayerId),
       pickupDrop: (dropId) => this.pickup(dropId),

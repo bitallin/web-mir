@@ -8,7 +8,12 @@ import type {
   QuestView,
 } from '@web-legend/contracts';
 
-import type { PlayerAppearance, TelegraphView, WorldLabelView } from './game/worldBridge';
+import type {
+  PlayerAppearance,
+  ReachMarkerView,
+  TelegraphView,
+  WorldLabelView,
+} from './game/worldBridge';
 import type { LootView } from './net/worldClient';
 
 export {};
@@ -45,6 +50,9 @@ declare global {
       selfServerPosition: () => { x: number; y: number } | null;
       playerAppearance: (playerId: string) => PlayerAppearance | null;
       activeTelegraphs: () => TelegraphView[];
+      /** Arrival markers currently drawn by the scene (TD-CLI-24). */
+      questMarkers: () => ReachMarkerView[];
+      questMarkerScreenPoint: (questId: string) => { x: number; y: number } | null;
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
       sendChat: (

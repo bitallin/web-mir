@@ -1,6 +1,8 @@
+import { TILE_UNITS } from '@web-legend/contracts';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { mapBundleFor } from '../game/mapCatalog';
+import type { ReachMarker } from '../lib/reachMarkers';
 import type { LootView, MonsterView, PlayerView } from '../net/worldClient';
 
 const MAP_WIDTH = 220;
@@ -12,6 +14,8 @@ export type MinimapProps = {
   players: PlayerView[];
   monsters: MonsterView[];
   loot: LootView[];
+  /** Active arrival objectives on this map (TD-CLI-24). */
+  questMarkers: ReachMarker[];
 };
 
 type Background = {
@@ -24,7 +28,7 @@ type Background = {
  * stamped once per map, then each snapshot only paints entities, so a 20Hz
  * state update never redraws the whole terrain.
  */
-export function Minimap({ mapId, selfId, players, monsters, loot }: MinimapProps) {
+export function Minimap({ mapId, selfId, players, monsters, loot, questMarkers }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const backgroundRef = useRef<Background | null>(null);
   const bundle = useMemo(() => mapBundleFor(mapId), [mapId]);
@@ -62,6 +66,27 @@ export function Minimap({ mapId, selfId, players, monsters, loot }: MinimapProps
       context.fill();
     };
 
+    for (const marker of questMarkers) {
+      const x = (((marker.tile.x + 0.5) * TILE_UNITS) / 1000) * scaleX;
+      const y = (((marker.tile.y + 0.5) * TILE_UNITS) / 1000) * scaleY;
+      const radius = Math.max(3, marker.radiusTiles * scaleX);
+      context.beginPath();
+      context.arc(x, y, radius, 0, Math.PI * 2);
+      context.fillStyle = 'rgba(229, 193, 90, 0.16)';
+      context.fill();
+      context.strokeStyle = '#e5c15a';
+      context.lineWidth = 1;
+      context.stroke();
+      context.beginPath();
+      context.moveTo(x, y - 3.2);
+      context.lineTo(x + 3.2, y);
+      context.lineTo(x, y + 3.2);
+      context.lineTo(x - 3.2, y);
+      context.closePath();
+      context.fillStyle = '#f2d16b';
+      context.fill();
+    }
+
     for (const drop of loot) {
       dot(drop.x, drop.y, 1.6, '#c9a227');
     }
@@ -89,7 +114,7 @@ export function Minimap({ mapId, selfId, players, monsters, loot }: MinimapProps
         context.stroke();
       }
     }
-  }, [manifest, height, players, monsters, loot, selfId]);
+  }, [manifest, height, players, monsters, loot, questMarkers, selfId]);
 
   const self = players.find((player) => player.playerId === selfId);
 
@@ -100,6 +125,8 @@ export function Minimap({ mapId, selfId, players, monsters, loot }: MinimapProps
       data-map-id={manifest.mapId}
       data-self-x={self?.x ?? ''}
       data-self-y={self?.y ?? ''}
+      data-quest-markers={String(questMarkers.length)}
+      data-quest-tiles={questMarkers.map((marker) => `${marker.tile.x},${marker.tile.y}`).join(' ')}
     >
       <div className="minimap-heading">
         <span>小地图</span>
@@ -118,6 +145,7 @@ export function Minimap({ mapId, selfId, players, monsters, loot }: MinimapProps
         <span className="legend-player">玩家</span>
         <span className="legend-monster">怪物</span>
         <span className="legend-loot">掉落</span>
+        <span className="legend-quest">任务目标</span>
       </p>
     </div>
   );
