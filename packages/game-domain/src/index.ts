@@ -48,6 +48,7 @@ export {
   findInventoryPlacement,
   isConsumable,
   isShopQuantityAllowed,
+  isTradeableItem,
   itemBuyPrice,
   itemSellPrice,
   purchaseCost,

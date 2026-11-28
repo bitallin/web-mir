@@ -75,6 +75,8 @@ export type SessionRecord = {
   recentFriends: Map<string, true>;
   /** Guild command ids already applied by this session (ADR-048). */
   recentGuild: Map<string, true>;
+  /** Trade command ids already applied by this session (ADR-050). */
+  recentTrade: Map<string, true>;
   hp: number;
   mp: number;
   /** Set by a moderator disconnect; such a session never enters the grace window. */

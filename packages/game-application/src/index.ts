@@ -47,6 +47,10 @@ export type {
   SellInput,
   ShopBuyOutcome,
   ShopSellOutcome,
+  TradeSettlementInput,
+  TradeSettlementOutcome,
+  TradeSettlementSide,
+  TradeSettlementSideResult,
   UnequipInput,
   UseInput,
 } from './assetService';

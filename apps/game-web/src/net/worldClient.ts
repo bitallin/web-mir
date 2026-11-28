@@ -33,6 +33,8 @@ import {
   sessionTransferSchema,
   shopCatalogSchema,
   systemNoticeSchema,
+  tradeInviteViewSchema,
+  tradeStateSchema,
   worldRoomNameFor,
   type AssetResult,
   type CharacterProgress,
@@ -65,6 +67,8 @@ import {
   type SessionKicked,
   type ShopCatalog,
   type SystemNotice,
+  type TradeInviteView,
+  type TradeState,
   type TilePoint,
 } from '@web-legend/contracts';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
@@ -166,6 +170,8 @@ export type WorldClientCallbacks = {
   onGuildPresence: (presence: GuildPresence) => void;
   onGuildRefresh: (refresh: GuildRefresh) => void;
   onGuildDirectory: (directory: GuildDirectory) => void;
+  onTradeInvite: (invite: TradeInviteView) => void;
+  onTradeState: (state: TradeState) => void;
   onAssetResult: (result: AssetResult) => void;
   onProgress: (progress: CharacterProgress) => void;
   onLevelUp: (levelUp: LevelUp) => void;
@@ -614,7 +620,31 @@ export class WorldClient {
     return this.sendSocialCommand(CLIENT_MESSAGES.guildApplicationDecline, { applicationId });
   }
 
-  private sendSocialCommand(kind: string, fields: Record<string, string>): boolean {
+  sendTradeInvite(targetPlayerId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.tradeInvite, { targetPlayerId });
+  }
+
+  sendTradeAccept(inviteId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.tradeAccept, { inviteId });
+  }
+
+  sendTradeDecline(inviteId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.tradeDecline, { inviteId });
+  }
+
+  sendTradeOffer(tradeId: string, itemIds: readonly string[], gold: number): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.tradeOffer, { tradeId, itemIds, gold });
+  }
+
+  sendTradeLock(tradeId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.tradeLock, { tradeId });
+  }
+
+  sendTradeCancel(tradeId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.tradeCancel, { tradeId });
+  }
+
+  private sendSocialCommand(kind: string, fields: Record<string, unknown>): boolean {
     const room = this.room;
     if (room === null || this.stopped || this.transferring) {
       return false;
@@ -964,6 +994,24 @@ export class WorldClient {
         const parsed = guildDirectorySchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onGuildDirectory(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.tradeInvite, (payload: unknown) => {
+        const parsed = tradeInviteViewSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onTradeInvite(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.tradeState, (payload: unknown) => {
+        const parsed = tradeStateSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onTradeState(parsed.data);
         }
       }),
     );

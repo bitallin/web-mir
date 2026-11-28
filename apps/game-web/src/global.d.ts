@@ -10,6 +10,8 @@ import type {
   PartyView,
   QuestNavigationPurpose,
   QuestView,
+  TradeInviteView,
+  TradeState,
 } from '@web-legend/contracts';
 
 import type {
@@ -109,6 +111,8 @@ declare global {
       leaveGuild: () => boolean;
       kickGuildMember: (playerId: string) => boolean;
       disbandGuild: () => boolean;
+      tradeState: () => TradeState | null;
+      tradeInviteState: () => TradeInviteView | null;
       lootDrops: () => LootView[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
       lootIconFrame: (dropId: string) => number | null;

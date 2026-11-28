@@ -3,6 +3,8 @@ import {
   INVENTORY_CAPACITY,
   LOOT_EXPIRY_MS,
   LOOT_OWNER_WINDOW_MS,
+  TRADE_MAX_GOLD,
+  TRADE_MAX_ITEM_STACKS,
   type AssetCommandKind,
   type ContentBundle,
   type EquipmentSlot,
@@ -24,6 +26,7 @@ import {
   findInventoryPlacement,
   isConsumable,
   isShopQuantityAllowed,
+  isTradeableItem,
   itemBuyPrice,
   itemSellPrice,
   purchaseCost,
@@ -62,7 +65,7 @@ import {
   type ExpiredDropCleanup,
   type ItemInstance,
 } from '@web-legend/persistence';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, sql } from 'drizzle-orm';
 
 import { AssetError } from './errors';
 
@@ -214,6 +217,29 @@ export type SellInput = {
   quantity: number;
 };
 
+/** One side of a trade as the room last observed it (ADR-050). */
+export type TradeSettlementSide = {
+  characterId: string;
+  items: readonly { itemId: string; quantity: number }[];
+  gold: number;
+};
+
+export type TradeSettlementInput = {
+  tradeId: string;
+  sides: readonly [TradeSettlementSide, TradeSettlementSide];
+};
+
+export type TradeSettlementSideResult = {
+  characterId: string;
+  snapshot: InventorySnapshot;
+  stats: CombatStats;
+};
+
+export type TradeSettlementOutcome = {
+  deduplicated: boolean;
+  sides: TradeSettlementSideResult[];
+};
+
 export type ShopBuyOutcome = AssetCommandOutcome & {
   purchased: {
     templateId: string;
@@ -272,6 +298,7 @@ function itemView(row: ItemInstance, catalog: ItemCatalog): ItemView {
     maxMpBonus: definition.maxMpBonus,
     healHp: definition.healHp,
     healMp: definition.healMp,
+    tradeable: isTradeableItem(definition),
   };
 }
 
@@ -1315,6 +1342,330 @@ export class AssetService {
           unitPrice,
           totalValue,
         },
+      };
+    });
+  }
+
+  /**
+   * Settles one face-to-face trade atomically (ADR-050). Both character rows
+   * are locked in UUID order before anything else, so two crossed trades cannot
+   * deadlock; every offered row, wallet and ledger entry then changes inside
+   * the same transaction. The room has already verified ownership in memory,
+   * but this transaction re-checks everything against PostgreSQL because the
+   * offer is only a client-observed intention.
+   */
+  async settleTrade(input: TradeSettlementInput): Promise<TradeSettlementOutcome> {
+    const now = this.now();
+    const [left, right] = [...input.sides].sort((a, b) =>
+      a.characterId < b.characterId ? -1 : a.characterId > b.characterId ? 1 : 0,
+    ) as [TradeSettlementSide, TradeSettlementSide];
+    if (left.characterId === right.characterId) {
+      throw new AssetError('TRADE_SELF');
+    }
+    for (const side of [left, right]) {
+      if (
+        side.items.length > TRADE_MAX_ITEM_STACKS ||
+        !Number.isSafeInteger(side.gold) ||
+        side.gold < 0 ||
+        side.gold > TRADE_MAX_GOLD
+      ) {
+        throw new AssetError('INVALID_QUANTITY');
+      }
+      if (new Set(side.items.map((entry) => entry.itemId)).size !== side.items.length) {
+        throw new AssetError('TRADE_ITEM_UNAVAILABLE');
+      }
+    }
+
+    return this.db.transaction(async (tx) => {
+      const lockedCharacters = await tx
+        .select({ id: characters.id })
+        .from(characters)
+        .where(inArray(characters.id, [left.characterId, right.characterId]))
+        .orderBy(asc(characters.id))
+        .for('update');
+      if (lockedCharacters.length !== 2) {
+        throw new AssetError('INVALID_SESSION');
+      }
+
+      const leftClaimed = await this.claimCommand(
+        tx,
+        left.characterId,
+        'trade_settle',
+        input.tradeId,
+      );
+      const rightClaimed = await this.claimCommand(
+        tx,
+        right.characterId,
+        'trade_settle',
+        input.tradeId,
+      );
+      if (leftClaimed !== rightClaimed) {
+        throw new AssetError('SERVICE_UNAVAILABLE');
+      }
+      if (!leftClaimed) {
+        const leftAssets = await this.loadAssetsWithin(tx, left.characterId);
+        const rightAssets = await this.loadAssetsWithin(tx, right.characterId);
+        return {
+          deduplicated: true,
+          sides: [
+            {
+              characterId: left.characterId,
+              snapshot: leftAssets.snapshot,
+              stats: leftAssets.stats,
+            },
+            {
+              characterId: right.characterId,
+              snapshot: rightAssets.snapshot,
+              stats: rightAssets.stats,
+            },
+          ],
+        };
+      }
+
+      const itemIds = [...left.items, ...right.items].map((entry) => entry.itemId);
+      const itemRows =
+        itemIds.length === 0
+          ? []
+          : await tx
+              .select()
+              .from(itemInstances)
+              .where(inArray(itemInstances.id, itemIds))
+              .orderBy(asc(itemInstances.id))
+              .for('update');
+      const itemById = new Map(itemRows.map((row) => [row.id, row]));
+      for (const side of [left, right]) {
+        for (const entry of side.items) {
+          const row = itemById.get(entry.itemId);
+          const definition = row === undefined ? undefined : this.content.items[row.templateId];
+          if (
+            row === undefined ||
+            definition === undefined ||
+            row.characterId !== side.characterId ||
+            row.container !== 'inventory' ||
+            row.quantity !== entry.quantity ||
+            !isTradeableItem(definition)
+          ) {
+            throw new AssetError('TRADE_ITEM_UNAVAILABLE');
+          }
+        }
+      }
+
+      const walletRows = await tx
+        .select()
+        .from(wallets)
+        .where(inArray(wallets.characterId, [left.characterId, right.characterId]))
+        .orderBy(asc(wallets.characterId))
+        .for('update');
+      const walletByCharacter = new Map(walletRows.map((row) => [row.characterId, row]));
+      for (const side of [left, right]) {
+        const balance = walletByCharacter.get(side.characterId)?.balance ?? 0;
+        if (side.gold > balance) {
+          throw new AssetError('INSUFFICIENT_GOLD');
+        }
+      }
+
+      // Simulate the receiver's inventory after its own offers leave, then plan
+      // each incoming stack against those slots. The real rows are parked in
+      // the next step, so a swap never needs two rows in one slot.
+      const leftInventory = await listInventoryItems(tx, left.characterId);
+      const rightInventory = await listInventoryItems(tx, right.characterId);
+      const leftOffered = new Set(left.items.map((entry) => entry.itemId));
+      const rightOffered = new Set(right.items.map((entry) => entry.itemId));
+      type SimulatedStack = {
+        itemId: string;
+        templateId: string;
+        quantity: number;
+        slotIndex: number;
+      };
+      const leftState: SimulatedStack[] = leftInventory
+        .filter((row) => !leftOffered.has(row.id))
+        .map((row) => ({
+          itemId: row.id,
+          templateId: row.templateId,
+          quantity: row.quantity,
+          slotIndex: row.slotIndex ?? 0,
+        }));
+      const rightState: SimulatedStack[] = rightInventory
+        .filter((row) => !rightOffered.has(row.id))
+        .map((row) => ({
+          itemId: row.id,
+          templateId: row.templateId,
+          quantity: row.quantity,
+          slotIndex: row.slotIndex ?? 0,
+        }));
+
+      type PlacementPlan = {
+        source: ItemInstance;
+        toCharacterId: string;
+        placement: ReturnType<typeof findInventoryPlacement>;
+      };
+      const plans: PlacementPlan[] = [];
+      const planIncoming = (
+        offeredIds: readonly string[],
+        toCharacterId: string,
+        state: SimulatedStack[],
+      ): void => {
+        const offeredRows = offeredIds
+          .map((itemId) => itemById.get(itemId))
+          .filter((row): row is ItemInstance => row !== undefined)
+          .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        for (const row of offeredRows) {
+          const placement = findInventoryPlacement(
+            {
+              items: state,
+              templateId: row.templateId,
+              quantity: row.quantity,
+              capacity: INVENTORY_CAPACITY,
+            },
+            this.content.items,
+          );
+          if (placement === null) {
+            throw new AssetError('INVENTORY_FULL');
+          }
+          if (placement.kind === 'merge') {
+            const target = state.find((entry) => entry.itemId === placement.targetItemId);
+            if (target === undefined) {
+              throw new AssetError('SERVICE_UNAVAILABLE');
+            }
+            target.quantity = placement.resultingQuantity;
+          } else {
+            state.push({
+              itemId: row.id,
+              templateId: row.templateId,
+              quantity: row.quantity,
+              slotIndex: placement.slotIndex,
+            });
+          }
+          plans.push({ source: row, toCharacterId, placement });
+        }
+      };
+      planIncoming(
+        left.items.map((entry) => entry.itemId),
+        right.characterId,
+        rightState,
+      );
+      planIncoming(
+        right.items.map((entry) => entry.itemId),
+        left.characterId,
+        leftState,
+      );
+
+      const moves: {
+        source: ItemInstance;
+        toCharacterId: string;
+        slotIndex: number;
+      }[] = [];
+      const merges: { source: ItemInstance; targetItemId: string }[] = [];
+      for (const plan of plans) {
+        if (plan.placement === null) {
+          throw new AssetError('SERVICE_UNAVAILABLE');
+        }
+        if (plan.placement.kind === 'merge') {
+          merges.push({ source: plan.source, targetItemId: plan.placement.targetItemId });
+        } else {
+          moves.push({
+            source: plan.source,
+            toCharacterId: plan.toCharacterId,
+            slotIndex: plan.placement.slotIndex,
+          });
+        }
+      }
+
+      // A swap can make two rows want each other's slot. Park every moving row
+      // under its new owner with a unique negative slot first, consume merged
+      // stacks next, then assign the real slots. Item ids survive the move, so
+      // drop/audit rows that reference an instance stay valid.
+      for (const [index, move] of moves.entries()) {
+        await tx
+          .update(itemInstances)
+          .set({
+            characterId: move.toCharacterId,
+            slotIndex: -(index + 1),
+            version: sql`${itemInstances.version} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(itemInstances.id, move.source.id));
+      }
+      for (const merge of merges) {
+        await tx.delete(itemInstances).where(eq(itemInstances.id, merge.source.id));
+        await tx
+          .update(itemInstances)
+          .set({
+            quantity: sql`${itemInstances.quantity} + ${merge.source.quantity}`,
+            version: sql`${itemInstances.version} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(itemInstances.id, merge.targetItemId));
+      }
+      for (const move of moves) {
+        await tx
+          .update(itemInstances)
+          .set({
+            slotIndex: move.slotIndex,
+            version: sql`${itemInstances.version} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(itemInstances.id, move.source.id));
+      }
+
+      const walletDeltas: [TradeSettlementSide, number][] = [
+        [left, right.gold - left.gold],
+        [right, left.gold - right.gold],
+      ];
+      for (const [side, delta] of walletDeltas) {
+        if (delta === 0) {
+          continue;
+        }
+        const wallet = walletByCharacter.get(side.characterId);
+        const balanceAfter = (wallet?.balance ?? 0) + delta;
+        if (balanceAfter < 0) {
+          throw new AssetError('INSUFFICIENT_GOLD');
+        }
+        if (wallet === undefined) {
+          await tx.insert(wallets).values({
+            characterId: side.characterId,
+            balance: balanceAfter,
+            version: 1,
+            updatedAt: now,
+          });
+        } else {
+          await tx
+            .update(wallets)
+            .set({
+              balance: balanceAfter,
+              version: sql`${wallets.version} + 1`,
+              updatedAt: now,
+            })
+            .where(eq(wallets.characterId, side.characterId));
+        }
+        await tx.insert(currencyLedger).values({
+          characterId: side.characterId,
+          currencyType: 'gold',
+          delta,
+          balanceAfter,
+          reason: 'trade_settle',
+          referenceId: input.tradeId,
+          idempotencyKey: `trade_settle:${side.characterId}:${input.tradeId}:gold`,
+          createdAt: now,
+        });
+      }
+
+      const leftAssets = await this.loadAssetsWithin(tx, left.characterId);
+      const rightAssets = await this.loadAssetsWithin(tx, right.characterId);
+      return {
+        deduplicated: false,
+        sides: [
+          {
+            characterId: left.characterId,
+            snapshot: leftAssets.snapshot,
+            stats: leftAssets.stats,
+          },
+          {
+            characterId: right.characterId,
+            snapshot: rightAssets.snapshot,
+            stats: rightAssets.stats,
+          },
+        ],
       };
     });
   }

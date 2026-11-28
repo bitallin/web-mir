@@ -55,6 +55,15 @@ export function itemSellPrice(definition: ItemDefinition): number {
   return definition.sellPrice ?? 0;
 }
 
+/**
+ * Trading uses the same "bound" rule the shop already relies on: an item with
+ * no sell price (the starter weapon) cannot leave its owner by trading either
+ * (ADR-050). Quest materials and consumables all have a sell price.
+ */
+export function isTradeableItem(definition: ItemDefinition): boolean {
+  return itemSellPrice(definition) > 0;
+}
+
 /** Whether one merchant command may move this many units of the template. */
 export function isShopQuantityAllowed(definition: ItemDefinition, quantity: number): boolean {
   if (!Number.isInteger(quantity) || quantity < 1) {

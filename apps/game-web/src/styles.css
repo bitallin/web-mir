@@ -3054,3 +3054,231 @@ body {
     width: auto;
   }
 }
+
+/* Face-to-face trade (ADR-050). The panel docks right like the shop so the
+   player, skill dock and chat stay visible. */
+.player-trade {
+  padding: 2px 8px;
+  border: 1px solid #3f6b6b;
+  background: transparent;
+  color: #8fd0d0;
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.player-trade:hover:not(:disabled) {
+  background: rgba(100, 190, 190, 0.14);
+}
+
+.trade-invite {
+  border-color: #3f6b6b;
+}
+
+.trade-result {
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid #232a32;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.trade-result.warning {
+  color: #e0a0a0;
+}
+
+.trade-result.subtle {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trade-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 10px 0;
+}
+
+.trade-side {
+  min-width: 0;
+  border: 1px solid #232a32;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.trade-side h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid #232a32;
+  color: var(--gold);
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.trade-side h3 em {
+  color: #8fd0a8;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.trade-items {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.trade-items li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.trade-items li.empty {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trade-items button {
+  padding: 1px 6px;
+  border: 1px solid #3f4f5b;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.trade-gold {
+  margin: 0;
+  padding: 4px 8px 6px;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.trade-gold-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.trade-gold-editor label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trade-gold-editor input {
+  width: 90px;
+  padding: 3px 6px;
+  border: 1px solid #2b323a;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.trade-gold-editor button {
+  padding: 2px 8px;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.trade-bag-title {
+  margin: 6px 14px 0;
+  color: var(--gold);
+  font-family: var(--serif);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.trade-bag {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  flex: 1 1 auto;
+  min-height: 60px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.trade-bag li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  font-size: 11px;
+}
+
+.trade-bag li[data-offered='true'] {
+  background: rgba(201, 162, 39, 0.1);
+}
+
+.trade-bag li.empty {
+  display: block;
+  color: var(--muted);
+}
+
+.trade-bag button {
+  padding: 2px 8px;
+  border: 1px solid #3f6b6b;
+  background: transparent;
+  color: #8fd0d0;
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.trade-bag button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.trade-lock {
+  margin: 8px 14px 12px;
+  padding: 8px;
+  border: 1px solid var(--gold);
+  background: rgba(201, 162, 39, 0.16);
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.trade-lock:hover {
+  background: rgba(201, 162, 39, 0.26);
+}
+
+.trade-hint {
+  margin: 8px 14px 12px;
+  color: #8fd0a8;
+  font-size: 11px;
+}
+
+@media (max-width: 860px) {
+  .trade-panel {
+    left: 12px;
+    right: 12px;
+    top: 236px;
+    bottom: 300px;
+    width: auto;
+  }
+}

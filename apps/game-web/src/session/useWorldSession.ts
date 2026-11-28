@@ -28,6 +28,8 @@ import type {
   ShopCatalog,
   SystemNotice,
   TilePoint,
+  TradeInviteView,
+  TradeState,
 } from '@web-legend/contracts';
 import type Phaser from 'phaser';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
@@ -116,6 +118,10 @@ export type SessionState = {
   guildDirectory: GuildSummaryView[] | null;
   /** Pending applications, populated only for the guild leader. */
   guildApplications: GuildApplicationView[];
+  /** The player's current face-to-face trade, if any (ADR-050). */
+  trade: TradeState | null;
+  /** An unanswered trade invitation addressed to the local player. */
+  tradeInvite: TradeInviteView | null;
   levelUpNotice: LevelUp | null;
   /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
   notices: SessionNotice[];
@@ -192,6 +198,8 @@ function initialState(character: CharacterView): SessionState {
     guildInvite: null,
     guildDirectory: null,
     guildApplications: [],
+    trade: null,
+    tradeInvite: null,
     levelUpNotice: null,
     notices: [],
     autoAttack: null,
@@ -401,8 +409,11 @@ class WorldSession {
   private guildInvite: GuildInviteView | null = null;
   private guildDirectory: GuildSummaryView[] | null = null;
   private lastGuildApplications: GuildApplicationView[] = [];
+  private trade: TradeState | null = null;
+  private tradeInvite: TradeInviteView | null = null;
   private partyInviteTimer: number | null = null;
   private guildInviteTimer: number | null = null;
+  private tradeInviteTimer: number | null = null;
   private levelBannerTimer: number | null = null;
   private systemMessageSequence = 0;
   private noticeSequence = 0;
@@ -859,6 +870,36 @@ class WorldSession {
             ...previous,
             guildDirectory: directory.guilds,
           }));
+        },
+        onTradeInvite: (invite) => {
+          this.tradeInvite = invite;
+          if (this.tradeInviteTimer !== null) {
+            window.clearTimeout(this.tradeInviteTimer);
+          }
+          const remaining = Math.max(0, invite.expiresAt - Date.now());
+          this.tradeInviteTimer = window.setTimeout(() => {
+            this.tradeInviteTimer = null;
+            this.clearTradeInvite();
+          }, remaining);
+          this.updateState((previous) => ({ ...previous, tradeInvite: invite }));
+        },
+        onTradeState: (trade) => {
+          this.trade = trade;
+          this.clearTradeInvite();
+          if (trade.status === 'completed') {
+            this.pushNotice('info', '交易完成，物品和金币已到账');
+          } else if (trade.status === 'cancelled') {
+            const messages: Record<string, string> = {
+              declined: '对方拒绝了交易邀请',
+              player_left: '对方离开了地图，交易已取消',
+              player_dead: '角色倒下，交易已取消',
+              out_of_range: '双方距离太远，交易已取消',
+              failed: '交易已取消',
+            };
+            const reason = trade.closeReason ?? 'cancelled';
+            this.pushNotice('warning', messages[reason] ?? '交易已取消');
+          }
+          this.updateState((previous) => ({ ...previous, trade }));
         },
         onAssetResult: (result) => {
           this.inventory = result.snapshot;
@@ -1495,6 +1536,105 @@ class WorldSession {
     return sent;
   }
 
+  inviteToTrade(targetPlayerId: string): boolean {
+    return this.sendTradeIntent(this.client?.sendTradeInvite(targetPlayerId) ?? false);
+  }
+
+  acceptTradeInvite(): boolean {
+    const invite = this.tradeInvite;
+    if (invite === null) {
+      return false;
+    }
+    const sent = this.client?.sendTradeAccept(invite.inviteId) ?? false;
+    if (sent) {
+      this.clearTradeInvite();
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  declineTradeInvite(): boolean {
+    const invite = this.tradeInvite;
+    if (invite === null) {
+      return false;
+    }
+    const sent = this.client?.sendTradeDecline(invite.inviteId) ?? false;
+    if (sent) {
+      this.clearTradeInvite();
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  /** Replaces the local item offer; omitted gold keeps the current amount. */
+  setTradeOffer(itemIds: readonly string[], gold?: number): boolean {
+    const trade = this.trade;
+    if (trade === null || trade.status !== 'open') {
+      return false;
+    }
+    return this.sendTradeIntent(
+      this.client?.sendTradeOffer(trade.tradeId, itemIds, gold ?? trade.selfGold) ?? false,
+    );
+  }
+
+  setTradeGold(gold: number): boolean {
+    const trade = this.trade;
+    if (trade === null || trade.status !== 'open') {
+      return false;
+    }
+    return this.setTradeOffer(
+      trade.selfItems.map((item) => item.itemId),
+      gold,
+    );
+  }
+
+  lockTrade(): boolean {
+    const trade = this.trade;
+    if (trade === null || trade.status !== 'open' || trade.selfLocked) {
+      return false;
+    }
+    return this.sendTradeIntent(this.client?.sendTradeLock(trade.tradeId) ?? false);
+  }
+
+  cancelTrade(): boolean {
+    const trade = this.trade;
+    if (trade === null || trade.status !== 'open') {
+      return false;
+    }
+    return this.sendTradeIntent(this.client?.sendTradeCancel(trade.tradeId) ?? false);
+  }
+
+  /** Dismisses a finished trade panel; the server already freed both players. */
+  clearTrade(): void {
+    if (this.trade === null) {
+      return;
+    }
+    this.trade = null;
+    this.updateState((previous) => ({ ...previous, trade: null }));
+  }
+
+  private sendTradeIntent(sent: boolean): boolean {
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  private clearTradeInvite(): void {
+    if (this.tradeInviteTimer !== null) {
+      window.clearTimeout(this.tradeInviteTimer);
+      this.tradeInviteTimer = null;
+    }
+    if (this.tradeInvite === null) {
+      return;
+    }
+    this.tradeInvite = null;
+    this.updateState((previous) => ({ ...previous, tradeInvite: null }));
+  }
+
   private applyGuildPresence(presence: GuildPresence): void {
     const current = this.guild;
     if (current === null) {
@@ -1614,6 +1754,10 @@ class WorldSession {
       window.clearTimeout(this.guildInviteTimer);
       this.guildInviteTimer = null;
     }
+    if (this.tradeInviteTimer !== null) {
+      window.clearTimeout(this.tradeInviteTimer);
+      this.tradeInviteTimer = null;
+    }
     const client = this.client;
     this.client = null;
     if (client !== null) {
@@ -1718,6 +1862,13 @@ class WorldSession {
     this.quests = [];
     this.party = null;
     this.partyInvite = null;
+    // The server ends a face-to-face trade when either side changes map.
+    this.trade = null;
+    this.tradeInvite = null;
+    if (this.tradeInviteTimer !== null) {
+      window.clearTimeout(this.tradeInviteTimer);
+      this.tradeInviteTimer = null;
+    }
     // The guidance intent survives the transfer; the new room gets it again.
     this.autoQuestSentMapId = null;
     this.autoClaimSent = false;
@@ -1763,6 +1914,8 @@ class WorldSession {
             },
       questRequest: null,
       partyInvite: null,
+      trade: null,
+      tradeInvite: null,
       levelUpNotice: null,
       notices: [],
       autoAttack: null,
@@ -1879,6 +2032,8 @@ class WorldSession {
       disbandGuild: () => this.disbandGuild(),
       partyState: () => this.party,
       partyInviteState: () => this.partyInvite,
+      tradeState: () => this.trade,
+      tradeInviteState: () => this.tradeInvite,
       lootDrops: () => this.latestLoot,
       lootScreenPoint: (dropId) => this.bridge.lootScreenPoint(dropId),
       lootIconFrame: (dropId) => this.bridge.lootIconFrame(dropId),
@@ -1939,6 +2094,14 @@ export type WorldSessionControls = {
   applyToGuild: (guildId: string) => boolean;
   acceptGuildApplication: (applicationId: string) => boolean;
   declineGuildApplication: (applicationId: string) => boolean;
+  inviteToTrade: (targetPlayerId: string) => boolean;
+  acceptTradeInvite: () => boolean;
+  declineTradeInvite: () => boolean;
+  setTradeOffer: (itemIds: readonly string[], gold?: number) => boolean;
+  setTradeGold: (gold: number) => boolean;
+  lockTrade: () => boolean;
+  cancelTrade: () => boolean;
+  clearTrade: () => void;
   toggleSfx: () => void;
 };
 
@@ -2116,6 +2279,29 @@ export function useWorldSession(
     (applicationId: string) => sessionRef.current?.declineGuildApplication(applicationId) ?? false,
     [],
   );
+  const inviteToTrade = useCallback(
+    (targetPlayerId: string) => sessionRef.current?.inviteToTrade(targetPlayerId) ?? false,
+    [],
+  );
+  const acceptTradeInvite = useCallback(() => sessionRef.current?.acceptTradeInvite() ?? false, []);
+  const declineTradeInvite = useCallback(
+    () => sessionRef.current?.declineTradeInvite() ?? false,
+    [],
+  );
+  const setTradeOffer = useCallback(
+    (itemIds: readonly string[], gold?: number) =>
+      sessionRef.current?.setTradeOffer(itemIds, gold) ?? false,
+    [],
+  );
+  const setTradeGold = useCallback(
+    (gold: number) => sessionRef.current?.setTradeGold(gold) ?? false,
+    [],
+  );
+  const lockTrade = useCallback(() => sessionRef.current?.lockTrade() ?? false, []);
+  const cancelTrade = useCallback(() => sessionRef.current?.cancelTrade() ?? false, []);
+  const clearTrade = useCallback(() => {
+    sessionRef.current?.clearTrade();
+  }, []);
   const toggleSfx = useCallback(() => {
     sessionRef.current?.toggleSfx();
   }, []);
@@ -2163,6 +2349,14 @@ export function useWorldSession(
     applyToGuild,
     acceptGuildApplication,
     declineGuildApplication,
+    inviteToTrade,
+    acceptTradeInvite,
+    declineTradeInvite,
+    setTradeOffer,
+    setTradeGold,
+    lockTrade,
+    cancelTrade,
+    clearTrade,
     toggleSfx,
   };
 }

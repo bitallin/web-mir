@@ -4959,3 +4959,83 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
 
 - `8100200` `feat(alpha-03): add a guild directory and join applications`。
 - `5b765d2` `fix(game-server): keep load bots off the portal and exit cleanly`。
+
+## 2026-11-28 Alpha 0.3 S5-C：面对面玩家交易
+
+### 目标
+
+玩家之间可以直接交换背包物品与金币。要求同图近距、双方存活、双确认、单一
+事务结算、幂等且可审计；不暴露报价给第三方，不影响只读/旧快照兼容。
+
+### 实际改动
+
+1. **ADR**：新增 ADR-050，确定 Room 内交易会话、PostgreSQL 原子结算、双角色
+   锁顺序、槽位停车、整堆交易与绑定规则。
+2. **契约**：新增 `packages/contracts/src/trade.ts`（交易状态、邀请、6 条命令、
+   边界常量）；`realtime.ts` 增加 `trade.*` 消息与 9 个 `TRADE_*` 拒绝码；
+   `economy.ts` 增加 `trade_settle` 资产命令与可选 `ItemView.tradeable`。
+3. **领域**：`isTradeableItem` 复用“无出售价即绑定”的语义。
+4. **应用**：`AssetService.settleTrade`——双角色按 UUID 锁、双方 `tradeId`
+   幂等、物品/钱包复核、负槽位停车、合并/落位、双钱包与两条账本同事务。
+5. **服务端**：新增 `TradeRegistry`（邀请/接受/拒绝/报价/锁定/取消/完成）；
+   Room 注册 6 条命令、范围与存活校验、双方锁定后自动结算、失败回滚并剔除
+   失效报价；离开/过图/断线/死亡取消交易并通知双方。
+6. **客户端**：附近玩家「交易」、邀请横幅、右侧停靠交易面板（双方报价、
+   背包整堆加入、金币输入、锁定/取消、完成结果）；过图/断线清理交易状态。
+7. **测试**：新增 11 条注册表单测、8 条真实 PostgreSQL 结算测试、6 条真实
+   Room 集成与 2 条双浏览器 E2E。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm exec playwright test tests/e2e/trade.spec.ts --workers=1
+pnpm test:e2e
+pnpm build
+pnpm verify:invariants
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
+  LOAD_OUTPUT=docs/phase-reports/alpha-03/trade/load-50p2a.json \
+  pnpm --filter @web-legend/game-server load:scenario
+```
+
+- 格式 / lint / 类型检查：通过（本容器实际 Node v24.22.2；Node 26 安装不完整）。
+- 单元/集成：92 文件、**683 测试**通过。
+- 交易 E2E：2/2 通过；全量 **54/54 通过（6.3 分钟）**。
+- 构建：通过。
+- 容量：50 人 × 2 分钟 50/50、接受率 98.7%、207 击杀、0 资产失败；
+  tick p50 1.38ms / p95 **3.61ms** / p99 4.46ms / max 5.73ms；资产事务
+  p95 43.27ms（`trade/load-50p2a.json`）。
+- 资产不变量：7/7 为 0（`trade/database-invariants.txt`）。
+- 开发栈：84–87 已重启到本切片代码（14:59），4 个服务健康 200；8584 可试玩。
+  无数据库迁移、无内容发布、协议版本不变。
+
+### 遇到的问题及解决方法
+
+1. **同槽位交换撞唯一索引**：最初“删除报价行再重插”能跑通，但会丢失物品
+   实例 ID 与掉落审计引用。改为按角色 UUID 锁 + 负槽位停车 + 合并/删除 +
+   正式落位，并新增“双方装备都在 10 号槽”的真实 PostgreSQL 用例。
+2. **交易状态竞态（测试）**：E2E/集成测试先等待一方状态、再订阅另一方，错过
+   了同一次广播。改为在发送命令前同时订阅双方。
+3. **E2E 假设角色职业**：默认创建的是战士，不是法师；断言从“收到 3 瓶魔法药”
+   改为按真实初始背包计算（+1 魔法药、+3 金创药）。
+4. **全量 E2E 重写历史截图**：运行全套 Playwright 会重新生成 phase-reports 下的
+   旧截图；已恢复历史文件，只保留本切片的新证据。
+
+### 尚未解决
+
+- 真人长时间试玩；交易税/历史/部分数量/黑名单/拍卖行（TD-ECO-06）。
+- 交易会话仅在 Room 内存，重启会取消未结算交易（TD-SRV-19）。
+- 远端 CI 与 Node 26 复跑仍待环境支持；正式美术（TD-CLI-13）。
+
+### 下一步计划
+
+1. 3 人副本实例（先写动态实例 ADR）或排行榜最小版。
+2. 行会公告/职位/经济与交易迭代按试玩反馈推进。
+3. 正式美术、八方向角色帧与远端 CI。
+
+### 提交
+
+- 待提交：`feat(alpha-03): add face-to-face player trading`。

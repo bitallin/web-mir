@@ -41,7 +41,7 @@ export const EQUIPMENT_SLOTS = ['weapon', 'armor'] as const;
 export const equipmentSlotSchema = z.enum(EQUIPMENT_SLOTS);
 export type EquipmentSlot = z.infer<typeof equipmentSlotSchema>;
 
-const templateIdSchema = z
+export const templateIdSchema = z
   .string()
   .min(3)
   .max(32)
@@ -73,6 +73,11 @@ export const itemViewSchema = z
     maxMpBonus: z.number().int().nonnegative(),
     healHp: z.number().int().nonnegative(),
     healMp: z.number().int().nonnegative(),
+    /**
+     * Server-computed trade eligibility (ADR-050). Optional so an older
+     * server's snapshot still decodes; the client only disables when false.
+     */
+    tradeable: z.boolean().optional(),
   })
   .strict();
 
@@ -123,6 +128,7 @@ export const assetCommandKindSchema = z.enum([
   'quest_accept',
   'quest_claim',
   'party_kill_reward',
+  'trade_settle',
 ]);
 
 export type AssetCommandKind = z.infer<typeof assetCommandKindSchema>;

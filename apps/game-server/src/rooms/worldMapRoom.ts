@@ -54,6 +54,15 @@ import {
   guildListCommandSchema,
   guildPresenceSchema,
   guildSnapshotSchema,
+  tradeAcceptCommandSchema,
+  tradeCancelCommandSchema,
+  tradeDeclineCommandSchema,
+  tradeInviteCommandSchema,
+  tradeInviteViewSchema,
+  tradeLockCommandSchema,
+  tradeOfferCommandSchema,
+  tradeStateSchema,
+  TRADE_RANGE_TILES,
   sessionKickedSchema,
   inventoryEquipSchema,
   inventorySnapshotSchema,
@@ -131,6 +140,8 @@ import {
   type ShopSellPrice,
   type SystemNotice,
   type TilePoint,
+  type TradeOfferItemView,
+  type TradeState,
 } from '@web-legend/contracts';
 import { MAP_MANIFESTS } from '@web-legend/contracts/maps';
 import {
@@ -156,11 +167,13 @@ import {
   type LootDropView,
   type PartyKillRewardInput,
   type PartyKillRewardOutcome,
+  type TradeSettlementOutcome,
 } from '@web-legend/game-application';
 import {
   CombatWorld,
   dailyPeriodKey,
   defaultChatFilter,
+  isTradeableItem,
   itemBuyPrice,
   itemSellPrice,
   nextDailyResetAt,
@@ -208,6 +221,7 @@ import { createTokenBucket } from '../world/rateLimiter';
 import { PartyService } from '../world/partyService';
 import { type PartyManagementRejection, type PartyState } from '../world/partyRegistry';
 import { GuildInviteService } from '../world/guildInvites';
+import { TradeRegistry, type TradeSessionState } from '../world/tradeRegistry';
 import {
   PlayerDirectory,
   type FriendServerEvent,
@@ -439,6 +453,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private friends!: FriendsService;
   private guilds!: GuildService;
   private guildInvites!: GuildInviteService;
+  /** Trades are face-to-face, so the table is scoped to this map room. */
+  private readonly trades = new TradeRegistry();
   private directory!: PlayerDirectory;
   /** Current content snapshot's party rule; defaults keep the feature usable. */
   private partyRule: { maxMembers: number; assistSharePermille: number; assistRangeTiles: number } =
@@ -722,6 +738,24 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.guildApplicationDecline, (client, message) => {
       this.handleGuildApplicationReply(client, message, 'decline');
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.tradeInvite, (client, message) => {
+      this.handleTradeInvite(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.tradeAccept, (client, message) => {
+      this.handleTradeAccept(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.tradeDecline, (client, message) => {
+      this.handleTradeDecline(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.tradeOffer, (client, message) => {
+      this.handleTradeOffer(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.tradeLock, (client, message) => {
+      this.handleTradeLock(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.tradeCancel, (client, message) => {
+      this.handleTradeCancel(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
@@ -909,6 +943,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       recentParty: new Map(),
       recentFriends: new Map(),
       recentGuild: new Map(),
+      recentTrade: new Map(),
       hp: combatPlayer.hp,
       mp: combatPlayer.mp,
       terminated: null,
@@ -1093,6 +1128,13 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     // re-issues its intent after reconnecting.
     session.autoAttack = null;
     session.questNavigation = null;
+    // A face-to-face trade cannot continue while one side is unreachable; a
+    // reconnect starts from a clean slate (ADR-050).
+    const cancelledTrade = this.trades.cancelForPlayer(session.playerId, 'player_left');
+    if (cancelledTrade !== undefined) {
+      this.sendTradeStateToBoth(cancelledTrade);
+      this.notifyTradeParticipants(cancelledTrade, '对方断线，交易已取消');
+    }
     this.setConnected(session.playerId, false);
     this.simulation.clearPath(session.playerId);
     // A dropped player must not be killed by monsters during the grace window.
@@ -1396,6 +1438,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     for (const event of events) {
       if (event.kind === 'death' && event.entityType === 'player') {
         this.simulation.clearPath(event.entityId);
+        const cancelledTrade = this.trades.cancelForPlayer(event.entityId, 'player_dead');
+        if (cancelledTrade !== undefined) {
+          this.sendTradeStateToBoth(cancelledTrade);
+          this.notifyTradeParticipants(cancelledTrade, '角色倒下，交易已取消');
+        }
       } else if (event.kind === 'respawn') {
         try {
           this.simulation.setPosition(event.entityId, { x: event.x, y: event.y });
@@ -1571,6 +1618,13 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     session.transferTargetMapId = portal.targetMapId;
     session.lastCheckpointAt = Date.now();
     this.stopAutoAttack(session, 'transferred');
+    // A trade is face-to-face; leaving the map ends it for both sides before
+    // the destination room can host the character (ADR-050).
+    const cancelledTrade = this.trades.cancelForPlayer(session.playerId, 'player_left');
+    if (cancelledTrade !== undefined) {
+      this.sendTradeStateToBoth(cancelledTrade);
+      this.notifyTradeParticipants(cancelledTrade, '对方离开了地图，交易已取消');
+    }
 
     // The target map is committed: remove the entity from this instance before
     // telling the browser to leave, so the character never exists twice.
@@ -5404,6 +5458,507 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
   }
 
+  private handleTradeInvite(client: Client, raw: unknown): void {
+    const parsed = tradeInviteCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openTradeCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    const target = this.registry.findByPlayerId(parsed.data.targetPlayerId);
+    if (target === undefined) {
+      this.failTradeCommand(opened, 'TRADE_TARGET_UNAVAILABLE');
+      return;
+    }
+    const block = this.tradeBlockReason(opened.session.playerId, target.playerId);
+    if (block !== null) {
+      this.failTradeCommand(opened, block);
+      return;
+    }
+    const result = this.trades.invite(
+      { playerId: opened.session.playerId, displayName: opened.session.displayName },
+      { playerId: target.playerId, displayName: target.displayName },
+    );
+    if (result.kind === 'rejected') {
+      this.failTradeCommand(opened, result.code);
+      return;
+    }
+    target.client.send(
+      SERVER_MESSAGES.tradeInvite,
+      tradeInviteViewSchema.parse({
+        inviteId: result.invite.inviteId,
+        fromPlayerId: result.invite.fromPlayerId,
+        fromDisplayName: result.invite.fromDisplayName,
+        expiresAt: result.invite.expiresAt,
+        serverTime: Date.now(),
+      }),
+    );
+    this.sendSystemNotice(opened.session.client, 'info', `已向 ${target.displayName} 发送交易邀请`);
+    this.completeTradeCommand();
+  }
+
+  private handleTradeAccept(client: Client, raw: unknown): void {
+    const parsed = tradeAcceptCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openTradeCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    const result = this.trades.accept(
+      opened.session.playerId,
+      opened.session.displayName,
+      parsed.data.inviteId,
+    );
+    if (result.kind === 'rejected') {
+      this.failTradeCommand(opened, result.code);
+      return;
+    }
+    const other = result.session.sides.find((side) => side.playerId !== opened.session.playerId);
+    const block =
+      other === undefined
+        ? 'TRADE_TARGET_UNAVAILABLE'
+        : this.tradeBlockReason(opened.session.playerId, other.playerId);
+    if (block !== null) {
+      const closed = this.trades.cancelForPlayer(
+        opened.session.playerId,
+        block === 'TRADE_OUT_OF_RANGE' ? 'out_of_range' : 'failed',
+      );
+      if (closed !== undefined) {
+        this.sendTradeStateToBoth(closed);
+      }
+      this.failTradeCommand(opened, block);
+      return;
+    }
+    this.sendTradeStateToBoth(result.session);
+    for (const side of result.session.sides) {
+      const session = this.registry.findByPlayerId(side.playerId);
+      if (session !== undefined) {
+        this.sendSystemNotice(session.client, 'info', '交易已开始，双方锁定后自动结算');
+      }
+    }
+    this.completeTradeCommand();
+  }
+
+  private handleTradeDecline(client: Client, raw: unknown): void {
+    const parsed = tradeDeclineCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openTradeCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    const result = this.trades.decline(opened.session.playerId, parsed.data.inviteId);
+    if (result.kind === 'rejected') {
+      this.failTradeCommand(opened, result.code);
+      return;
+    }
+    const inviter = this.registry.findByPlayerId(result.invite.fromPlayerId);
+    if (inviter !== undefined) {
+      this.sendSystemNotice(
+        inviter.client,
+        'warning',
+        `${opened.session.displayName} 拒绝了你的交易邀请`,
+      );
+    }
+    this.completeTradeCommand();
+  }
+
+  private handleTradeOffer(client: Client, raw: unknown): void {
+    const parsed = tradeOfferCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openTradeCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    const current = this.trades.sessionById(parsed.data.tradeId);
+    if (
+      current === undefined ||
+      !current.sides.some((side) => side.playerId === opened.session.playerId)
+    ) {
+      this.failTradeCommand(opened, 'TRADE_NOT_FOUND');
+      return;
+    }
+    const other = current.sides.find((side) => side.playerId !== opened.session.playerId);
+    const block =
+      other === undefined
+        ? 'TRADE_NOT_FOUND'
+        : this.tradeBlockReason(opened.session.playerId, other.playerId);
+    if (block !== null) {
+      const closed = this.trades.cancelForPlayer(
+        opened.session.playerId,
+        block === 'TRADE_OUT_OF_RANGE' ? 'out_of_range' : 'failed',
+      );
+      if (closed !== undefined) {
+        this.sendTradeStateToBoth(closed);
+      }
+      this.failTradeCommand(opened, block);
+      return;
+    }
+    const items = this.resolveTradeOffer(opened.session, parsed.data.itemIds);
+    if (typeof items === 'string') {
+      this.failTradeCommand(opened, items);
+      return;
+    }
+    if (parsed.data.gold > opened.session.assetSnapshot.gold) {
+      this.failTradeCommand(opened, 'INSUFFICIENT_GOLD');
+      return;
+    }
+    const result = this.trades.offer(
+      opened.session.playerId,
+      parsed.data.tradeId,
+      items,
+      parsed.data.gold,
+    );
+    if (result.kind === 'rejected') {
+      this.failTradeCommand(opened, result.code);
+      return;
+    }
+    this.sendTradeStateToBoth(result.session);
+    this.completeTradeCommand();
+  }
+
+  private handleTradeLock(client: Client, raw: unknown): void {
+    const parsed = tradeLockCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openTradeCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    const current = this.trades.sessionById(parsed.data.tradeId);
+    if (
+      current === undefined ||
+      !current.sides.some((side) => side.playerId === opened.session.playerId)
+    ) {
+      this.failTradeCommand(opened, 'TRADE_NOT_FOUND');
+      return;
+    }
+    const other = current.sides.find((side) => side.playerId !== opened.session.playerId);
+    const block =
+      other === undefined
+        ? 'TRADE_NOT_FOUND'
+        : this.tradeBlockReason(opened.session.playerId, other.playerId);
+    if (block !== null) {
+      const closed = this.trades.cancelForPlayer(
+        opened.session.playerId,
+        block === 'TRADE_OUT_OF_RANGE' ? 'out_of_range' : 'failed',
+      );
+      if (closed !== undefined) {
+        this.sendTradeStateToBoth(closed);
+      }
+      this.failTradeCommand(opened, block);
+      return;
+    }
+    const result = this.trades.lock(opened.session.playerId, parsed.data.tradeId);
+    if (result.kind === 'rejected') {
+      this.failTradeCommand(opened, result.code);
+      return;
+    }
+    this.sendTradeStateToBoth(result.session);
+    this.completeTradeCommand();
+    if (result.kind === 'ready') {
+      void this.settleTrade(result.session, opened.session);
+    }
+  }
+
+  private handleTradeCancel(client: Client, raw: unknown): void {
+    const parsed = tradeCancelCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openTradeCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    const result = this.trades.cancel(opened.session.playerId, parsed.data.tradeId);
+    if (result.kind === 'rejected') {
+      this.failTradeCommand(opened, result.code);
+      return;
+    }
+    this.sendTradeStateToBoth(result.session);
+    this.notifyTradeParticipants(result.session, '交易已取消');
+    this.completeTradeCommand();
+  }
+
+  private async settleTrade(trade: TradeSessionState, locker: SessionRecord): Promise<void> {
+    const [left, right] = trade.sides;
+    const block = this.tradeBlockReason(left.playerId, right.playerId);
+    if (block !== null) {
+      const closed = this.trades.cancelForPlayer(
+        left.playerId,
+        block === 'TRADE_OUT_OF_RANGE' ? 'out_of_range' : 'failed',
+      );
+      if (closed !== undefined) {
+        this.sendTradeStateToBoth(closed);
+      }
+      this.rejectTradeSettlement(locker, block);
+      return;
+    }
+
+    this.metrics.recordAssetCommand();
+    let outcome: TradeSettlementOutcome;
+    try {
+      outcome = await this.enqueueAsset(() =>
+        this.assets.settleTrade({
+          tradeId: trade.tradeId,
+          sides: [
+            {
+              characterId: left.playerId,
+              items: left.items.map((item) => ({
+                itemId: item.itemId,
+                quantity: item.quantity,
+              })),
+              gold: left.gold,
+            },
+            {
+              characterId: right.playerId,
+              items: right.items.map((item) => ({
+                itemId: item.itemId,
+                quantity: item.quantity,
+              })),
+              gold: right.gold,
+            },
+          ],
+        }),
+      );
+    } catch (error) {
+      this.metrics.recordAssetFailure();
+      this.trades.reopen(trade.tradeId);
+      const reopened = this.trades.sessionById(trade.tradeId);
+      if (reopened !== undefined) {
+        this.pruneTradeOffers(reopened);
+        this.sendTradeStateToBoth(reopened);
+      }
+      if (error instanceof AssetError) {
+        this.rejectTradeSettlement(locker, error.code);
+        return;
+      }
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, tradeId: trade.tradeId },
+        'trade settlement failed',
+      );
+      this.rejectTradeSettlement(locker, 'SERVICE_UNAVAILABLE');
+      return;
+    }
+
+    const finished = this.trades.complete(trade.tradeId) ?? {
+      ...trade,
+      status: 'completed' as const,
+      closeReason: 'completed' as const,
+    };
+    for (const side of outcome.sides) {
+      const session = this.registry.findByPlayerId(side.characterId);
+      if (session === undefined) {
+        continue;
+      }
+      session.assetSnapshot = side.snapshot;
+      try {
+        this.sendAssetSnapshot(session.client, session);
+      } catch (error) {
+        this.options.logger.warn(
+          { err: error, roomId: this.roomId, characterId: side.characterId },
+          'failed to deliver trade inventory snapshot',
+        );
+      }
+      if (this.hasActiveCollectQuest(session)) {
+        try {
+          this.sendQuestSnapshot(session.client, session);
+        } catch (error) {
+          this.options.logger.warn(
+            { err: error, roomId: this.roomId, characterId: side.characterId },
+            'failed to refresh quest views after a trade',
+          );
+        }
+      }
+    }
+    this.sendTradeStateToBoth(finished);
+    this.notifyTradeParticipants(finished, '交易完成');
+  }
+
+  /** The locker may have disconnected while the settlement was queued. */
+  private rejectTradeSettlement(locker: SessionRecord, code: CommandRejectionCode): void {
+    if (this.registry.get(locker.client.sessionId) !== locker) {
+      return;
+    }
+    try {
+      this.sendRejection(locker.client, {}, code);
+    } catch (error) {
+      this.options.logger.debug(
+        { err: error, roomId: this.roomId, playerId: locker.playerId },
+        'failed to deliver trade rejection',
+      );
+    }
+  }
+
+  private openTradeCommand(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+  ): OpenSocialCommand | null {
+    const meta = { commandId: command.commandId, clientSequence: command.clientSequence };
+    const session = this.registry.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, meta, 'INVALID_SESSION');
+      return null;
+    }
+    const gate = this.guard.check(session, command, session.recentTrade.has(command.commandId));
+    if (gate.kind === 'reject') {
+      this.sendRejection(client, meta, gate.code);
+      return null;
+    }
+    if (gate.kind === 'duplicate') {
+      const current = this.trades.sessionOf(session.playerId);
+      if (current !== undefined) {
+        this.sendTradeState(session, current);
+      }
+      return null;
+    }
+    session.lastSequence = command.clientSequence;
+    this.guard.remember(session.recentTrade, command.commandId, true);
+    return { session, commandId: command.commandId, clientSequence: command.clientSequence };
+  }
+
+  private failTradeCommand(opened: OpenSocialCommand, code: CommandRejectionCode): void {
+    opened.session.recentTrade.delete(opened.commandId);
+    this.sendRejection(
+      opened.session.client,
+      { commandId: opened.commandId, clientSequence: opened.clientSequence },
+      code,
+    );
+  }
+
+  private completeTradeCommand(): void {
+    this.metrics.recordAcceptedCommand();
+  }
+
+  private tradeDistanceTiles(leftId: string, rightId: string): number | null {
+    const left = this.simulation.getPlayer(leftId);
+    const right = this.simulation.getPlayer(rightId);
+    if (left === undefined || right === undefined) {
+      return null;
+    }
+    return Math.hypot(left.x - right.x, left.y - right.y) / TILE_UNITS;
+  }
+
+  private tradeBlockReason(leftId: string, rightId: string): CommandRejectionCode | null {
+    if (leftId === rightId) {
+      return 'TRADE_SELF';
+    }
+    const left = this.combat.getPlayer(leftId);
+    const right = this.combat.getPlayer(rightId);
+    if (left === undefined || right === undefined || !left.alive || !right.alive) {
+      return 'TRADE_TARGET_UNAVAILABLE';
+    }
+    const distance = this.tradeDistanceTiles(leftId, rightId);
+    if (distance === null) {
+      return 'TRADE_TARGET_UNAVAILABLE';
+    }
+    return distance > TRADE_RANGE_TILES ? 'TRADE_OUT_OF_RANGE' : null;
+  }
+
+  private resolveTradeOffer(
+    session: SessionRecord,
+    itemIds: readonly string[],
+  ): TradeOfferItemView[] | CommandRejectionCode {
+    const items: TradeOfferItemView[] = [];
+    for (const itemId of itemIds) {
+      const item = session.assetSnapshot.items.find((entry) => entry.itemId === itemId);
+      if (item === undefined || item.tradeable === false) {
+        return 'TRADE_ITEM_UNAVAILABLE';
+      }
+      const definition = this.content.bundle.items[item.templateId];
+      if (definition === undefined || !isTradeableItem(definition)) {
+        return 'TRADE_ITEM_UNAVAILABLE';
+      }
+      items.push({
+        itemId: item.itemId,
+        templateId: item.templateId,
+        name: item.name,
+        kind: item.kind,
+        ...(item.quality === undefined ? {} : { quality: item.quality }),
+        quantity: item.quantity,
+      });
+    }
+    return items;
+  }
+
+  /** Drops offers that no longer exist after a failed settlement. */
+  private pruneTradeOffers(trade: TradeSessionState): void {
+    for (const side of trade.sides) {
+      const session = this.registry.findByPlayerId(side.playerId);
+      if (session === undefined) {
+        side.items = [];
+        side.gold = 0;
+        continue;
+      }
+      const owned = new Set(session.assetSnapshot.items.map((item) => item.itemId));
+      side.items = side.items.filter((item) => owned.has(item.itemId));
+      side.gold = Math.min(side.gold, session.assetSnapshot.gold);
+    }
+  }
+
+  private sendTradeStateToBoth(trade: TradeSessionState): void {
+    for (const side of trade.sides) {
+      const session = this.registry.findByPlayerId(side.playerId);
+      if (session !== undefined) {
+        this.sendTradeState(session, trade);
+      }
+    }
+  }
+
+  private sendTradeState(session: SessionRecord, trade: TradeSessionState): void {
+    const self = trade.sides.find((side) => side.playerId === session.playerId);
+    const other = trade.sides.find((side) => side.playerId !== session.playerId);
+    if (self === undefined || other === undefined) {
+      return;
+    }
+    const state: TradeState = {
+      tradeId: trade.tradeId,
+      status: trade.status,
+      ...(trade.closeReason === undefined ? {} : { closeReason: trade.closeReason }),
+      selfPlayerId: self.playerId,
+      otherPlayerId: other.playerId,
+      otherDisplayName: other.displayName,
+      selfItems: self.items,
+      otherItems: other.items,
+      selfGold: self.gold,
+      otherGold: other.gold,
+      selfLocked: self.locked,
+      otherLocked: other.locked,
+      serverTime: Date.now(),
+    };
+    try {
+      session.client.send(SERVER_MESSAGES.tradeState, tradeStateSchema.parse(state));
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, playerId: session.playerId },
+        'trade state failed validation',
+      );
+    }
+  }
+
+  private notifyTradeParticipants(trade: TradeSessionState, message: string): void {
+    for (const side of trade.sides) {
+      const session = this.registry.findByPlayerId(side.playerId);
+      if (session !== undefined) {
+        this.sendSystemNotice(session.client, 'info', message);
+      }
+    }
+  }
+
   /**
    * Party commands change only in-memory state, so they share the command gate
    * with assets (protocol, duplicate id, sequence, rate limit) but run
@@ -5703,6 +6258,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     const player = this.simulation.getPlayer(session.playerId);
     const combatPlayer = this.combat.getPlayer(session.playerId);
     const displayName = session.displayName;
+    const cancelledTrade = this.trades.cancelForPlayer(session.playerId, 'player_left');
+    if (cancelledTrade !== undefined) {
+      this.sendTradeStateToBoth(cancelledTrade);
+      this.notifyTradeParticipants(cancelledTrade, '对方离开了地图，交易已取消');
+    }
     this.registry.remove(sessionId);
     const reachPrefix = `${session.playerId}:`;
     for (const key of this.reachBackoffUntil.keys()) {

@@ -1,0 +1,10 @@
+[WARN] Unsupported engine: wanted: {"node":">=26.0.0 <27"} (current: {"node":"v24.22.2","pnpm":"11.7.0"})
+$ bash infra/scripts/database-invariants.sh
+assert wallet_ledger_mismatch=0
+assert negative_wallets=0
+assert dup_equip_slot=0
+assert dup_inv_slot=0
+assert ground_without_drop=0
+assert claimed_but_ground=0
+assert stale_expired_open_ground=0
+all asset invariants passed (report: /data/nlp/ligen/web-mir/docs/phase-reports/database-invariants.txt)

@@ -54,6 +54,12 @@ export const CLIENT_MESSAGES = {
   guildApply: 'guild.apply',
   guildApplicationAccept: 'guild.apply.accept',
   guildApplicationDecline: 'guild.apply.decline',
+  tradeInvite: 'trade.invite',
+  tradeAccept: 'trade.accept',
+  tradeDecline: 'trade.decline',
+  tradeOffer: 'trade.offer',
+  tradeLock: 'trade.lock',
+  tradeCancel: 'trade.cancel',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -85,6 +91,8 @@ export const SERVER_MESSAGES = {
   guildPresence: 'guild.presence',
   guildRefresh: 'guild.refresh',
   guildDirectory: 'guild.directory',
+  tradeInvite: 'trade.invite',
+  tradeState: 'trade.state',
 } as const;
 
 /**
@@ -333,6 +341,15 @@ export const COMMAND_REJECTION_CODES = [
   'GUILD_NOT_FOUND',
   'GUILD_TARGET_NOT_MEMBER',
   'GUILD_APPLICATION_NOT_FOUND',
+  'TRADE_SELF',
+  'TRADE_ALREADY_TRADING',
+  'TRADE_TARGET_UNAVAILABLE',
+  'TRADE_TARGET_BUSY',
+  'TRADE_INVITE_EXPIRED',
+  'TRADE_NOT_FOUND',
+  'TRADE_LOCKED',
+  'TRADE_ITEM_UNAVAILABLE',
+  'TRADE_OUT_OF_RANGE',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -405,6 +422,15 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   GUILD_NOT_FOUND: '行会不存在或已经解散',
   GUILD_TARGET_NOT_MEMBER: '对方不在你的行会中',
   GUILD_APPLICATION_NOT_FOUND: '入会申请不存在或已处理',
+  TRADE_SELF: '不能和自己交易',
+  TRADE_ALREADY_TRADING: '你已经在交易中',
+  TRADE_TARGET_UNAVAILABLE: '对方不在附近，或已经离线',
+  TRADE_TARGET_BUSY: '对方正在交易中',
+  TRADE_INVITE_EXPIRED: '交易邀请已过期或不存在',
+  TRADE_NOT_FOUND: '交易不存在或已经结束',
+  TRADE_LOCKED: '报价已锁定，请先取消锁定',
+  TRADE_ITEM_UNAVAILABLE: '该物品已不在背包中，或不可交易',
+  TRADE_OUT_OF_RANGE: '双方距离太远，交易已取消',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

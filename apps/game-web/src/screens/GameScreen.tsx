@@ -6,6 +6,8 @@ import {
   SHOP_MAX_QUANTITY,
   SHOP_RANGE_TILES,
   TILE_UNITS,
+  TRADE_MAX_ITEM_STACKS,
+  TRADE_RANGE_TILES,
   type CharacterView,
   type CombatTargetChanged,
   type ItemKind,
@@ -193,6 +195,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const [shopTab, setShopTab] = useState<'buy' | 'sell'>('buy');
   const [questOpen, setQuestOpen] = useState(false);
   const [questNpcId, setQuestNpcId] = useState<string | null>(null);
+  const [tradeGoldDraft, setTradeGoldDraft] = useState('0');
   const requestTicket = useCallback(async () => {
     const response = await issueGameTicket(character.id);
     return response.ticket;
@@ -239,6 +242,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     applyToGuild,
     acceptGuildApplication,
     declineGuildApplication,
+    inviteToTrade,
+    acceptTradeInvite,
+    declineTradeInvite,
+    setTradeOffer,
+    setTradeGold,
+    lockTrade,
+    cancelTrade,
+    clearTrade,
     toggleSfx,
   } = useWorldSession(containerRef, {
     character,
@@ -253,6 +264,24 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    if (state.trade === null) {
+      return;
+    }
+    setShopOpen(false);
+    setBagOpen(false);
+    setQuestOpen(false);
+    setFriendsOpen(false);
+    setGuildOpen(false);
+    setCharacterOpen(false);
+  }, [state.trade]);
+
+  useEffect(() => {
+    if (state.trade !== null) {
+      setTradeGoldDraft(String(state.trade.selfGold));
+    }
+  }, [state.trade]);
 
   const classDefinition = CHARACTER_CLASS_CATALOG[character.classId];
   const partyLeaderId = state.party?.leaderId ?? null;
@@ -285,6 +314,24 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const expToNextLevel = inventory?.expToNextLevel ?? 0;
   const gold = inventory?.gold ?? 0;
   const displayedItems = bagSorted ? sortBagItems(items) : items;
+  const trade = state.trade;
+  const tradeIsOpen = trade !== null && trade.status === 'open';
+  const tradeOfferedIds = new Set(trade?.selfItems.map((item) => item.itemId) ?? []);
+  const tradeableItems = items.filter((item) => item.tradeable !== false);
+  const tradeStatusLabel =
+    trade === null
+      ? ''
+      : trade.status === 'settling'
+        ? '结算中'
+        : trade.status === 'completed'
+          ? '已完成'
+          : trade.status === 'cancelled'
+            ? '已取消'
+            : trade.selfLocked
+              ? '等待对方锁定'
+              : trade.otherLocked
+                ? '对方已锁定'
+                : '准备中';
 
   const equippedFor = (item: ItemView): ItemView | null => {
     if (item.equipSlot === 'weapon') {
@@ -436,6 +483,32 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     },
     [castSkill, state.selectedTargetId, state.selfId],
   );
+
+  const toggleTradeItem = (itemId: string): void => {
+    if (trade === null || !tradeIsOpen || trade.selfLocked) {
+      return;
+    }
+    const current = trade.selfItems.map((item) => item.itemId);
+    const next = current.includes(itemId)
+      ? current.filter((id) => id !== itemId)
+      : [...current, itemId];
+    setTradeOffer(next);
+  };
+
+  const submitTradeGold = (): void => {
+    if (trade === null || !tradeIsOpen || trade.selfLocked) {
+      setTradeGoldDraft(String(trade?.selfGold ?? 0));
+      return;
+    }
+    const value = Number.parseInt(tradeGoldDraft, 10);
+    if (!Number.isFinite(value) || value < 0) {
+      setTradeGoldDraft(String(trade.selfGold));
+      return;
+    }
+    const clamped = Math.min(value, gold);
+    setTradeGoldDraft(String(clamped));
+    setTradeGold(clamped);
+  };
 
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
@@ -1051,6 +1124,40 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             </section>
           ) : null}
 
+          {state.tradeInvite !== null ? (
+            <section
+              className="party-invite trade-invite"
+              data-testid="trade-invite"
+              aria-live="polite"
+            >
+              <p>
+                <strong>{state.tradeInvite.fromDisplayName}</strong> 请求与你面对面交易
+              </p>
+              <div className="party-invite-actions">
+                <button
+                  type="button"
+                  className="party-accept"
+                  data-testid="trade-invite-accept"
+                  onClick={() => {
+                    acceptTradeInvite();
+                  }}
+                >
+                  接受
+                </button>
+                <button
+                  type="button"
+                  className="party-decline"
+                  data-testid="trade-invite-decline"
+                  onClick={() => {
+                    declineTradeInvite();
+                  }}
+                >
+                  拒绝
+                </button>
+              </div>
+            </section>
+          ) : null}
+
           {state.party !== null ? (
             <section className="party-panel" data-testid="party-panel" aria-label="队伍">
               <div className="panel-heading">
@@ -1315,6 +1422,25 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           }}
                         >
                           邀请入会
+                        </button>
+                      ) : null}
+                      {player.connected &&
+                      player.alive &&
+                      self !== undefined &&
+                      Math.hypot(
+                        self.x / TILE_UNITS - player.x / TILE_UNITS,
+                        self.y / TILE_UNITS - player.y / TILE_UNITS,
+                      ) <= TRADE_RANGE_TILES ? (
+                        <button
+                          type="button"
+                          className="player-trade"
+                          data-testid="player-trade"
+                          data-player-id={player.playerId}
+                          onClick={() => {
+                            inviteToTrade(player.playerId);
+                          }}
+                        >
+                          交易
                         </button>
                       ) : null}
                     </span>
@@ -2242,6 +2368,219 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             接取后点「前往击杀」或「前往探索」自动寻路（击杀目标会自动战斗）；
             完成后点「回去交付」返回并自动交付。
           </p>
+        </aside>
+      ) : null}
+
+      {trade !== null ? (
+        <aside
+          className="hud shop-panel trade-panel"
+          data-testid="trade-panel"
+          data-status={trade.status}
+          data-trade-id={trade.tradeId}
+          aria-label="交易"
+        >
+          <div className="panel-heading">
+            <h2>交易 · {trade.otherDisplayName}</h2>
+            <span data-testid="trade-status">{tradeStatusLabel}</span>
+            {trade.status === 'completed' || trade.status === 'cancelled' ? (
+              <button
+                type="button"
+                className="panel-close"
+                data-testid="trade-close"
+                onClick={clearTrade}
+              >
+                关闭
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="panel-close"
+                data-testid="trade-cancel"
+                onClick={cancelTrade}
+              >
+                取消
+              </button>
+            )}
+          </div>
+
+          {trade.status === 'completed' ? (
+            <p className="trade-result" data-testid="trade-result">
+              交易完成，物品与金币已经交换。
+            </p>
+          ) : trade.status === 'cancelled' ? (
+            <p className="trade-result warning" data-testid="trade-result">
+              交易已取消。
+            </p>
+          ) : trade.status === 'settling' ? (
+            <p className="trade-result" data-testid="trade-result">
+              双方已锁定，正在结算…
+            </p>
+          ) : (
+            <p className="trade-result subtle" data-testid="trade-result">
+              双方都锁定后自动结算；修改报价会解除双方锁定。
+            </p>
+          )}
+
+          <div className="trade-columns">
+            <section className="trade-side" data-testid="trade-self-side">
+              <h3>
+                我的报价
+                {trade.selfLocked ? <em data-testid="trade-self-locked">已锁定</em> : null}
+              </h3>
+              <ul className="trade-items" data-testid="trade-self-items">
+                {trade.selfItems.map((item) => (
+                  <li
+                    key={item.itemId}
+                    data-testid="trade-self-item"
+                    data-item-id={item.itemId}
+                    data-template-id={item.templateId}
+                    data-quantity={item.quantity}
+                  >
+                    <ItemIcon
+                      templateId={item.templateId}
+                      kind={item.kind}
+                      {...(item.quality === undefined ? {} : { quality: item.quality })}
+                    />
+                    <span>{item.name}</span>
+                    <em>×{item.quantity}</em>
+                    {tradeIsOpen && !trade.selfLocked ? (
+                      <button
+                        type="button"
+                        data-testid="trade-remove-item"
+                        onClick={() => {
+                          toggleTradeItem(item.itemId);
+                        }}
+                      >
+                        移除
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+                {trade.selfItems.length === 0 ? <li className="empty">尚未放入物品</li> : null}
+              </ul>
+              <p className="trade-gold" data-testid="trade-self-gold">
+                金币 {trade.selfGold}
+              </p>
+            </section>
+
+            <section className="trade-side" data-testid="trade-other-side">
+              <h3>
+                对方报价
+                {trade.otherLocked ? <em data-testid="trade-other-locked">已锁定</em> : null}
+              </h3>
+              <ul className="trade-items" data-testid="trade-other-items">
+                {trade.otherItems.map((item) => (
+                  <li
+                    key={item.itemId}
+                    data-testid="trade-other-item"
+                    data-template-id={item.templateId}
+                    data-quantity={item.quantity}
+                  >
+                    <ItemIcon
+                      templateId={item.templateId}
+                      kind={item.kind}
+                      {...(item.quality === undefined ? {} : { quality: item.quality })}
+                    />
+                    <span>{item.name}</span>
+                    <em>×{item.quantity}</em>
+                  </li>
+                ))}
+                {trade.otherItems.length === 0 ? <li className="empty">尚未放入物品</li> : null}
+              </ul>
+              <p className="trade-gold" data-testid="trade-other-gold">
+                金币 {trade.otherGold}
+              </p>
+            </section>
+          </div>
+
+          {tradeIsOpen ? (
+            <>
+              {!trade.selfLocked ? (
+                <div className="trade-gold-editor">
+                  <label>
+                    我的金币
+                    <input
+                      data-testid="trade-gold-input"
+                      type="number"
+                      min={0}
+                      max={gold}
+                      value={tradeGoldDraft}
+                      onChange={(event) => {
+                        setTradeGoldDraft(event.target.value);
+                      }}
+                      onBlur={submitTradeGold}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          submitTradeGold();
+                        }
+                      }}
+                    />
+                  </label>
+                  <span>持有 {gold}</span>
+                  <button type="button" data-testid="trade-gold-set" onClick={submitTradeGold}>
+                    确定
+                  </button>
+                </div>
+              ) : null}
+
+              <h3 className="trade-bag-title">
+                背包 · 点击整堆加入{trade.selfLocked ? '（已锁定）' : ''}
+              </h3>
+              <ul className="trade-bag" data-testid="trade-bag">
+                {tradeableItems.map((item) => {
+                  const offered = tradeOfferedIds.has(item.itemId);
+                  const full = !offered && trade.selfItems.length >= TRADE_MAX_ITEM_STACKS;
+                  return (
+                    <li
+                      key={item.itemId}
+                      data-testid="trade-bag-item"
+                      data-item-id={item.itemId}
+                      data-template-id={item.templateId}
+                      data-offered={offered ? 'true' : 'false'}
+                    >
+                      <ItemIcon
+                        templateId={item.templateId}
+                        kind={item.kind}
+                        quality={qualityOf(item)}
+                      />
+                      <span>
+                        {item.name} ×{item.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        data-testid="trade-bag-toggle"
+                        disabled={trade.selfLocked || full}
+                        onClick={() => {
+                          toggleTradeItem(item.itemId);
+                        }}
+                      >
+                        {offered ? '移出' : '加入'}
+                      </button>
+                    </li>
+                  );
+                })}
+                {tradeableItems.length === 0 ? (
+                  <li className="empty">背包里没有可交易的物品</li>
+                ) : null}
+              </ul>
+
+              {trade.selfLocked ? (
+                <p className="trade-hint" data-testid="trade-locked-hint">
+                  已锁定，等待对方锁定后自动结算。
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  className="trade-lock"
+                  data-testid="trade-lock"
+                  onClick={lockTrade}
+                >
+                  锁定报价
+                </button>
+              )}
+            </>
+          ) : null}
         </aside>
       ) : null}
 

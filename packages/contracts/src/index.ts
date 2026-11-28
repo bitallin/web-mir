@@ -197,6 +197,7 @@ export {
   shopOfferSchema,
   shopSellPriceSchema,
   shopSellSchema,
+  templateIdSchema,
 } from './economy';
 export type {
   AssetCommandKind,
@@ -443,6 +444,39 @@ export type {
   GuildSummaryView,
   GuildView,
 } from './guild';
+
+export {
+  TRADE_CLOSE_REASONS,
+  TRADE_INVITE_TTL_MS,
+  TRADE_MAX_GOLD,
+  TRADE_MAX_ITEM_STACKS,
+  TRADE_RANGE_TILES,
+  TRADE_STATUSES,
+  tradeAcceptCommandSchema,
+  tradeCancelCommandSchema,
+  tradeCloseReasonSchema,
+  tradeDeclineCommandSchema,
+  tradeInviteCommandSchema,
+  tradeInviteViewSchema,
+  tradeLockCommandSchema,
+  tradeOfferCommandSchema,
+  tradeOfferItemViewSchema,
+  tradeStateSchema,
+  tradeStatusSchema,
+} from './trade';
+export type {
+  TradeAcceptCommand,
+  TradeCancelCommand,
+  TradeCloseReason,
+  TradeDeclineCommand,
+  TradeInviteCommand,
+  TradeInviteView,
+  TradeLockCommand,
+  TradeOfferCommand,
+  TradeOfferItemView,
+  TradeState,
+  TradeStatus,
+} from './trade';
 
 export {
   ADMIN_COMMAND_STATUSES,
