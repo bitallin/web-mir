@@ -22,7 +22,7 @@
 | S3-E  | 怪物归属、自动拾取、争夺掉落与远处自动走近                 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_LOOT_PICKUP_REPORT.md`、ADR-041        |
 | S3-M  | 八方向移动：斜向寻路/阻挡、WASD 短步、空格停止             | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_EIGHT_WAY_MOVEMENT_REPORT.md`、ADR-043 |
 | S4-A  | 队伍社交：队伍聊天、队长移交、踢人（跨图投递）             | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_PARTY_SOCIAL_REPORT.md`、ADR-044       |
-| S4-B  | 好友系统：申请/列表/在线状态、好友跨图组队、频道选择器     | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_FRIENDS_REPORT.md`、ADR-045            |
+| S4-B  | 好友系统：申请/列表/在线状态、好友跨图组队、聊天标准布局   | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_FRIENDS_REPORT.md`、ADR-045            |
 | S4-C  | 待定：到达目标世界标记、按名字邀请                         | 待定 | —                                                                            |
 | S5    | 待定：交易或排行榜最小版                                   | 待定 | —                                                                            |
 
@@ -172,8 +172,8 @@
 4. 好友组队：同 Room 近距离邀请规则不变；跨图或超范围只允许已接受好友，且目标
    必须在线；非好友远距邀请返回 `PARTY_TARGET_UNAVAILABLE`。
 5. 客户端：好友面板（在线/离线、好友申请、已发送、邀请、删除）、附近玩家
-   「加好友」与未处理申请角标；聊天面板只有一套「附近 / 队伍」选择器，
-   同时决定日志显示与发言频道（纯展示层，不改变服务端投递）。
+   「加好友」与未处理申请角标；聊天日志默认显示全部频道，标题栏只筛选日志，
+   输入行左侧单独选择发言频道（纯展示层，不改变服务端投递）。
 6. 验证：623 个单元/集成测试、全量 51 个浏览器 E2E；真实 PostgreSQL 覆盖
    好友事务，真实 Room 覆盖跨图好友邀请与陌生人拒绝。
 
