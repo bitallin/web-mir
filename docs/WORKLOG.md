@@ -4489,3 +4489,99 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
   选择器决定发送频道、被踢后回退”；全量 **51/51** 浏览器 E2E 通过。
 - 文档：切片报告、执行计划、状态与演进记录同步为“聊天标准布局”。
 - 提交：`58f5050` `fix(alpha-03): show all chat channels by default with a send selector`。
+
+### 2026-11-28 Alpha 0.3 S4-C：好友私聊与进程级在线目录
+
+**目标**：在好友与频道筛选之后交付一对一私聊（好友入口、跨图投递、隐私与
+限频），并按 TD-SRV-14 把在线状态与跨 Room 路由从 `PartyService` 提取为独立的
+在线目录，供队伍、好友与后续行会共用。
+
+### 实际改动
+
+1. **进程级 PlayerDirectory**
+   - 新增 `apps/game-server/src/world/playerDirectory.ts`：presence 表、Room
+     投递端口、`deliver`/`deliverMany`；投递类型为闭集联合（聊天、组队邀请、
+     队伍名单刷新、好友事件）。
+   - `PartyService` 只保留队伍注册表，构造时注入目录；presence、端口与
+     `registerRoom` 全部移除。`FriendNotifier` 删除，好友刷新与上下线事件改由
+     目录投递。
+   - Room 只注册一个投递端口；`deliverToPlayer` 按类型解码，不把跨 Room 状态
+     写入公开 Room State。
+2. **契约**
+   - `CHAT_CHANNELS` 增加 `whisper`；`chat.send` 增加可选 `targetPlayerId`，
+     `chat.message` 增加可选 `targetPlayerId` / `targetDisplayName`。
+   - schema 强制私聊必须带目标、其他频道不得带目标；新增拒绝码
+     `CHAT_TARGET_UNAVAILABLE`。
+3. **服务端**
+   - `handleChat` 的私聊分支复用过滤、限频、禁言与 `clientMessageId` 去重；
+     `deliverWhisper` 异步校验好友关系，再按目录投递并回显发送者。
+   - 离线、非好友、自己与目录投递失败统一返回 `CHAT_TARGET_UNAVAILABLE`；
+     关系查询失败返回 `SERVICE_UNAVAILABLE`。
+   - 私聊消息不落库、不进入公开 Room State；双方收到同一 `messageId`。
+4. **客户端**
+   - 好友行「私聊」选中目标、切换发言频道与日志筛选；发言选择器显示
+     「私聊·名字」，输入提示显示发送对象。
+   - 私聊行显示「→ 名字」或「私聊」标签；“全部”日志同时显示附近、队伍与私聊。
+   - 目标离线/失去好友时自动清空目标并回到附近频道。
+5. **测试**
+   - 契约 2 条（目标必填、目标字段保留）；`PartyService` 测试改为通过目录写入
+     presence；新增真实 Room + PostgreSQL 跨图私聊用例（收件、回复、陌生人、
+     自己、离线）。
+   - `tests/e2e/friends.spec.ts` 扩展私聊收发、标签与地图频道隔离断言。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm exec playwright test tests/e2e/friends.spec.ts
+pnpm exec playwright test tests/e2e/party.spec.ts tests/e2e/hud.spec.ts
+pnpm exec playwright test
+pnpm build
+pnpm verify:invariants
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
+  LOAD_OUTPUT=docs/phase-reports/alpha-03/whisper/load-50p2a.json pnpm load:scenario
+```
+
+- 格式 / lint / 类型检查：通过。
+- 单元/集成：85 文件、**626 测试**通过。
+- 好友 E2E：1/1 通过；队伍 + HUD E2E：6/6 通过。
+- 全量 E2E：**51/51 通过（6.1 分钟，退出码 0）**。
+- 构建：通过（全部 workspace 包）。
+- 容量 sanity：50/50、接受率 98.9%、206 击杀、0 资产失败；tick p50 1.4ms /
+  p95 **4.04ms** / p99 5.82ms / max 6.88ms，资产事务 p95 59.14ms。
+- 资产不变量：压测后 7/7 为 0。
+- 开发栈：84–87 于 10:04 重启到本切片代码（Node 26），4 个服务健康 200。
+
+### 遇到的问题及解决方法
+
+1. **在线目录职责漂移**：好友切片把 presence 留在 `PartyService`，私聊成为
+   第三个消费者。先完成 TD-SRV-14 的提取再写功能，避免复制第二份在线状态或
+   在“队伍服务”里长出私聊路由；沉淀 EL-047。
+2. **隐私探测**：离线、非好友与自己使用同一个拒绝码，客户端无法用私聊探测
+   某人是否在线；入口只放在好友列表。
+3. **投递失败**：目录 `deliver` 返回 false 时不再回显，避免发送者以为消息已
+   送达；统一按 `CHAT_TARGET_UNAVAILABLE` 提示。
+4. **测试竞态**：离线好友用例最初依赖 `friend.list` 快照，可能与最终离开的
+   presence 清理竞速；改为等待 `friend.presence` 的 `online=false` 事件再发
+   私聊。
+
+### 尚未解决
+
+- 私聊没有离线消息、历史记录、黑名单或“最近同玩”入口；过图/重连丢失客户端
+  聊天记录（TD-CLI-04）。
+- 在线目录仍为进程内状态（与 TD-SRV-11 同类），多进程前需要共享协调。
+- 完整人工试玩、50 人 × 10 分钟正式回归与远端 CI 待完成。
+
+### 下一步计划
+
+1. 世界内到达目标标记（TD-CLI-24）。
+2. 按名字邀请/最近同玩与队伍标记（TD-CLI-17 剩余）。
+3. 行会先写 ADR；3 人副本先写动态实例 ADR。
+
+### 提交
+
+- 待提交（S4-C 私聊与在线目录、ADR-046、切片报告、状态/日志/债务/经验与
+  E2E 证据）。

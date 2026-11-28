@@ -588,6 +588,11 @@ body {
   cursor: not-allowed;
 }
 
+.friend-actions button.active {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
 .friend-badge {
   margin-left: 4px;
   padding: 0 4px;
@@ -1220,6 +1225,11 @@ body {
   border: 1px solid #33415c;
   color: #8fb4ff;
   font-size: 10px;
+}
+
+.chat-channel-tag.whisper {
+  border-color: #5c4a7a;
+  color: #c9a7ff;
 }
 
 .chat-panel ul {

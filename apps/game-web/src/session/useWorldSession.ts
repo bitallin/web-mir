@@ -1349,8 +1349,8 @@ class WorldSession {
     return sent;
   }
 
-  sendChat(text: string, channel: ChatChannel = 'map'): boolean {
-    return this.client?.sendChat(text, channel) ?? false;
+  sendChat(text: string, channel: ChatChannel = 'map', targetPlayerId?: string): boolean {
+    return this.client?.sendChat(text, channel, targetPlayerId) ?? false;
   }
 
   rejoin(): void {
@@ -1619,7 +1619,7 @@ class WorldSession {
       activeTelegraphs: () => this.bridge.activeTelegraphs(),
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),
       interactNpc: (npcId) => this.interactNpc(npcId),
-      sendChat: (text, channel) => this.sendChat(text, channel),
+      sendChat: (text, channel, targetPlayerId) => this.sendChat(text, channel, targetPlayerId),
       pickupDrop: (dropId) => this.pickup(dropId),
       equipItem: (itemId) => this.equip(itemId),
       unequipSlot: (slot) => this.unequip(slot),
@@ -1667,7 +1667,7 @@ class WorldSession {
 export type WorldSessionControls = {
   state: SessionState;
   rejoin: () => void;
-  sendChat: (text: string, channel?: ChatChannel) => boolean;
+  sendChat: (text: string, channel?: ChatChannel, targetPlayerId?: string) => boolean;
   castSkill: (skillId: string, targetId: string) => boolean;
   selectTarget: (monsterId: string) => void;
   attack: (targetId: string) => boolean;
@@ -1742,8 +1742,8 @@ export function useWorldSession(
   }, []);
 
   const sendChat = useCallback(
-    (text: string, channel: ChatChannel = 'map') =>
-      sessionRef.current?.sendChat(text, channel) ?? false,
+    (text: string, channel: ChatChannel = 'map', targetPlayerId?: string) =>
+      sessionRef.current?.sendChat(text, channel, targetPlayerId) ?? false,
     [],
   );
   const castSkill = useCallback(

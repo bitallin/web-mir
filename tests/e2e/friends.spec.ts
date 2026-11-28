@@ -141,4 +141,51 @@ test('players add a friend, invite them to a party, and filter chat channels', a
   await bob.page.getByTestId('chat-send-channel').selectOption('party');
   await expect(bob.page.getByTestId('chat-input')).toHaveAttribute('placeholder', '发送到队伍…');
   await bob.page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-chat-filter.png') });
+
+  // Whispers start from the friend list and stay between the two players.
+  await friendRow(alice.page, bob.name).getByTestId('friend-whisper').click();
+  await expect(alice.page.getByTestId('chat-send-channel')).toHaveValue('whisper');
+  await expect(alice.page.getByTestId('chat-input')).toHaveAttribute(
+    'placeholder',
+    `发送给 ${bob.name}…`,
+  );
+  await expect(alice.page.getByTestId('chat-filter-whisper')).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await alice.page.getByTestId('chat-input').fill('whisper hello from alice');
+  await alice.page.getByTestId('chat-send').click();
+
+  // Alice sees her own line labelled with the recipient.
+  const aliceWhisper = alice.page
+    .locator('[data-testid="chat-message"][data-channel="whisper"]')
+    .filter({ hasText: 'whisper hello from alice' });
+  await expect(aliceWhisper).toHaveCount(1, { timeout: 10_000 });
+  await expect(aliceWhisper).toContainText(`→ ${bob.name}`);
+
+  // Bob opens his whisper log and replies from the friend row.
+  await bob.page.getByTestId('chat-filter-whisper').click();
+  const bobWhisper = bob.page
+    .locator('[data-testid="chat-message"][data-channel="whisper"]')
+    .filter({ hasText: 'whisper hello from alice' });
+  await expect(bobWhisper).toHaveCount(1, { timeout: 10_000 });
+  await expect(bobWhisper).toContainText('私聊');
+  await friendRow(bob.page, alice.name).getByTestId('friend-whisper').click();
+  await bob.page.getByTestId('chat-input').fill('whisper reply from bob');
+  await bob.page.getByTestId('chat-send').click();
+
+  const aliceReply = alice.page
+    .locator('[data-testid="chat-message"][data-channel="whisper"]')
+    .filter({ hasText: 'whisper reply from bob' });
+  await expect(aliceReply).toHaveCount(1, { timeout: 10_000 });
+  await expect(aliceReply).toContainText('私聊');
+
+  // The nearby-only filter never exposes a whisper to the map channel.
+  await bob.page.getByTestId('chat-filter-map').click();
+  await expect(
+    bob.page
+      .locator('[data-testid="chat-message"][data-channel="whisper"]')
+      .filter({ hasText: 'whisper reply from bob' }),
+  ).toHaveCount(0);
+  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-whisper.png') });
 });

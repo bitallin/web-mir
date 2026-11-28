@@ -25,8 +25,8 @@ import { renderGameServerPrometheus } from './prometheus';
 import { DiagnosticsRoom } from './rooms/diagnosticsRoom';
 import { WorldMapRoom } from './rooms/worldMapRoom';
 import { ContentStore, type ContentProvider } from './world/contentStore';
-import { FriendNotifier } from './world/friendNotifier';
 import { createMapInstances } from './world/mapRegistry';
+import { PlayerDirectory } from './world/playerDirectory';
 import { PartyService } from './world/partyService';
 import { SERVICE_VERSION } from './version';
 
@@ -116,12 +116,10 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
       refreshMs: options.contentRefreshMs ?? 5_000,
     });
   const adminHub = options.adminHub ?? new AdminCommandHub(logger);
-  // Parties span map rooms, so they live on the process rather than in a room
-  // (ADR-036). The content-driven size limit is applied once the store starts.
-  const partyService = new PartyService();
-  // Friend events also cross map rooms; presence (owned by the party service)
-  // decides which room can reach a player (ADR-045).
-  const friendNotifier = new FriendNotifier((playerId) => partyService.presenceOf(playerId));
+  // Presence, party, friend and whisper delivery span map rooms, so they live
+  // on the process rather than in a room (ADR-036, ADR-045, ADR-046).
+  const playerDirectory = new PlayerDirectory();
+  const partyService = new PartyService({ directory: playerDirectory });
 
   const server = new Server({
     // index.ts owns SIGTERM/SIGINT so it can drain rooms, stop metrics and
@@ -256,7 +254,7 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
       contentStore,
       adminHub,
       partyService,
-      friendNotifier,
+      playerDirectory,
       realmCode: env.GAME_SERVER_REALM,
       ...options.world,
     });

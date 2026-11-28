@@ -146,8 +146,11 @@ export type MoveStopCommand = z.infer<typeof moveStopCommandSchema>;
 
 export const CHAT_MESSAGE_MAX_LENGTH = 120 as const;
 
-/** Map chat reaches everyone in the room; party chat is routed to members only. */
-export const CHAT_CHANNELS = ['map', 'party'] as const;
+/**
+ * Map chat reaches everyone in the room; party chat is routed to members only;
+ * whisper reaches one friend through whichever room hosts them (ADR-046).
+ */
+export const CHAT_CHANNELS = ['map', 'party', 'whisper'] as const;
 export const chatChannelSchema = z.enum(CHAT_CHANNELS);
 export type ChatChannel = z.infer<typeof chatChannelSchema>;
 
@@ -162,6 +165,8 @@ export const chatSendSchema = z
     clientMessageId: z.uuid(),
     /** Omitting the channel keeps old clients on map chat. */
     channel: chatChannelSchema.default('map'),
+    /** Required for whisper and rejected on every other channel. */
+    targetPlayerId: z.uuid().optional(),
     message: z
       .string()
       .min(1)
@@ -176,7 +181,23 @@ export const chatSendSchema = z
         { message: 'message contains control characters' },
       ),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.channel === 'whisper' && value.targetPlayerId === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['targetPlayerId'],
+        message: 'whisper requires a target',
+      });
+    }
+    if (value.channel !== 'whisper' && value.targetPlayerId !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['targetPlayerId'],
+        message: 'only whisper may carry a target',
+      });
+    }
+  });
 
 export type ChatSend = z.infer<typeof chatSendSchema>;
 
@@ -187,6 +208,9 @@ export const chatMessageSchema = z
     displayName: z.string().min(1).max(32),
     message: z.string().min(1).max(CHAT_MESSAGE_MAX_LENGTH),
     channel: chatChannelSchema,
+    /** Present on whispers so both sides can label the conversation. */
+    targetPlayerId: z.uuid().optional(),
+    targetDisplayName: z.string().min(1).max(32).optional(),
     serverTime: z.number().nonnegative(),
   })
   .strict();
@@ -277,6 +301,7 @@ export const COMMAND_REJECTION_CODES = [
   'FRIEND_REQUEST_PENDING',
   'FRIEND_REQUEST_NOT_FOUND',
   'FRIEND_NOT_FRIENDS',
+  'CHAT_TARGET_UNAVAILABLE',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -335,6 +360,7 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   FRIEND_REQUEST_PENDING: '好友申请已经发送过了',
   FRIEND_REQUEST_NOT_FOUND: '好友申请不存在或已处理',
   FRIEND_NOT_FRIENDS: '对方不是你的好友',
+  CHAT_TARGET_UNAVAILABLE: '对方不在线，或你们还不是好友',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

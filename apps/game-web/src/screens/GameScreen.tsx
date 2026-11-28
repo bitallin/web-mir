@@ -161,8 +161,12 @@ function dailyResetLabel(quest: QuestView): string | null {
 export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatDraft, setChatDraft] = useState('');
-  const [chatFilter, setChatFilter] = useState<'all' | 'map' | 'party'>('all');
-  const [chatSendChannel, setChatSendChannel] = useState<'map' | 'party'>('map');
+  const [chatFilter, setChatFilter] = useState<'all' | 'map' | 'party' | 'whisper'>('all');
+  const [chatSendChannel, setChatSendChannel] = useState<'map' | 'party' | 'whisper'>('map');
+  const [whisperTarget, setWhisperTarget] = useState<{
+    playerId: string;
+    displayName: string;
+  } | null>(null);
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
@@ -458,10 +462,13 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     if (draft.trim().length === 0) {
       return;
     }
-    if (sendChat(draft, chatSendChannel)) {
+    if (chatSendChannel === 'whisper' && whisperTarget === null) {
+      return;
+    }
+    if (sendChat(draft, chatSendChannel, whisperTarget?.playerId)) {
       setChatDraft('');
     }
-  }, [chatDraft, chatSendChannel, sendChat]);
+  }, [chatDraft, chatSendChannel, whisperTarget, sendChat]);
 
   // Leaving or losing the party must not leave the view or composer on a dead
   // channel; the log itself defaults to showing every channel.
@@ -473,6 +480,26 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
       setChatSendChannel('map');
     }
   }, [state.party, chatFilter, chatSendChannel]);
+
+  // A whisper target can go offline or be removed while the panel is open;
+  // the composer must not keep pointing at a player who cannot receive.
+  useEffect(() => {
+    if (whisperTarget === null) {
+      return;
+    }
+    const friend = state.friends?.friends.find(
+      (candidate) => candidate.playerId === whisperTarget.playerId,
+    );
+    if (friend === undefined || !friend.online) {
+      setWhisperTarget(null);
+      if (chatSendChannel === 'whisper') {
+        setChatSendChannel('map');
+      }
+      if (chatFilter === 'whisper') {
+        setChatFilter('all');
+      }
+    }
+  }, [state.friends, whisperTarget, chatSendChannel, chatFilter]);
 
   // The server pushes snapshots on join and on changes; opening the panel also
   // asks for one so online state is current after a while in the background.
@@ -1381,6 +1408,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 ['all', '全部'],
                 ['map', '附近'],
                 ['party', '队伍'],
+                ['whisper', '私聊'],
               ] as const
             ).map(([key, label]) => (
               <button
@@ -1402,7 +1430,13 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               </button>
             ))}
           </div>
-          <span>{chatFilter === 'party' ? `${state.party?.members.length ?? 0} 人` : mapName}</span>
+          <span>
+            {chatFilter === 'party'
+              ? `${state.party?.members.length ?? 0} 人`
+              : chatFilter === 'whisper'
+                ? (whisperTarget?.displayName ?? '未选择对象')
+                : mapName}
+          </span>
           <button
             type="button"
             className="chat-toggle"
@@ -1432,7 +1466,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 ? '队伍消息只有队伍成员能看到'
                 : chatFilter === 'map'
                   ? '同地图的玩家都能看到这里的消息'
-                  : '附近与队伍频道的消息会一起显示在这里'}
+                  : chatFilter === 'whisper'
+                    ? whisperTarget === null
+                      ? '在好友列表点击「私聊」开始对话'
+                      : `正在与 ${whisperTarget.displayName} 私聊，只有你们两人能看到`
+                    : '附近、队伍与私聊消息会一起显示在这里'}
             </li>
           ) : null}
           {visibleMessages.map((message) => (
@@ -1443,6 +1481,13 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               data-channel={message.channel}
             >
               {message.channel === 'party' ? <span className="chat-channel-tag">队伍</span> : null}
+              {message.channel === 'whisper' ? (
+                <span className="chat-channel-tag whisper">
+                  {message.playerId === state.selfId
+                    ? `→ ${message.targetDisplayName ?? '好友'}`
+                    : '私聊'}
+                </span>
+              ) : null}
               <span className="chat-author">{message.displayName}</span>
               <span className="chat-text">{message.message}</span>
             </li>
@@ -1461,18 +1506,34 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             aria-label="发言频道"
             value={chatSendChannel}
             onChange={(event) => {
-              setChatSendChannel(event.currentTarget.value === 'party' ? 'party' : 'map');
+              const next = event.currentTarget.value;
+              if (next === 'party') {
+                setChatSendChannel('party');
+              } else if (next === 'whisper' && whisperTarget !== null) {
+                setChatSendChannel('whisper');
+              } else {
+                setChatSendChannel('map');
+              }
             }}
           >
             <option value="map">附近</option>
             <option value="party" disabled={state.party === null}>
               队伍
             </option>
+            <option value="whisper" disabled={whisperTarget === null}>
+              {whisperTarget === null ? '私聊（未选择）' : `私聊·${whisperTarget.displayName}`}
+            </option>
           </select>
           <input
             type="text"
             data-testid="chat-input"
-            placeholder={chatSendChannel === 'party' ? '发送到队伍…' : '说点什么…'}
+            placeholder={
+              chatSendChannel === 'party'
+                ? '发送到队伍…'
+                : chatSendChannel === 'whisper'
+                  ? `发送给 ${whisperTarget?.displayName ?? '好友'}…`
+                  : '说点什么…'
+            }
             maxLength={CHAT_MESSAGE_MAX_LENGTH}
             value={chatDraft}
             onChange={(event) => {
@@ -1994,6 +2055,25 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                     </span>
                     <span className="friend-meta">Lv.{friend.level}</span>
                     <span className="friend-actions">
+                      {friend.online ? (
+                        <button
+                          type="button"
+                          data-testid="friend-whisper"
+                          data-player-id={friend.playerId}
+                          className={whisperTarget?.playerId === friend.playerId ? 'active' : ''}
+                          onClick={() => {
+                            setWhisperTarget({
+                              playerId: friend.playerId,
+                              displayName: friend.displayName,
+                            });
+                            setChatSendChannel('whisper');
+                            setChatFilter('whisper');
+                            setChatOpen(true);
+                          }}
+                        >
+                          私聊
+                        </button>
+                      ) : null}
                       {friend.online ? (
                         <button
                           type="button"

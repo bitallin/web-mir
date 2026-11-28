@@ -10,6 +10,7 @@ import {
   TILE_UNITS,
   chatMessageSchema,
   commandRejectedSchema,
+  friendPresenceSchema,
   friendRefreshSchema,
   friendSnapshotSchema,
   lootClaimedSchema,
@@ -19,6 +20,7 @@ import {
   worldRoomNameFor,
   type ChatMessage,
   type CommandRejected,
+  type FriendPresence,
   type FriendRefresh,
   type FriendSnapshot,
   type PartyInviteView,
@@ -688,6 +690,156 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
     });
     expect((await rejected).code).toBe('PARTY_TARGET_UNAVAILABLE');
     expect(roomC.state.players.has(carol.character.id)).toBe(true);
+  });
+
+  it('whispers only between friends and across maps', async () => {
+    const alice = await actorAt(SAFE_TILE);
+    const bob = await actorAt({ x: 3, y: 16 });
+    const carol = await actorAt({ x: 20, y: 16 });
+    const roomA = await createWorld(alice.ticket);
+    const roomB = await joinWorld(roomA.roomId, bob.ticket);
+    const roomC = await joinWorld(roomA.roomId, carol.ticket);
+    await waitUntil(
+      () =>
+        roomA.state.players.has(bob.character.id) && roomC.state.players.has(carol.character.id),
+      10_000,
+      'whisper actors visible',
+    );
+
+    // Alice and Bob become friends; Carol stays a stranger.
+    const requestRefresh = waitForMessage<FriendRefresh>(roomB, 'friend.refresh', (payload) =>
+      friendRefreshSchema.parse(payload),
+    );
+    roomA.send('friend.request', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetPlayerId: bob.character.id,
+    });
+    await requestRefresh;
+    const incoming = waitForFriendSnapshot(roomB, (snapshot) => snapshot.incoming.length === 1);
+    roomB.send('friend.list', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+    });
+    const requestId = (await incoming).incoming[0]?.requestId;
+    expect(requestId).toBeDefined();
+    const bobFriends = waitForFriendSnapshot(roomB, (snapshot) => snapshot.friends.length === 1);
+    roomB.send('friend.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      requestId: requestId as string,
+    });
+    await bobFriends;
+
+    // Bob crosses to town so the whisper has to be routed to another room.
+    const transfer = waitForMessage(
+      roomB,
+      'session.transfer',
+      (payload) => sessionTransferSchema.parse(payload),
+      20_000,
+    );
+    roomB.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetTileX: 1,
+      targetTileY: 16,
+    });
+    expect((await transfer).mapId).toBe(STARTER_TOWN_MAP_ID);
+    await roomB.leave();
+    const town = await createMapRoom(STARTER_TOWN_MAP_ID, await issueTicket(db, bob));
+    await waitUntil(() => town.state.players.has(bob.character.id), 10_000, 'bob reached town');
+
+    // The sender gets a local echo and the friend gets the same line across maps.
+    const echo = waitForMessage<ChatMessage>(roomA, 'chat.message', (payload) =>
+      chatMessageSchema.parse(payload),
+    );
+    const received = waitForMessage<ChatMessage>(town, 'chat.message', (payload) =>
+      chatMessageSchema.parse(payload),
+    );
+    roomA.send('chat.send', {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: randomUUID(),
+      channel: 'whisper',
+      targetPlayerId: bob.character.id,
+      message: 'meet at the gate',
+    });
+    const [sent, delivered] = await Promise.all([echo, received]);
+    expect(sent.channel).toBe('whisper');
+    expect(sent.playerId).toBe(alice.character.id);
+    expect(sent.targetPlayerId).toBe(bob.character.id);
+    expect(delivered.playerId).toBe(alice.character.id);
+    expect(delivered.targetDisplayName).toBe(bob.character.name);
+    expect(delivered.message).toBe('meet at the gate');
+
+    // The reply crosses back; a stranger and a self-target are rejected with
+    // the same code so the client cannot probe who is online.
+    const reply = waitForMessage<ChatMessage>(roomA, 'chat.message', (payload) =>
+      chatMessageSchema.parse(payload),
+    );
+    town.send('chat.send', {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: randomUUID(),
+      channel: 'whisper',
+      targetPlayerId: alice.character.id,
+      message: 'on my way',
+    });
+    const answered = await reply;
+    expect(answered.playerId).toBe(bob.character.id);
+    expect(answered.targetDisplayName).toBe(alice.character.name);
+
+    const strangerRejected = waitForMessage<CommandRejected>(roomC, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    roomC.send('chat.send', {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: randomUUID(),
+      channel: 'whisper',
+      targetPlayerId: alice.character.id,
+      message: 'hello stranger',
+    });
+    expect((await strangerRejected).code).toBe('CHAT_TARGET_UNAVAILABLE');
+
+    const selfRejected = waitForMessage<CommandRejected>(roomA, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    roomA.send('chat.send', {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: randomUUID(),
+      channel: 'whisper',
+      targetPlayerId: alice.character.id,
+      message: 'talking to myself',
+    });
+    expect((await selfRejected).code).toBe('CHAT_TARGET_UNAVAILABLE');
+
+    // An offline friend is unavailable too. The presence event is emitted by
+    // the final leave after the directory drops the player, so it is a safe
+    // point to send the next whisper.
+    const offlinePresence = waitForMessage<FriendPresence>(
+      roomA,
+      'friend.presence',
+      (payload) => friendPresenceSchema.parse(payload),
+      10_000,
+    );
+    await town.leave();
+    const away = await offlinePresence;
+    expect(away.playerId).toBe(bob.character.id);
+    expect(away.online).toBe(false);
+
+    const offlineRejected = waitForMessage<CommandRejected>(roomA, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    roomA.send('chat.send', {
+      protocolVersion: PROTOCOL_VERSION,
+      clientMessageId: randomUUID(),
+      channel: 'whisper',
+      targetPlayerId: bob.character.id,
+      message: 'still there?',
+    });
+    expect((await offlineRejected).code).toBe('CHAT_TARGET_UNAVAILABLE');
   });
 
   it('shares kill experience with nearby members only', async () => {

@@ -183,7 +183,7 @@ describe('chat channels', () => {
     expect(chatSendSchema.safeParse({ ...base, channel: 'world' }).success).toBe(false);
   });
 
-  it('validates delivered messages on both channels', () => {
+  it('validates delivered messages on every channel', () => {
     const delivered = {
       messageId: '0192f0a0-0000-7000-8000-000000000003',
       playerId: '0192f0a0-0000-7000-8000-000000000004',
@@ -193,6 +193,32 @@ describe('chat channels', () => {
     };
     expect(chatMessageSchema.parse({ ...delivered, channel: 'map' }).channel).toBe('map');
     expect(chatMessageSchema.parse({ ...delivered, channel: 'party' }).channel).toBe('party');
+    expect(chatMessageSchema.parse({ ...delivered, channel: 'whisper' }).channel).toBe('whisper');
     expect(chatMessageSchema.safeParse({ ...delivered, channel: 'world' }).success).toBe(false);
+  });
+
+  it('requires a target for whispers and forbids one elsewhere', () => {
+    const targetPlayerId = '0192f0a0-0000-7000-8000-000000000005';
+    expect(chatSendSchema.safeParse({ ...base, channel: 'whisper' }).success).toBe(false);
+    expect(
+      chatSendSchema.parse({ ...base, channel: 'whisper', targetPlayerId }).targetPlayerId,
+    ).toBe(targetPlayerId);
+    expect(chatSendSchema.safeParse({ ...base, channel: 'party', targetPlayerId }).success).toBe(
+      false,
+    );
+  });
+
+  it('keeps whisper targets on delivered messages', () => {
+    const delivered = chatMessageSchema.parse({
+      messageId: '0192f0a0-0000-7000-8000-000000000006',
+      playerId: '0192f0a0-0000-7000-8000-000000000007',
+      displayName: 'Sender',
+      message: 'psst',
+      channel: 'whisper',
+      targetPlayerId: '0192f0a0-0000-7000-8000-000000000008',
+      targetDisplayName: 'Recipient',
+      serverTime: 10,
+    });
+    expect(delivered.targetDisplayName).toBe('Recipient');
   });
 });

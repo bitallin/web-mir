@@ -10,21 +10,22 @@
 
 ## 切片顺序与状态
 
-| 切片  | 目标                                                       | 状态 | 证据                                                                         |
-| ----- | ---------------------------------------------------------- | ---- | ---------------------------------------------------------------------------- |
-| S1    | 组队：邀请/接受/离开、名单、跨图保留、共享击杀经验与掉落   | 完成 | `docs/phase-reports/alpha-02/ALPHA_02_PARTY_REPORT.md`、ADR-035/036          |
-| S2    | 世界首领：废墟「灰烬魔像」、二阶段狂暴、地图公告、首领 HUD | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_BOSS_REPORT.md`、ADR-037               |
-| S3-A  | 每日任务：内容化重置、周期键、2 个日常任务                 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_DAILY_QUESTS_REPORT.md`、ADR-038       |
-| S3-B  | 一键任务导航：全局面板、远程接取、自动寻路/战斗与到达交付  | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_GUIDANCE_REPORT.md`、ADR-039     |
-| S3-C  | 10 步主线任务链：野外发布者、面板分组、引导优先主线        | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_CHAIN_REPORT.md`                 |
-| S3-D1 | 收集类任务目标：背包进度、交物事务、每日材料消耗           | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_COLLECT_QUESTS_REPORT.md`、ADR-040     |
-| S3-D2 | 到达类任务目标：地点、半径与探索进度                       | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_REACH_QUESTS_REPORT.md`、ADR-042       |
-| S3-E  | 怪物归属、自动拾取、争夺掉落与远处自动走近                 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_LOOT_PICKUP_REPORT.md`、ADR-041        |
-| S3-M  | 八方向移动：斜向寻路/阻挡、WASD 短步、空格停止             | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_EIGHT_WAY_MOVEMENT_REPORT.md`、ADR-043 |
-| S4-A  | 队伍社交：队伍聊天、队长移交、踢人（跨图投递）             | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_PARTY_SOCIAL_REPORT.md`、ADR-044       |
-| S4-B  | 好友系统：申请/列表/在线状态、好友跨图组队、聊天标准布局   | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_FRIENDS_REPORT.md`、ADR-045            |
-| S4-C  | 待定：到达目标世界标记、按名字邀请                         | 待定 | —                                                                            |
-| S5    | 待定：交易或排行榜最小版                                   | 待定 | —                                                                            |
+| 切片  | 目标                                                         | 状态 | 证据                                                                         |
+| ----- | ------------------------------------------------------------ | ---- | ---------------------------------------------------------------------------- |
+| S1    | 组队：邀请/接受/离开、名单、跨图保留、共享击杀经验与掉落     | 完成 | `docs/phase-reports/alpha-02/ALPHA_02_PARTY_REPORT.md`、ADR-035/036          |
+| S2    | 世界首领：废墟「灰烬魔像」、二阶段狂暴、地图公告、首领 HUD   | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_BOSS_REPORT.md`、ADR-037               |
+| S3-A  | 每日任务：内容化重置、周期键、2 个日常任务                   | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_DAILY_QUESTS_REPORT.md`、ADR-038       |
+| S3-B  | 一键任务导航：全局面板、远程接取、自动寻路/战斗与到达交付    | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_GUIDANCE_REPORT.md`、ADR-039     |
+| S3-C  | 10 步主线任务链：野外发布者、面板分组、引导优先主线          | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_QUEST_CHAIN_REPORT.md`                 |
+| S3-D1 | 收集类任务目标：背包进度、交物事务、每日材料消耗             | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_COLLECT_QUESTS_REPORT.md`、ADR-040     |
+| S3-D2 | 到达类任务目标：地点、半径与探索进度                         | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_REACH_QUESTS_REPORT.md`、ADR-042       |
+| S3-E  | 怪物归属、自动拾取、争夺掉落与远处自动走近                   | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_LOOT_PICKUP_REPORT.md`、ADR-041        |
+| S3-M  | 八方向移动：斜向寻路/阻挡、WASD 短步、空格停止               | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_EIGHT_WAY_MOVEMENT_REPORT.md`、ADR-043 |
+| S4-A  | 队伍社交：队伍聊天、队长移交、踢人（跨图投递）               | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_PARTY_SOCIAL_REPORT.md`、ADR-044       |
+| S4-B  | 好友系统：申请/列表/在线状态、好友跨图组队、聊天标准布局     | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_FRIENDS_REPORT.md`、ADR-045            |
+| S4-C  | 私聊与在线目录：好友私聊、跨图投递、从 PartyService 提取目录 | 完成 | `docs/phase-reports/alpha-03/ALPHA_03_WHISPER_REPORT.md`、ADR-046            |
+| S4-D  | 待定：到达目标世界标记、按名字邀请                           | 待定 | —                                                                            |
+| S5    | 待定：交易或排行榜最小版                                     | 待定 | —                                                                            |
 
 ## S2 验收（已完成）
 
@@ -177,16 +178,30 @@
 6. 验证：623 个单元/集成测试、全量 51 个浏览器 E2E；真实 PostgreSQL 覆盖
    好友事务，真实 Room 覆盖跨图好友邀请与陌生人拒绝。
 
+## S4-C 验收（已完成）
+
+1. 在线目录：`PlayerDirectory` 独占进程级 presence 与跨 Room 投递；过图只
+   标记离线，最终离开才移除；队伍与好友不再各自持有 presence 或路由端口。
+2. 协议：`chat.send`/`chat.message` 增加可选 `whisper` 频道与目标字段；旧客户端
+   省略频道仍是地图聊天，协议版本不变。
+3. 服务端：私聊复用过滤、限频、禁言与消息去重；仅好友可私聊；离线、非好友、
+   自己统一返回 `CHAT_TARGET_UNAVAILABLE`；发送者回显，收件人由目录跨图投递，
+   消息不进入公开 Room State、不落库。
+4. 客户端：好友行「私聊」、私聊发言频道与日志筛选、收发标签；目标离线或失去
+   好友时自动回到附近频道。
+5. 验证：真实 PostgreSQL + Room 集成覆盖跨图私聊、陌生人拒绝、自己与离线
+   拒绝；真实浏览器覆盖好友私聊收发与地图频道隔离。
+
 ## 下一片选择依据
 
-1. **私聊**：好友列表已有入口；需要一对一会话、跨图投递、隐私与限频，是用户
-   认可顺序中的下一步。
-2. **世界内到达目标标记**（TD-CLI-24）：小改动、直接改善到达任务可发现性。
-3. **按名字邀请/队伍标记**（TD-CLI-17 剩余部分）：需要在线目录与隐私边界。
-4. **行会 ADR**：行会创建/职位/公告/行会频道，依赖好友与在线状态；先写 ADR。
-5. **3 人副本实例**：多人价值最高，但需要动态 Room/实例路由 ADR，工作量大。
+1. **世界内到达目标标记**（TD-CLI-24）：小改动、直接改善到达任务可发现性。
+2. **按名字邀请/队伍标记**（TD-CLI-17 剩余部分）：需要在线目录与隐私边界；
+   私聊已完成，可把“最近同玩”作为入口。
+3. **行会 ADR**：行会创建/职位/公告/行会频道，依赖好友与在线状态；先写 ADR。
+4. **3 人副本实例**：多人价值最高，但需要动态 Room/实例路由 ADR，工作量大。
 
-除非试玩给出相反信号，下一片优先私聊；行会与副本先写 ADR 再实施。
+私聊已交付；除非试玩给出相反信号，下一片优先到达标记与按名字入口，行会与
+副本先写 ADR 再实施。
 
 ## 债务影响
 
@@ -210,7 +225,11 @@
 - S3-D2 新增：到达目标在世界内没有光柱/小地图标记（TD-CLI-24，P3）；完成事务
   不写资产命令（到达不改变资产，幂等由行锁与状态条件保证）；到达扫描是每
   4 tick 的进程内位置检查，不引入数据库读取。
-- 保持：TD-SRV-11（队伍仅内存）、TD-CLI-17（队伍聊天/分配/移交）、
+- S4-C 关闭：TD-SRV-14（在线状态寄居 PartyService）；新增私聊协议字段与目录
+  投递联合，无迁移、无内容发布、无协议版本升级。仍保留：私聊无离线消息、
+  历史、黑名单与“最近同玩”入口（并入 TD-CLI-17）；在线目录仍为进程内状态
+  （与 TD-SRV-11 同类）。
+- 保持：TD-SRV-11（队伍仅内存）、TD-CLI-17（按名字入口/队伍标记）、
   TD-CLI-13（正式美术）。
 - S2 不新增数据库迁移、不改资产模型、不引入 Redis；S3-A 增加一条向前兼容
   的迁移（周期键 + 唯一索引替换），不改资产模型、不引入 Redis；S3-B 无迁移、

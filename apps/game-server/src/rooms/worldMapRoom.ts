@@ -187,7 +187,11 @@ import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket } from '../world/rateLimiter';
 import { PartyService } from '../world/partyService';
 import { type PartyManagementRejection, type PartyState } from '../world/partyRegistry';
-import { FriendNotifier, type FriendServerEvent } from '../world/friendNotifier';
+import {
+  PlayerDirectory,
+  type FriendServerEvent,
+  type PlayerDelivery,
+} from '../world/playerDirectory';
 import { CommandGuard } from './commandGuard';
 import { SessionRegistry, type QuestNavigationState, type SessionRecord } from './sessionRegistry';
 import {
@@ -217,8 +221,8 @@ export type WorldMapRoomOptions = {
   adminHub?: AdminCommandHub;
   /** Process-wide party table shared by every map room (ADR-036). */
   partyService?: PartyService;
-  /** Process-wide friend event router; rooms without one keep their own. */
-  friendNotifier?: FriendNotifier;
+  /** Process-wide presence and cross-room router (ADR-046, TD-SRV-14). */
+  playerDirectory?: PlayerDirectory;
   /** Realm this process serves; characters from other realms are rejected. */
   realmCode?: string;
   /** Overrides the compiled map's monster spawns; tests use an empty list. */
@@ -410,7 +414,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private views!: StateViewPublisher;
   private parties!: PartyService;
   private friends!: FriendsService;
-  private friendNotifier!: FriendNotifier;
+  private directory!: PlayerDirectory;
   /** Current content snapshot's party rule; defaults keep the feature usable. */
   private partyRule: { maxMembers: number; assistSharePermille: number; assistRangeTiles: number } =
     { maxMembers: 4, assistSharePermille: 0, assistRangeTiles: 12 };
@@ -457,32 +461,15 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.autoPickupRangeTiles =
       this.content.bundle.rules?.loot?.autoPickupRangeTiles ?? DEFAULT_AUTO_PICKUP_RANGE_TILES;
     this.autoPickupEnabled = options.autoPickup ?? true;
+    this.directory =
+      options.playerDirectory ?? options.partyService?.routing ?? new PlayerDirectory();
     this.parties =
-      options.partyService ?? new PartyService({ maxMembers: this.partyRule.maxMembers });
+      options.partyService ??
+      new PartyService({ directory: this.directory, maxMembers: this.partyRule.maxMembers });
     this.friends = new FriendsService(options.database);
-    this.friendNotifier =
-      options.friendNotifier ?? new FriendNotifier((playerId) => this.parties.presenceOf(playerId));
-    this.friendNotifier.registerRoom(this.roomId, {
-      notify: (playerId, event) => {
-        this.sendFriendEvent(playerId, event);
-      },
-    });
-    this.parties.registerRoom(this.roomId, {
-      sendInvite: (playerId, invite) => {
-        this.registry.findByPlayerId(playerId)?.client.send(SERVER_MESSAGES.partyInvite, invite);
-      },
-      sendChat: (playerId, message) => {
-        this.registry
-          .findByPlayerId(playerId)
-          ?.client.send(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(message));
-      },
-      refresh: (playerIds) => {
-        for (const playerId of playerIds) {
-          const session = this.registry.findByPlayerId(playerId);
-          if (session !== undefined) {
-            this.sendPartySnapshot(session.client, session);
-          }
-        }
+    this.directory.registerRoom(this.roomId, {
+      deliver: (playerId, delivery) => {
+        this.deliverToPlayer(playerId, delivery);
       },
     });
 
@@ -868,7 +855,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     };
     this.registry.add(session);
     client.view = view;
-    this.parties.setPresence({
+    this.directory.setPresence({
       playerId: auth.characterId,
       displayName: auth.displayName,
       classId: combatPlayer.classId,
@@ -1073,8 +1060,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
   override async onDispose(): Promise<void> {
     this.options.adminHub?.unregister(this.roomId);
-    this.parties.unregisterRoom(this.roomId);
-    this.friendNotifier.unregisterRoom(this.roomId);
+    this.directory.unregisterRoom(this.roomId);
     const sessionIds = [...this.registry.sessionIds()];
     await Promise.allSettled(sessionIds.map(async (sessionId) => this.removeSession(sessionId)));
     this.options.metrics.unregister(this.roomId);
@@ -2305,6 +2291,28 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
 
     const channel = parsed.data.channel;
+    if (channel === 'whisper') {
+      const targetPlayerId = parsed.data.targetPlayerId;
+      if (targetPlayerId === undefined || targetPlayerId === session.playerId) {
+        this.sendRejection(client, {}, 'CHAT_TARGET_UNAVAILABLE');
+        return;
+      }
+      void this.deliverWhisper(
+        client,
+        session.playerId,
+        displayName,
+        filtered.text,
+        targetPlayerId,
+      ).catch((error: unknown) => {
+        this.options.logger.error(
+          { err: error, roomId: this.roomId, playerId: session.playerId },
+          'whisper delivery failed',
+        );
+        this.sendRejection(client, {}, 'SERVICE_UNAVAILABLE');
+      });
+      return;
+    }
+
     let partyMemberIds: readonly string[] | null = null;
     if (channel === 'party') {
       const party = this.parties.partyOf(session.playerId);
@@ -2329,6 +2337,64 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       // Party chat follows membership across maps, not the room broadcast.
       this.parties.deliverChat(partyMemberIds, chatMessageSchema.parse(message));
     }
+    this.metrics.recordChatMessage();
+  }
+
+  /**
+   * Whispers are friend-only, so a hostile client cannot use them to probe who
+   * is online or to harass strangers (ADR-046). The same rejection covers
+   * offline, non-friend and self targets; the sender's friend list already
+   * shows who is online.
+   */
+  private async deliverWhisper(
+    client: Client,
+    senderId: string,
+    senderName: string,
+    text: string,
+    targetPlayerId: string,
+  ): Promise<void> {
+    let friendly: boolean;
+    try {
+      friendly = await this.friends.areFriends(senderId, targetPlayerId);
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, playerId: senderId },
+        'whisper friendship lookup failed',
+      );
+      this.sendRejection(client, {}, 'SERVICE_UNAVAILABLE');
+      return;
+    }
+    if (!friendly) {
+      this.sendRejection(client, {}, 'CHAT_TARGET_UNAVAILABLE');
+      return;
+    }
+
+    const target = this.directory.presenceOf(targetPlayerId);
+    if (target === undefined || !target.connected) {
+      this.sendRejection(client, {}, 'CHAT_TARGET_UNAVAILABLE');
+      return;
+    }
+
+    const message = chatMessageSchema.parse({
+      messageId: randomUUID(),
+      playerId: senderId,
+      displayName: senderName,
+      message: text.slice(0, CHAT_MESSAGE_MAX_LENGTH),
+      channel: 'whisper',
+      targetPlayerId,
+      targetDisplayName: target.displayName,
+      serverTime: Date.now(),
+    } satisfies ChatMessage);
+
+    // Both sides see the same line; the recipient's room decodes it like any
+    // other private chat delivery, and the sender gets a local echo only when
+    // the directory actually reached a room.
+    const delivered = this.directory.deliver(targetPlayerId, { kind: 'chat', message });
+    if (!delivered) {
+      this.sendRejection(client, {}, 'CHAT_TARGET_UNAVAILABLE');
+      return;
+    }
+    client.send(SERVER_MESSAGES.chatMessage, message);
     this.metrics.recordChatMessage();
   }
 
@@ -4154,7 +4220,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (targetPlayerId === session.playerId) {
       return 'PARTY_SELF';
     }
-    const presence = this.parties.presenceOf(targetPlayerId);
+    const presence = this.directory.presenceOf(targetPlayerId);
     if (presence === undefined || !presence.connected) {
       return 'PARTY_TARGET_UNAVAILABLE';
     }
@@ -4193,7 +4259,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
     // Re-check state after the async gap: the target may have gone offline or
     // joined a party while the friendship query ran.
-    const presence = this.parties.presenceOf(targetPlayerId);
+    const presence = this.directory.presenceOf(targetPlayerId);
     if (presence === undefined || !presence.connected) {
       this.failPartyCommand(opened, 'PARTY_TARGET_UNAVAILABLE');
       return;
@@ -4331,7 +4397,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         if (result.kind === 'rejected') {
           return this.partyManagementRejectionCode(result.reason);
         }
-        const targetName = this.parties.presenceOf(command.targetPlayerId)?.displayName ?? '队友';
+        const targetName = this.directory.presenceOf(command.targetPlayerId)?.displayName ?? '队友';
         this.sendSystemNotice(session.client, 'info', `已把队长交给 ${targetName}`);
         for (const memberId of result.party.memberIds) {
           if (memberId === session.playerId) {
@@ -4369,7 +4435,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         }
         // Presence outlives membership, so the kicked player's name is still
         // readable here even though their roster has been cleared.
-        const kickedName = this.parties.presenceOf(result.kickedId)?.displayName ?? '队友';
+        const kickedName = this.directory.presenceOf(result.kickedId)?.displayName ?? '队友';
         // The kicked player's roster is cleared by the service refresh, which
         // is routed to whichever room hosts them (it may not be this one).
         for (const memberId of result.party.memberIds) {
@@ -4498,8 +4564,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     targetPlayerId: string,
   ): Promise<void> {
     const outcome = await this.friends.request(opened.session.playerId, targetPlayerId);
-    const targetName = this.parties.presenceOf(targetPlayerId)?.displayName ?? '玩家';
-    this.friendNotifier.notifyRefresh(targetPlayerId);
+    const targetName = this.directory.presenceOf(targetPlayerId)?.displayName ?? '玩家';
+    this.notifyFriendRefresh(targetPlayerId);
     this.sendSystemNotice(
       opened.session.client,
       'info',
@@ -4511,8 +4577,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
   private async applyFriendAccept(opened: OpenSocialCommand, requestId: string): Promise<void> {
     const outcome = await this.friends.accept(opened.session.playerId, requestId);
-    const requesterName = this.parties.presenceOf(outcome.requesterId)?.displayName ?? '对方';
-    this.friendNotifier.notifyRefresh(outcome.requesterId);
+    const requesterName = this.directory.presenceOf(outcome.requesterId)?.displayName ?? '对方';
+    this.notifyFriendRefresh(outcome.requesterId);
     this.sendSystemNotice(opened.session.client, 'info', `你和 ${requesterName} 已成为好友`);
     await this.sendFriendSnapshot(opened.session.client, opened.session);
     this.completeFriendCommand();
@@ -4520,7 +4586,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
 
   private async applyFriendDecline(opened: OpenSocialCommand, requestId: string): Promise<void> {
     const outcome = await this.friends.decline(opened.session.playerId, requestId);
-    this.friendNotifier.notifyRefresh(outcome.requesterId);
+    this.notifyFriendRefresh(outcome.requesterId);
     this.sendSystemNotice(opened.session.client, 'info', '已拒绝好友申请');
     await this.sendFriendSnapshot(opened.session.client, opened.session);
     this.completeFriendCommand();
@@ -4530,9 +4596,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     opened: OpenSocialCommand,
     friendPlayerId: string,
   ): Promise<void> {
-    const name = this.parties.presenceOf(friendPlayerId)?.displayName ?? '对方';
+    const name = this.directory.presenceOf(friendPlayerId)?.displayName ?? '对方';
     await this.friends.remove(opened.session.playerId, friendPlayerId);
-    this.friendNotifier.notifyRefresh(friendPlayerId);
+    this.notifyFriendRefresh(friendPlayerId);
     this.sendSystemNotice(opened.session.client, 'info', `已把 ${name} 移出好友`);
     await this.sendFriendSnapshot(opened.session.client, opened.session);
     this.completeFriendCommand();
@@ -4589,7 +4655,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     try {
       const relations = await this.friends.relations(session.playerId);
       const friends = relations.friends.map((friend) => {
-        const presence = this.parties.presenceOf(friend.playerId);
+        const presence = this.directory.presenceOf(friend.playerId);
         return {
           playerId: friend.playerId,
           displayName: friend.displayName,
@@ -4625,6 +4691,36 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         { err: error, roomId: this.roomId, playerId: session.playerId },
         'friend snapshot failed',
       );
+    }
+  }
+
+  private notifyFriendRefresh(playerId: string): void {
+    this.directory.deliver(playerId, { kind: 'friend.event', event: { type: 'refresh' } });
+  }
+
+  /**
+   * Single entry point for events routed by the process-wide directory. The
+   * room only decodes what its own sessions can receive; it never stores
+   * cross-room state in Room State.
+   */
+  private deliverToPlayer(playerId: string, delivery: PlayerDelivery): void {
+    const session = this.registry.findByPlayerId(playerId);
+    if (session === undefined) {
+      return;
+    }
+    switch (delivery.kind) {
+      case 'chat':
+        session.client.send(SERVER_MESSAGES.chatMessage, chatMessageSchema.parse(delivery.message));
+        break;
+      case 'party.invite':
+        session.client.send(SERVER_MESSAGES.partyInvite, delivery.invite);
+        break;
+      case 'party.refresh':
+        this.sendPartySnapshot(session.client, session);
+        break;
+      case 'friend.event':
+        this.sendFriendEvent(playerId, delivery.event);
+        break;
     }
   }
 
@@ -4665,7 +4761,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       serverTime: Date.now(),
     };
     for (const friendId of friendIds) {
-      this.friendNotifier.notifyPresence(friendId, presence);
+      this.directory.deliver(friendId, {
+        kind: 'friend.event',
+        event: { type: 'presence', presence },
+      });
     }
   }
 
@@ -4748,7 +4847,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       if (player === undefined || statePlayer === undefined) {
         continue;
       }
-      this.parties.setPresence({
+      this.directory.setPresence({
         playerId: session.playerId,
         displayName: session.displayName,
         classId: player.classId,
@@ -4785,7 +4884,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private partyView(party: PartyState): PartyView | null {
     const members: PartyMemberView[] = [];
     for (const memberId of party.memberIds) {
-      const presence = this.parties.presenceOf(memberId);
+      const presence = this.directory.presenceOf(memberId);
       if (presence === undefined) {
         continue;
       }
@@ -4985,14 +5084,15 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (session.transferring) {
       // The destination room reports presence again; friends and party
       // rosters see the player as offline for the gap.
-      this.parties.markOffline(session.playerId);
+      this.directory.markOffline(session.playerId);
       if (formerParty !== undefined) {
         this.parties.refreshMembers(formerParty.memberIds);
       }
     } else {
       // Presence also backs friend online state, so it must be dropped even
       // for players who never joined a party.
-      this.parties.removePlayer(session.playerId);
+      this.parties.leave(session.playerId);
+      this.directory.removePlayer(session.playerId);
       if (formerParty !== undefined) {
         for (const memberId of formerParty.memberIds) {
           if (memberId === session.playerId) {

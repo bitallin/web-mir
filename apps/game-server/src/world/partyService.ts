@@ -1,4 +1,4 @@
-import type { CharacterClass, ChatMessage, PartyInviteView } from '@web-legend/contracts';
+import type { ChatMessage, PartyInviteView } from '@web-legend/contracts';
 
 import {
   PartyRegistry,
@@ -10,37 +10,17 @@ import {
   type PartyLeaveResult,
   type PartyState,
 } from './partyRegistry';
+import type { PlayerDirectory } from './playerDirectory';
 
 /**
  * One party table per game-server process (ADR-036). A map room owns its
  * sessions and combat state, but a party must survive the leave/join cycle a
- * map transfer performs, so membership lives above the rooms. Presence is
- * pushed by the room that currently hosts a member; a member between rooms is
- * kept in the roster as disconnected until the next room reports in.
+ * map transfer performs, so membership lives above the rooms. Player presence
+ * and cross-room routing belong to the shared `PlayerDirectory` (TD-SRV-14).
  */
 
-export type PartyMemberPresence = {
-  playerId: string;
-  displayName: string;
-  classId: CharacterClass;
-  level: number;
-  hp: number;
-  maxHp: number;
-  alive: boolean;
-  connected: boolean;
-  roomId: string | null;
-};
-
-/** What a room lets the service do to its players. */
-export type PartyRoomPort = {
-  sendInvite: (playerId: string, invite: PartyInviteView) => void;
-  /** Delivers a party-channel message to one member hosted by this room. */
-  sendChat: (playerId: string, message: ChatMessage) => void;
-  /** Re-send each listed player's roster snapshot when they are hosted here. */
-  refresh: (playerIds: readonly string[]) => void;
-};
-
 export type PartyServiceOptions = {
+  directory: PlayerDirectory;
   maxMembers?: number;
   now?: () => number;
   inviteTtlMs?: number;
@@ -50,10 +30,10 @@ const DEFAULT_MAX_MEMBERS = 4;
 
 export class PartyService {
   private readonly registry: PartyRegistry;
-  private readonly presence = new Map<string, PartyMemberPresence>();
-  private readonly ports = new Map<string, PartyRoomPort>();
+  private readonly directory: PlayerDirectory;
 
-  constructor(options: PartyServiceOptions = {}) {
+  constructor(options: PartyServiceOptions) {
+    this.directory = options.directory;
     this.registry = new PartyRegistry({
       maxMembers: options.maxMembers ?? DEFAULT_MAX_MEMBERS,
       ...(options.now === undefined ? {} : { now: options.now }),
@@ -65,17 +45,14 @@ export class PartyService {
     return this.registry.maxMembers;
   }
 
+  /** The shared directory this service routes through. */
+  get routing(): PlayerDirectory {
+    return this.directory;
+  }
+
   /** Party size comes from content, which is only known after the store starts. */
   setMaxMembers(maxMembers: number): void {
     this.registry.setMaxMembers(maxMembers);
-  }
-
-  registerRoom(roomId: string, port: PartyRoomPort): void {
-    this.ports.set(roomId, port);
-  }
-
-  unregisterRoom(roomId: string): void {
-    this.ports.delete(roomId);
   }
 
   partyOf(playerId: string): PartyState | undefined {
@@ -86,33 +63,13 @@ export class PartyService {
     return this.registry.isMember(playerId);
   }
 
-  presenceOf(playerId: string): PartyMemberPresence | undefined {
-    return this.presence.get(playerId);
-  }
-
-  setPresence(presence: PartyMemberPresence): void {
-    this.presence.set(presence.playerId, presence);
-  }
-
-  /**
-   * A transferring member stays in the party but has no room; the roster shows
-   * them as disconnected until the destination room reports presence.
-   */
-  markOffline(playerId: string): void {
-    const presence = this.presence.get(playerId);
-    if (presence === undefined) {
-      return;
-    }
-    this.presence.set(playerId, { ...presence, connected: false, roomId: null });
-  }
-
   createInvite(fromPlayerId: string, toPlayerId: string): PartyInviteResult {
     return this.registry.createInvite(fromPlayerId, toPlayerId);
   }
 
   /** Routes an invitation to whichever room hosts the invited player. */
   notifyInvite(invite: PartyInviteRecord): void {
-    const sender = this.presence.get(invite.fromPlayerId);
+    const sender = this.directory.presenceOf(invite.fromPlayerId);
     const view: PartyInviteView = {
       inviteId: invite.inviteId,
       fromPlayerId: invite.fromPlayerId,
@@ -120,7 +77,7 @@ export class PartyService {
       expiresAt: invite.expiresAt,
       serverTime: Date.now(),
     };
-    this.portFor(invite.toPlayerId)?.sendInvite(invite.toPlayerId, view);
+    this.directory.deliver(invite.toPlayerId, { kind: 'party.invite', invite: view });
   }
 
   pendingInviteFor(playerId: string): PartyInviteRecord | undefined {
@@ -171,19 +128,10 @@ export class PartyService {
   /**
    * Party chat follows membership, not the map: each member is delivered by
    * whichever room currently hosts them, so a party split across maps still
-   * talks. A member between rooms has no port and misses the message.
+   * talks. A member between rooms has no room and misses the message.
    */
   deliverChat(playerIds: readonly string[], message: ChatMessage): void {
-    for (const playerId of playerIds) {
-      this.portFor(playerId)?.sendChat(playerId, message);
-    }
-  }
-
-  /** The character is leaving the world for good: drop party and presence. */
-  removePlayer(playerId: string): PartyLeaveResult {
-    const result = this.leave(playerId);
-    this.presence.delete(playerId);
-    return result;
+    this.directory.deliverMany(playerIds, { kind: 'chat', message });
   }
 
   expireInvites(): void {
@@ -192,26 +140,8 @@ export class PartyService {
 
   /** Re-sends the roster to every room that currently hosts one of the players. */
   refreshMembers(playerIds: readonly string[]): void {
-    const byRoom = new Map<string, string[]>();
     for (const playerId of playerIds) {
-      const roomId = this.presence.get(playerId)?.roomId;
-      if (roomId === null || roomId === undefined) {
-        continue;
-      }
-      const members = byRoom.get(roomId);
-      if (members === undefined) {
-        byRoom.set(roomId, [playerId]);
-      } else {
-        members.push(playerId);
-      }
+      this.directory.deliver(playerId, { kind: 'party.refresh' });
     }
-    for (const [roomId, members] of byRoom) {
-      this.ports.get(roomId)?.refresh(members);
-    }
-  }
-
-  private portFor(playerId: string): PartyRoomPort | undefined {
-    const roomId = this.presence.get(playerId)?.roomId;
-    return roomId === null || roomId === undefined ? undefined : this.ports.get(roomId);
   }
 }

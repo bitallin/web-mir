@@ -47,7 +47,11 @@ declare global {
       activeTelegraphs: () => TelegraphView[];
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
-      sendChat: (text: string, channel?: 'map' | 'party') => boolean;
+      sendChat: (
+        text: string,
+        channel?: 'map' | 'party' | 'whisper',
+        targetPlayerId?: string,
+      ) => boolean;
       pickupDrop: (dropId: string) => boolean;
       equipItem: (itemId: string) => boolean;
       unequipSlot: (slot: EquipmentSlot) => boolean;

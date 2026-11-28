@@ -566,7 +566,7 @@ export class WorldClient {
     return true;
   }
 
-  sendChat(text: string, channel: ChatChannel = 'map'): boolean {
+  sendChat(text: string, channel: ChatChannel = 'map', targetPlayerId?: string): boolean {
     const room = this.room;
     const message = text.trim();
     if (
@@ -574,7 +574,8 @@ export class WorldClient {
       this.stopped ||
       this.transferring ||
       message.length === 0 ||
-      message.length > CHAT_MESSAGE_MAX_LENGTH
+      message.length > CHAT_MESSAGE_MAX_LENGTH ||
+      (channel === 'whisper' && (targetPlayerId === undefined || targetPlayerId.length === 0))
     ) {
       return false;
     }
@@ -584,6 +585,7 @@ export class WorldClient {
       clientMessageId: createUuid(),
       channel,
       message,
+      ...(channel === 'whisper' && targetPlayerId !== undefined ? { targetPlayerId } : {}),
     });
     return true;
   }

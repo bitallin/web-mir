@@ -746,17 +746,20 @@ ADR-036。
   系状态塞进公开 Room State。
 - 工作量：M（持久化）/ L（跨进程）。
 
-### TD-SRV-14（P3）在线状态仍寄居 PartyService
+### TD-SRV-14（已关闭，2026-11-28）在线状态仍寄居 PartyService
 
-- 证据：好友系统按 ADR-045 复用 `PartyService` 的 presence 与 Room 端口来显示
-  在线状态、路由 `friend.refresh/presence`；presence 名字仍叫
+- 原证据：好友系统按 ADR-045 复用 `PartyService` 的 presence 与 Room 端口来
+  显示在线状态、路由 `friend.refresh/presence`；presence 名字仍叫
   `PartyMemberPresence`，职责已超出队伍。
-- 影响：单进程可用；随着私聊、公会频道加入，会有更多功能依赖这份状态，而它
-  位于一个以“队伍”命名的服务里，多进程时也无法共享。
-- 建议：在私聊/公会切片前把 presence 与 Room 路由提取为独立的
-  `PlayerDirectory`（在线状态 + 跨 Room 投递），Party/Friend/Guild 共用；多进程
-  前再评估 Redis 或其他共享协调（与 TD-SRV-11 同类）。
-- 工作量：S（进程内提取）/ L（跨进程）。
+- 处置（ADR-046）：提取独立 `PlayerDirectory`，持有 presence 与跨 Room 投递；
+  `PartyService` 只保留队伍注册表，`FriendNotifier` 删除，好友事件与私聊都走
+  目录。写入/清理路径仍由会话生命周期统一：过图 `markOffline`，最终离开
+  `removePlayer`。
+- 证据：`apps/game-server/src/world/playerDirectory.ts`、
+  `apps/game-server/test/partyService.test.ts`、
+  `apps/game-server/test/party.integration.test.ts`（跨图私聊）。
+- 保留风险：在线状态仍在进程内；多进程部署前需要共享协调（与 TD-SRV-11
+  同类），不属于本切片。
 
 ## 2. 数据、事务与经济
 
@@ -923,7 +926,8 @@ ADR-036。
 - 证据：`useWorldSession.ts:666-698` 重置 messages/systemMessages/combatLog，
   然后 `game.destroy(true)` + `createWorldGame`。
 - 影响：每次过图重建 WebGL 上下文与纹理注册，低端机可能触发上下文回收；
-  聊天/战斗记录在过图时全部丢失，不像 MMORPG 频道。
+  聊天/战斗记录在过图时全部丢失，不像 MMORPG 频道；私聊历史同样只存在客户端
+  内存，过图或重连后消失。
 - 建议：只重启 Scene 并复用 Game/纹理；聊天历史按频道保留。
 - 工作量：M。
 
@@ -1080,11 +1084,14 @@ ADR-036。
   服务端权限校验与名单刷新；真实浏览器 E2E 覆盖移交、踢人与队伍消息。
 - 已部分关闭（ADR-045）：附近玩家可「加好友」，好友列表可「邀请」跨图组队；
   好友申请、在线状态与持久化已交付。
-- 仍开放：按名字搜索/邀请（需要在线玩家目录与隐私边界）、世界内队伍成员标记、
-  被踢者的定向提示。
-- 建议：按试玩反馈决定；按名字邀请应优先限定“好友的好友/最近同玩”范围，避免
+- 已部分关闭（ADR-046）：好友列表可「私聊」，跨图投递、仅好友与统一拒绝码；
+  在线目录已从 `PartyService` 提取。
+- 仍开放：按名字搜索/邀请与私聊（需要在线玩家目录与隐私边界）、世界内队伍
+  成员标记、被踢者的定向提示；私聊没有离线消息、历史、黑名单或“最近同玩”
+  入口。
+- 建议：按试玩反馈决定；按名字搜索/私聊应优先限定“好友/最近同玩”范围，避免
   全局玩家搜索带来的骚扰面。
-- 工作量：S（成员标记）/ M（按名字邀请与目录查询）。
+- 工作量：S（成员标记）/ M（按名字搜索与最近同玩）。
 
 ### TD-CLI-24（P3）世界内没有到达任务目标标记
 
