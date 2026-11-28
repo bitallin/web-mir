@@ -4706,3 +4706,85 @@ pnpm build
 
 - `4d7db09` `feat(alpha-03): mark arrival quest targets in the world`
   （派生函数、世界/小地图标记、桥重放、单测与 E2E、切片报告与截图）。
+
+## 2026-11-28 Alpha 0.3 S4-E：队伍在场感与「最近同玩」
+
+### 目标
+
+收口 TD-CLI-17 的主要部分：让同图队友在世界与小地图上可见，并让解散后的
+队伍能通过「最近同玩」重新邀请，同时不引入全局按名字搜索的骚扰面。
+
+### 实际改动
+
+1. **契约**：`friend.snapshot` 增加 `recent`（最多 20，缺省 `[]`）与
+   `recentTeammateViewSchema`；新增 `RECENT_TEAMMATES_MAX`。无新命令/消息。
+2. **服务端**：`PartyService` 在 `acceptInvite` 成功时两两记录最近同玩，按
+   `lastPlayedAt` 淘汰最旧；`WorldMapRoom` 用 presence 合并快照（在线优先），
+   跨图邀请在好友查询前先检查最近同玩。
+3. **客户端**：`WorldScene` 为同图、存活、非自己的队友绘制绿色脚环与绿色
+   名字；`WorldBridge` 在场景重建后重放名单；`Minimap` 使用绿色队友点与
+   「队友」图例，输出 `data-party-markers` / `data-party-ids`；好友面板新增
+   「最近同玩」，离线/已在队伍/队伍已满时禁用邀请。
+4. **隐私**：公开 Room State 不新增字段；队伍名单仍只走私有消息；不提供全局
+   搜索；最近同玩只覆盖真实组过队的玩家。
+5. **测试**：契约缺省/上限、服务记录与淘汰、真实 PostgreSQL + 双 Room 跨图
+   邀请；`party.spec.ts` 断言世界/小地图标记、解散后消失、最近同玩重邀与
+   跨图无标记。
+
+### 命令与结果
+
+```bash
+pnpm exec vitest run packages/contracts/src/friends.test.ts apps/game-server/test/partyService.test.ts
+pnpm exec vitest run apps/game-server/test/party.integration.test.ts
+pnpm test
+pnpm exec playwright test tests/e2e/party.spec.ts
+pnpm test:e2e
+pnpm build
+```
+
+- 定向单元：2 文件、16 测试通过。
+- 组队集成：8 测试通过（含新增跨图最近同玩邀请）。
+- 全量单元/集成：86 文件、**633 测试**通过。
+- 组队 E2E：2/2 通过（44.5 秒）。
+- 全量 E2E：**51/51 通过（6.1 分钟，退出码 0）**。
+- 构建 / lint / 类型检查：Node 26 下全部通过。
+- 开发栈：84–87 已重启到本切片代码，4 个 `/health/ready` 200，Game Server
+  内容 `2026.11.27.7` 刷新无错误；8584 双浏览器实测看到队友绿环/绿色名字、
+  小地图队友点与「最近同玩」入口（截图 `party-presence/dev-8584-*.png`）。
+- 容量 sanity：50 人 × 2 分钟 50/50、接受率 98.6%、191 击杀、0 资产失败；
+  tick p50 1.38ms / p95 **3.62ms** / p99 5.75ms / max 8.94ms、
+  资产事务 p95 61.85ms（`party-presence/load-50p2a.json`）。
+- 资产不变量：7/7 为 0（`party-presence/database-invariants.txt`）。
+
+### 遇到的问题及解决方法
+
+1. **公开状态不能承载队伍关系**：最初考虑给 `PlayerState` 加队伍标识，会让
+   任何客户端读到别人的队伍；改为客户端从私有 `party.snapshot` 派生标记，
+   服务端零字段变化（ADR-047 §3）。
+2. **按名字邀请的骚扰面**：不做全局搜索，改为只记录真实形成过的队伍；
+   记录最多 20 条且只对当事人可见，最近同玩同时成为跨图邀请的授权依据。
+3. **跨图成员没有视觉**：AOI 只包含本图实体，跨图队友自然没有世界/小地图
+   标记；E2E 显式断言过图后标记为 0，避免把“名单里有”误当成“世界里有”。
+4. **全量 E2E 重写历史截图**：按项目惯例只保留本切片证据；其余截图改动用
+   `git stash push -m "incidental e2e screenshots 2026-11-28"` 保存（可恢复），
+   没有提交，也没有删除。
+5. **出生点角色重叠**：两名角色出生在同一格且没有碰撞，世界标记会被本地角色
+   遮挡；8584 证据脚本先让队友走开 3 格再截图，并在报告中记录该限制。
+
+### 尚未解决
+
+- 8584 真人试玩（本轮已用双 Playwright 上下文验证，尚未由真人长时间试玩）。
+- 最近同玩为进程内状态，重启/换服后清空（TD-SRV-15）。
+- 被踢者定向提示、私聊历史/黑名单；行会与副本 ADR 尚未开始。
+- 远端 CI 仍待确认。
+
+### 下一步计划
+
+1. 行会先写 ADR；再评估 3 人副本实例或玩家交易最小版。
+2. 正式美术（含八方向帧）与远端 CI。
+3. 视试玩反馈决定私聊历史/黑名单与被踢提示。
+
+### 提交
+
+- `0c834ab` `feat(alpha-03): show party presence and recent teammates`
+  （契约、服务端、客户端、测试、ADR、切片报告、状态与日志）。
