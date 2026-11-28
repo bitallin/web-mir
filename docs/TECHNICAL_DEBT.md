@@ -625,6 +625,28 @@ ADR-036。
 - 未新增 P0/P1/P2：好友关系迁移有唯一约束与检查约束；好友操作走统一命令
   门禁但不在 tick 内；聊天频道筛选是纯客户端展示，不承担隐私边界。
 
+## 0.24 Alpha 0.3 S4-D 到达目标标记复核（2026-11-28）
+
+证据见 `docs/phase-reports/alpha-03/ALPHA_03_REACH_MARKER_REPORT.md`、
+`apps/game-web/src/lib/reachMarkers.test.ts` 与
+`tests/e2e/reachQuests.spec.ts`。
+
+### 已关闭
+
+| 编号      | 处置                                                     | 证据                                                     |
+| --------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| TD-CLI-24 | 世界显示菱形/光柱/范围圈，小地图显示金环；到达后自动移除 | `ALPHA_03_REACH_MARKER_REPORT.md`、`reachQuests.spec.ts` |
+
+### 说明
+
+- 标记只从服务端任务状态派生（当前地图、active、未完成），不新增协议或客户端
+  位置推断；服务端仍是到达判定的唯一来源。
+- 标记经 `WorldBridge` 推给 Phaser，桥保存最近一次并在场景重建时重放，过图
+  或场景重启不会丢失；`reset` 会清空旧地图标记。
+- 未新增 P0/P1/P2：纯客户端展示改动，无 tick、数据库、内容或热路径变化。
+- 保留：跨图任务不在当前地图画远处箭头；点击标记直达需要复用既有
+  `quest.navigate`，留待试玩反馈。
+
 ## 1. 服务端与实时网络
 
 ### TD-SRV-01（P1）Room 成为 2178 行的万能类
@@ -1099,14 +1121,19 @@ ADR-036。
   全局玩家搜索带来的骚扰面。
 - 工作量：S（成员标记）/ M（按名字搜索与最近同玩）。
 
-### TD-CLI-24（P3）世界内没有到达任务目标标记
+### TD-CLI-24（已关闭，2026-11-28）世界内没有到达任务目标标记
 
-证据：`docs/ADR/ADR-042-arrival-quest-objectives.md` §5、8584 截图
-`docs/phase-reports/alpha-03/reach-quests/dev-reach-offer-8584.png`。
-
-任务面板显示“到达 晨曦主城（35,15）”，一键导航会自动走到；但世界与小地图上
-没有光柱、圆圈或目的地标记，玩家手动完成时只能按坐标找。建议在客户端按当前
-进行中的到达任务绘制一个低干扰标记，并在到达后移除；不改变服务端协议。
+- 原证据：`docs/ADR/ADR-042-arrival-quest-objectives.md` §5、8584 截图
+  `docs/phase-reports/alpha-03/reach-quests/dev-reach-offer-8584.png`。
+- 原问题：任务面板显示“到达 晨曦主城（35,15）”，一键导航会自动走到；但世界
+  与小地图上没有光柱、圆圈或目的地标记，玩家手动完成时只能按坐标找。
+- 处置：`reachMarkersFor(quests, mapId)` 从服务端任务状态派生当前地图上进行中
+  的到达目标；`WorldScene` 绘制地面圈、淡光柱、浮动菱形与标题，`Minimap`
+  绘制金环与图例；到达后随任务状态自动移除。`WorldBridge` 保存最近标记并在
+  场景重建时重放。
+- 证据：`docs/phase-reports/alpha-03/ALPHA_03_REACH_MARKER_REPORT.md`、
+  `apps/game-web/src/lib/reachMarkers.test.ts`、
+  `tests/e2e/reachQuests.spec.ts`（接取后出现、到达后消失）。
 
 ## 4. 内容与运营
 

@@ -4637,3 +4637,72 @@ pnpm build
 
 - `19383cf` `fix(alpha-03): keep chat history across maps and reply by name`
   （客户端聊天连续性、点击名字回复、未读提示、输入历史、E2E 与截图）。
+
+### 2026-11-28 Alpha 0.3 S4-D：世界内到达任务目标标记
+
+**背景**：S3-D2 的到达任务能自动寻路并在服务端权威位置完成，但世界与小地图
+没有目标标记；玩家手动完成时只能按面板坐标寻找（TD-CLI-24）。本切片只做
+展示层，把进行中的到达目标变成可发现的低干扰标记。
+
+### 实际改动
+
+1. **派生**：新增 `apps/game-web/src/lib/reachMarkers.ts` 的
+   `reachMarkersFor(quests, mapId)`——只取当前地图、`active` 且进度未完成的
+   `reach` 目标；完成、交付或换图后不残留。
+2. **世界**：`WorldScene.setQuestMarkers` 绘制与任务半径一致的地面椭圆、淡
+   光柱、浮动菱形与任务标题；深度在玩家/怪物之下，不遮挡中心与 HUD。
+3. **小地图**：`Minimap` 绘制金环与中心菱形，图例增加「任务目标」，并输出
+   `data-quest-markers` / `data-quest-tiles` 供 E2E 断言。
+4. **生命周期**：`WorldBridge` 保存最近标记，场景 `attach` 时重放、`reset`
+   时清空；会话在任务快照/更新与 `switchMap` 时重新派生，过图不丢标记。
+5. **测试**：新增 3 条派生单测；`tests/e2e/reachQuests.spec.ts` 改为普通接取 →
+   关闭面板 → 断言世界与小地图标记 → 自动探索到达 → 断言标记消失 → 交付。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm exec playwright test tests/e2e/reachQuests.spec.ts
+pnpm exec playwright test
+pnpm build
+```
+
+- 格式 / lint / 类型检查：通过。
+- 单元/集成：86 文件、**629 测试**通过。
+- 到达任务 E2E：单跑 1/1 通过；全量 **51/51 通过（6.0 分钟，退出码 0）**。
+- 构建：通过；变更仅客户端，未重跑 50 人容量回归。
+- 截图：`docs/phase-reports/alpha-03/reach-quests/reach-marker.png` 与
+  `reach-completed.png`；其余历史截图已恢复，未提交全量 E2E 的 incidental
+  覆盖。
+
+### 遇到的问题及解决方法
+
+1. **E2E 截图被任务面板遮住小地图**：首次在“接取并前往”后立即截图，右侧
+   任务面板替换了小地图。改为普通接取 → 关闭面板 → 断言/截图，再点追踪器
+   「前往」继续流程；同时避免导航在断言前就到达造成的竞态。
+2. **场景重建丢标记**：过图会销毁并重建 Phaser 场景；若只把标记存在场景里，
+   新场景要等下一次任务更新才会重画。把最近标记存入 `WorldBridge` 并在
+   `attach` 重放，`reset` 清空旧地图标记（EL-049）。
+3. **全量 E2E 改写历史截图**：按项目惯例只保留本切片新证据，使用
+   `git restore` 恢复 alpha-01/02/03（除 reach-quests）与 phase-03–07 的截图。
+
+### 尚未解决
+
+- 8584 人工试玩待完成；跨图任务仍只通过面板与一键导航表达，当前地图不画远处
+  箭头；点击标记直达仍需复用 `quest.navigate` 意图。
+- TD-CLI-17 剩余（按名字邀请/最近同玩与队伍标记）、行会 ADR、正式美术与远端
+  CI 仍开放。
+
+### 下一步计划
+
+1. 按名字邀请/最近同玩与队伍标记（TD-CLI-17 剩余）。
+2. 行会先写 ADR；3 人副本先写动态实例 ADR。
+3. 正式美术（含八方向角色帧）与远端 CI。
+
+### 提交
+
+- `4d7db09` `feat(alpha-03): mark arrival quest targets in the world`
+  （派生函数、世界/小地图标记、桥重放、单测与 E2E、切片报告与截图）。
