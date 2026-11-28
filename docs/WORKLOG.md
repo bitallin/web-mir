@@ -4418,6 +4418,8 @@ pnpm build
 pnpm db:migrate
 pnpm exec playwright test tests/e2e/friends.spec.ts
 pnpm exec playwright test
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
+  LOAD_OUTPUT=docs/phase-reports/alpha-03/friends/load-50p2a.json pnpm load:scenario
 ```
 
 - 格式 / lint / 类型 / 构建：通过。
@@ -4425,6 +4427,8 @@ pnpm exec playwright test
 - 好友 E2E：1/1 通过；HUD 与好友组合 5/5。
 - 全量 E2E：首轮 47 通过、1 失败（状态板高度 205 > 200）、3 未运行；修复后
   **51/51 通过**（6.0 分钟）。
+- 容量 sanity：50/50、接受率 98.7%、202 击杀、0 资产失败；tick p50 1.38ms /
+  p95 **3.6ms** / p99 4.36ms / max 4.89ms，资产事务 p95 54.8ms。
 - 迁移 `0011` 已应用到开发库；开发栈 84–87 于 07:22 重启，内容
   `2026.11.27.7` 刷新无错误。
 
@@ -4446,7 +4450,7 @@ pnpm exec playwright test
 
 - 在线状态仍由 `PartyService` 持有（TD-SRV-14）；多进程前需要独立在线目录。
 - 无黑名单/举报、好友分组、离线消息、按名字搜索；好友申请只有命令限频。
-- 未复跑 50 人容量回归；远端 CI 仍待确认。
+- 只跑了 50 人 × 2 分钟 sanity，未跑 10 分钟正式回归；远端 CI 仍待确认。
 - 私聊与行会未开始。
 
 ### 下一步计划
