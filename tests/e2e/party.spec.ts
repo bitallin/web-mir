@@ -106,19 +106,47 @@ test('players form a party, leave it, and keep it across a map transfer', async 
   expect(aliceState?.members.map((member) => member.displayName)).toEqual(
     expect.arrayContaining([alice.name, bob.name]),
   );
+  const bobId = aliceState?.members.find((member) => member.displayName === bob.name)?.playerId;
+  const aliceId = aliceState?.members.find((member) => member.displayName === alice.name)?.playerId;
+  expect(bobId).toBeDefined();
+  expect(aliceId).toBeDefined();
+
+  // Party membership is visible in the world and on the minimap, and only the
+  // other member is ringed (self keeps its own marker).
+  await expect(alice.page.getByTestId('minimap')).toHaveAttribute('data-party-markers', '2');
+  await expect(bob.page.getByTestId('minimap')).toHaveAttribute('data-party-markers', '2');
+  await expect
+    .poll(() => alice.page.evaluate(() => window.__webLegendDebug?.partyMarkerIds()))
+    .toEqual([bobId]);
+  await expect
+    .poll(() => bob.page.evaluate(() => window.__webLegendDebug?.partyMarkerIds()))
+    .toEqual([aliceId]);
   await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'party-formed.png') });
 
   // Leaving removes the member from both rosters, while the leader keeps the
-  // remaining party of one.
+  // remaining party of one. The markers follow the roster immediately.
   await bob.page.getByTestId('party-leave').click();
   await expect(bob.page.getByTestId('party-panel')).toHaveCount(0, { timeout: 10_000 });
   await expect(alice.page.getByTestId('party-member')).toHaveCount(1);
   await expect(alice.page.getByTestId('party-size')).toHaveText('1/4');
+  await expect(alice.page.getByTestId('minimap')).toHaveAttribute('data-party-markers', '1');
+  await expect(bob.page.getByTestId('minimap')).toHaveAttribute('data-party-markers', '0');
+  await expect
+    .poll(() => alice.page.evaluate(() => window.__webLegendDebug?.partyMarkerIds()))
+    .toEqual([]);
 
-  // Re-form, then leave the map: the party survives the transfer (ADR-036).
-  await invite(alice.page, bob.name);
+  // A former teammate is offered by name in the friend panel, so the party can
+  // be rebuilt without waiting to meet in the world again (ADR-047).
+  await alice.page.getByTestId('friend-toggle').click();
+  const recentRow = alice.page.locator(`[data-testid="recent-teammate"][data-name="${bob.name}"]`);
+  await expect(recentRow).toHaveCount(1, { timeout: 10_000 });
+  await expect(recentRow).toHaveAttribute('data-online', 'true');
+  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'party-recent.png') });
+  await recentRow.getByTestId('recent-invite').click();
   await acceptInvite(bob.page, alice.name);
   await expect(alice.page.getByTestId('party-member')).toHaveCount(2);
+  await expect(alice.page.getByTestId('minimap')).toHaveAttribute('data-party-markers', '2');
+  await alice.page.getByTestId('friend-close').click();
 
   await bob.page.evaluate((tile) => window.__webLegendDebug?.moveToTile(tile.x, tile.y), {
     x: WILDS_PORTAL.x,
@@ -143,6 +171,16 @@ test('players form a party, leave it, and keep it across a map transfer', async 
   await expect(
     alice.page.locator(`[data-testid="party-member"][data-name="${bob.name}"]`),
   ).toHaveAttribute('data-connected', 'true', { timeout: 15_000 });
+  // A cross-map member stays in the roster but has no world visual or minimap
+  // dot, so each client only marks the party members actually on its map.
+  await expect(bob.page.getByTestId('minimap')).toHaveAttribute('data-party-markers', '1');
+  await expect(alice.page.getByTestId('minimap')).toHaveAttribute('data-party-markers', '1');
+  await expect
+    .poll(() => bob.page.evaluate(() => window.__webLegendDebug?.partyMarkerIds()))
+    .toEqual([]);
+  await expect
+    .poll(() => alice.page.evaluate(() => window.__webLegendDebug?.partyMarkerIds()))
+    .toEqual([]);
   await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'party-after-transfer.png') });
 });
 

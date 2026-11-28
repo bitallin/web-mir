@@ -1,4 +1,9 @@
-import type { ChatMessage, PartyInviteView } from '@web-legend/contracts';
+import {
+  RECENT_TEAMMATES_MAX,
+  type CharacterClass,
+  type ChatMessage,
+  type PartyInviteView,
+} from '@web-legend/contracts';
 
 import {
   PartyRegistry,
@@ -26,17 +31,33 @@ export type PartyServiceOptions = {
   inviteTtlMs?: number;
 };
 
+/**
+ * A former party member, kept so the player can invite them again from any
+ * map without a global player search (ADR-047).
+ */
+export type RecentTeammateRecord = {
+  playerId: string;
+  displayName: string;
+  classId: CharacterClass;
+  level: number;
+  lastPlayedAt: number;
+};
+
 const DEFAULT_MAX_MEMBERS = 4;
 
 export class PartyService {
   private readonly registry: PartyRegistry;
   private readonly directory: PlayerDirectory;
+  private readonly now: () => number;
+  /** playerId -> teammateId -> record; process memory only, bounded per player. */
+  private readonly recent = new Map<string, Map<string, RecentTeammateRecord>>();
 
   constructor(options: PartyServiceOptions) {
     this.directory = options.directory;
+    this.now = options.now ?? (() => Date.now());
     this.registry = new PartyRegistry({
       maxMembers: options.maxMembers ?? DEFAULT_MAX_MEMBERS,
-      ...(options.now === undefined ? {} : { now: options.now }),
+      now: this.now,
       ...(options.inviteTtlMs === undefined ? {} : { inviteTtlMs: options.inviteTtlMs }),
     });
   }
@@ -87,9 +108,61 @@ export class PartyService {
   acceptInvite(inviteId: string, acceptingPlayerId: string): PartyAcceptResult {
     const result = this.registry.acceptInvite(inviteId, acceptingPlayerId);
     if (result.kind === 'joined') {
+      this.recordTeam(result.party.memberIds);
       this.refreshMembers(result.party.memberIds);
     }
     return result;
+  }
+
+  /**
+   * Only a party the player actually joined creates a record, so the list can
+   * never become a directory of everyone who is online. A member between maps
+   * has no presence and is skipped until the next join refreshes the pair.
+   */
+  private recordTeam(memberIds: readonly string[]): void {
+    const at = this.now();
+    for (const memberId of memberIds) {
+      const member = this.directory.presenceOf(memberId);
+      if (member === undefined) {
+        continue;
+      }
+      let bucket = this.recent.get(memberId);
+      if (bucket === undefined) {
+        bucket = new Map();
+        this.recent.set(memberId, bucket);
+      }
+      for (const teammateId of memberIds) {
+        if (teammateId === memberId) {
+          continue;
+        }
+        const teammate = this.directory.presenceOf(teammateId);
+        if (teammate === undefined) {
+          continue;
+        }
+        bucket.set(teammateId, {
+          playerId: teammateId,
+          displayName: teammate.displayName,
+          classId: teammate.classId,
+          level: teammate.level,
+          lastPlayedAt: at,
+        });
+      }
+      trimRecent(bucket);
+    }
+  }
+
+  /** Most recent first; used to fill the private friend snapshot. */
+  recentPartners(playerId: string): RecentTeammateRecord[] {
+    const bucket = this.recent.get(playerId);
+    if (bucket === undefined) {
+      return [];
+    }
+    return [...bucket.values()].sort((left, right) => right.lastPlayedAt - left.lastPlayedAt);
+  }
+
+  /** Authorizes a cross-map invite to someone the player has partied with. */
+  knowsTeammate(actorId: string, targetId: string): boolean {
+    return this.recent.get(actorId)?.has(targetId) ?? false;
   }
 
   declineInvite(inviteId: string, decliningPlayerId: string): boolean {
@@ -143,5 +216,17 @@ export class PartyService {
     for (const playerId of playerIds) {
       this.directory.deliver(playerId, { kind: 'party.refresh' });
     }
+  }
+}
+
+function trimRecent(bucket: Map<string, RecentTeammateRecord>): void {
+  if (bucket.size <= RECENT_TEAMMATES_MAX) {
+    return;
+  }
+  const oldestFirst = [...bucket.values()].sort(
+    (left, right) => left.lastPlayedAt - right.lastPlayedAt,
+  );
+  for (const record of oldestFirst.slice(0, bucket.size - RECENT_TEAMMATES_MAX)) {
+    bucket.delete(record.playerId);
   }
 }

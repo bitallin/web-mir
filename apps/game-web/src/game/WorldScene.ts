@@ -107,6 +107,8 @@ class PlayerVisual {
   readonly sprite: Phaser.GameObjects.Sprite;
   readonly isSelf: boolean;
   private readonly hpBar: Phaser.GameObjects.Graphics;
+  private readonly partyRing: Phaser.GameObjects.Graphics;
+  private partyMember = false;
   private readonly character: CharacterAsset;
   private readonly animations: CharacterAnimations;
   current: ScreenPoint = { x: 0, y: 0 };
@@ -153,10 +155,46 @@ class PlayerVisual {
       .setOrigin(0.5, 1);
 
     this.hpBar = scene.add.graphics();
+    this.partyRing = scene.add.graphics();
 
-    this.container = scene.add.container(0, 0, [this.sprite, this.nameText, this.hpBar]);
+    this.container = scene.add.container(0, 0, [
+      this.partyRing,
+      this.sprite,
+      this.nameText,
+      this.hpBar,
+    ]);
     this.setDisplayName(displayName);
     this.drawHpBar();
+    this.drawPartyRing();
+  }
+
+  /**
+   * Party membership comes from the private roster, never from public room
+   * state, so another player's party is not inferable here (ADR-047).
+   */
+  setPartyMember(member: boolean): void {
+    if (this.partyMember === member) {
+      return;
+    }
+    this.partyMember = member;
+    this.drawPartyRing();
+    this.nameText.setColor(this.isSelf ? '#e5c15a' : member ? '#9fe0a8' : '#e8e0cd');
+  }
+
+  get isPartyMarked(): boolean {
+    return this.partyMember && !this.isSelf && this.alive;
+  }
+
+  private drawPartyRing(): void {
+    this.partyRing.clear();
+    this.partyRing.setVisible(this.partyMember && !this.isSelf && this.alive);
+    if (!this.partyMember || this.isSelf || !this.alive) {
+      return;
+    }
+    this.partyRing.lineStyle(2, 0x7fd08a, 0.85);
+    this.partyRing.strokeEllipse(0, -2, 30, 14);
+    this.partyRing.lineStyle(1, 0x7fd08a, 0.3);
+    this.partyRing.strokeEllipse(0, -2, 40, 19);
   }
 
   get isAlive(): boolean {
@@ -192,6 +230,7 @@ class PlayerVisual {
     this.maxHp = maxHp;
     this.alive = alive;
     this.drawHpBar();
+    this.drawPartyRing();
   }
 
   labelRect(): LabelRect {
@@ -353,6 +392,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
   private questMarkersState: ReachMarkerView[] = [];
   private questMarkerObjects: Phaser.GameObjects.Container[] = [];
   private readonly questMarkerPoints = new Map<string, ScreenPoint>();
+  private readonly partyMemberIds = new Set<string>();
   private labelClock = 0;
   private lootClock = 0;
   private pathGraphics!: Phaser.GameObjects.Graphics;
@@ -511,6 +551,7 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
       }
       visual.applyView(player);
       visual.setMotion(player.moving && player.alive, player.facing);
+      visual.setPartyMember(this.partyMemberIds.has(player.playerId));
 
       if (isSelf) {
         this.serverSelf = { x: player.x, y: player.y };
@@ -902,6 +943,28 @@ export class WorldScene extends Phaser.Scene implements WorldSceneHandle {
 
   questMarkerScreenPoint(questId: string): ScreenPoint | null {
     return this.questMarkerPoints.get(questId) ?? null;
+  }
+
+  /** Mirrors the private party roster onto the player visuals already in AOI. */
+  setPartyMembers(memberIds: readonly string[]): void {
+    this.partyMemberIds.clear();
+    for (const memberId of memberIds) {
+      this.partyMemberIds.add(memberId);
+    }
+    for (const [playerId, visual] of this.visuals) {
+      visual.setPartyMember(this.partyMemberIds.has(playerId));
+    }
+  }
+
+  /** Test-only readback: alive party members currently marked in the scene. */
+  partyMarkerIds(): string[] {
+    const ids: string[] = [];
+    for (const [playerId, visual] of this.visuals) {
+      if (visual.isPartyMarked) {
+        ids.push(playerId);
+      }
+    }
+    return ids;
   }
 
   private drawQuestMarkers(): void {

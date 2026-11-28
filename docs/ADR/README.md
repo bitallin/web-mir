@@ -51,5 +51,6 @@
 | [ADR-044](ADR-044-party-management-and-chat.md)                                | 队伍移交/踢人、队伍聊天与跨图投递        | Accepted              |
 | [ADR-045](ADR-045-friends-presence-and-friend-invites.md)                      | 好友关系、在线状态与好友跨图组队邀请     | Accepted              |
 | [ADR-046](ADR-046-player-directory-and-friend-whispers.md)                     | 进程级在线目录、好友私聊与跨图投递       | Accepted              |
+| [ADR-047](ADR-047-party-presence-markers-and-recent-teammates.md)              | 队伍世界标记、最近同玩与跨图邀请授权     | Accepted              |
 
 模板：[ADR-000-template.md](ADR-000-template.md)

@@ -527,6 +527,10 @@ body {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.friend-section li.recent-teammate {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
 .friend-list li.empty,
 .friend-section li.empty {
   display: block;
@@ -2304,6 +2308,10 @@ body {
 
 .legend-player::before {
   background: #9fc4e0;
+}
+
+.legend-party::before {
+  background: #7fd08a;
 }
 
 .legend-monster::before {

@@ -692,6 +692,89 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
     expect(roomC.state.players.has(carol.character.id)).toBe(true);
   });
 
+  it('remembers former teammates and lets them re-invite from another map', async () => {
+    const alice = await actorAt(SAFE_TILE);
+    const bob = await actorAt({ x: 3, y: 16 });
+    const roomA = await createWorld(alice.ticket);
+    const roomB = await joinWorld(roomA.roomId, bob.ticket);
+    await waitUntil(
+      () => roomA.state.players.has(bob.character.id),
+      10_000,
+      'both players visible',
+    );
+
+    await formParty(roomA, roomB, alice, bob);
+
+    const leftA = waitForParty(roomA, (snapshot) => snapshot.party?.members.length === 1);
+    const leftB = waitForParty(roomB, (snapshot) => snapshot.party === null);
+    roomB.send('party.leave', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+    });
+    await Promise.all([leftA, leftB]);
+
+    // A shared party is what makes the other player reachable later: the
+    // private snapshot lists Bob as a former teammate without a global search.
+    const recent = waitForFriendSnapshot(roomA, (snapshot) =>
+      snapshot.recent.some((entry) => entry.playerId === bob.character.id),
+    );
+    roomA.send('friend.list', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+    });
+    const snapshot = await recent;
+    expect(snapshot.recent[0]).toMatchObject({
+      playerId: bob.character.id,
+      displayName: bob.character.name,
+      online: true,
+    });
+
+    // Bob crosses to town; Alice, still in the wilds, invites him across maps.
+    const transfer = waitForMessage(
+      roomB,
+      'session.transfer',
+      (payload) => sessionTransferSchema.parse(payload),
+      20_000,
+    );
+    roomB.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetTileX: 1,
+      targetTileY: 16,
+    });
+    expect((await transfer).mapId).toBe(STARTER_TOWN_MAP_ID);
+    await roomB.leave();
+    const bobTicket = await issueTicket(db, bob);
+    const town = await createMapRoom(STARTER_TOWN_MAP_ID, bobTicket);
+    await waitUntil(() => town.state.players.has(bob.character.id), 10_000, 'bob joined the town');
+
+    // They are not friends, so only the shared party history authorizes this.
+    const invite = waitForMessage<PartyInviteView>(town, 'party.invite', (payload) =>
+      partyInviteViewSchema.parse(payload),
+    );
+    roomA.send('party.invite', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetPlayerId: bob.character.id,
+    });
+    const received = await invite;
+    const joined = waitForParty(town, (snapshot) => snapshot.party?.members.length === 2);
+    town.send('party.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      inviteId: received.inviteId,
+    });
+    const party = await joined;
+    expect(party.party?.members.map((member) => member.playerId)).toEqual(
+      expect.arrayContaining([alice.character.id, bob.character.id]),
+    );
+  });
+
   it('whispers only between friends and across maps', async () => {
     const alice = await actorAt(SAFE_TILE);
     const bob = await actorAt({ x: 3, y: 16 });

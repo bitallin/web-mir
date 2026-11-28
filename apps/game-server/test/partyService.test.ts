@@ -19,9 +19,13 @@ function presence(playerId: string, roomId: string | null, connected = true) {
   };
 }
 
-function serviceWithRooms() {
+function serviceWithRooms(now?: () => number) {
   const directory = new PlayerDirectory();
-  const service = new PartyService({ directory, inviteTtlMs: 30_000 });
+  const service = new PartyService({
+    directory,
+    inviteTtlMs: 30_000,
+    ...(now === undefined ? {} : { now }),
+  });
   const invites: { roomId: string; playerId: string; invite: PartyInviteView }[] = [];
   const refreshes: { roomId: string; playerIds: readonly string[] }[] = [];
   const chats: { roomId: string; playerId: string; channel: string }[] = [];
@@ -167,6 +171,46 @@ describe('PartyService management and chat', () => {
     );
     expect(service.partyOf('b')).toBeUndefined();
     expect(directory.presenceOf('b')).toBeDefined();
+  });
+
+  it('remembers a former teammate only once the party actually formed', () => {
+    const { service } = twoMemberParty();
+    expect(service.knowsTeammate('a', 'b')).toBe(true);
+    expect(service.knowsTeammate('b', 'a')).toBe(true);
+    expect(service.recentPartners('a').map((record) => record.playerId)).toEqual(['b']);
+    const record = service.recentPartners('b')[0];
+    expect(record?.playerId).toBe('a');
+    expect(record?.displayName).toBe('Player-a');
+    expect(typeof record?.lastPlayedAt).toBe('number');
+
+    // An unanswered invite is not a shared party and must not grant reach.
+    const untouched = serviceWithRooms();
+    untouched.directory.setPresence(presence('c', 'room-a'));
+    untouched.directory.setPresence(presence('d', 'room-b'));
+    untouched.service.createInvite('c', 'd');
+    expect(untouched.service.knowsTeammate('c', 'd')).toBe(false);
+  });
+
+  it('keeps only the newest teammates per player', () => {
+    let clock = 1_000;
+    const { service, directory } = serviceWithRooms(() => clock);
+    directory.setPresence(presence('a', 'room-a'));
+    for (let index = 0; index < 25; index += 1) {
+      const teammateId = `teammate-${String(index)}`;
+      directory.setPresence(presence(teammateId, 'room-b'));
+      const invite = service.createInvite('a', teammateId);
+      if (invite.kind !== 'invited') {
+        throw new Error('invite rejected');
+      }
+      clock += 1_000;
+      expect(service.acceptInvite(invite.invite.inviteId, teammateId).kind).toBe('joined');
+      service.leave(teammateId);
+    }
+
+    const recent = service.recentPartners('a');
+    expect(recent).toHaveLength(20);
+    expect(recent.map((record) => record.playerId)).not.toContain('teammate-0');
+    expect(recent[0]?.playerId).toBe('teammate-24');
   });
 
   it('delivers party chat to each member through the room that hosts them', () => {

@@ -333,6 +333,7 @@ export type {
 export {
   FRIEND_LIST_MAX,
   FRIEND_REQUEST_LIST_MAX,
+  RECENT_TEAMMATES_MAX,
   friendAcceptCommandSchema,
   friendDeclineCommandSchema,
   friendEntrySchema,
@@ -343,6 +344,7 @@ export {
   friendRequestCommandSchema,
   friendRequestViewSchema,
   friendSnapshotSchema,
+  recentTeammateViewSchema,
 } from './friends';
 export type {
   FriendAcceptCommand,
@@ -355,6 +357,7 @@ export type {
   FriendRequestCommand,
   FriendRequestView,
   FriendSnapshot,
+  RecentTeammateView,
 } from './friends';
 
 export {

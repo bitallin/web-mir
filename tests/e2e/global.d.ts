@@ -40,6 +40,7 @@ declare global {
         radiusTiles: number;
       }[];
       questMarkerScreenPoint: (questId: string) => { x: number; y: number } | null;
+      partyMarkerIds: () => string[];
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
       sendChat: (text: string) => boolean;

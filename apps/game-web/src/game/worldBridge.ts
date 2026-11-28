@@ -68,6 +68,8 @@ export type WorldSceneHandle = {
   setQuestMarkers: (markers: readonly ReachMarkerView[]) => void;
   questMarkerScreenPoint: (questId: string) => ScreenPoint | null;
   questMarkers: () => ReachMarkerView[];
+  setPartyMembers: (memberIds: readonly string[]) => void;
+  partyMarkerIds: () => string[];
   labels: () => WorldLabelView[];
   selectEntity: (entityId: string) => void;
   restart: () => void;
@@ -81,6 +83,7 @@ export class WorldBridge {
   private scene: WorldSceneHandle | null = null;
   private latestSnapshot: SceneSnapshot | null = null;
   private latestQuestMarkers: readonly ReachMarkerView[] = [];
+  private latestPartyMembers: readonly string[] = [];
   private attachCount = 0;
 
   onMoveRequest: ((tile: TilePoint) => void) | null = null;
@@ -98,6 +101,7 @@ export class WorldBridge {
       scene.applySnapshot(this.latestSnapshot);
     }
     scene.setQuestMarkers(this.latestQuestMarkers);
+    scene.setPartyMembers(this.latestPartyMembers);
   }
 
   detach(scene: WorldSceneHandle): void {
@@ -110,6 +114,7 @@ export class WorldBridge {
   reset(): void {
     this.latestSnapshot = null;
     this.latestQuestMarkers = [];
+    this.latestPartyMembers = [];
   }
 
   pushSnapshot(data: SceneSnapshot): void {
@@ -208,6 +213,15 @@ export class WorldBridge {
 
   questMarkers(): ReachMarkerView[] {
     return this.scene?.questMarkers() ?? [];
+  }
+
+  setPartyMembers(memberIds: readonly string[]): void {
+    this.latestPartyMembers = [...memberIds];
+    this.scene?.setPartyMembers(this.latestPartyMembers);
+  }
+
+  partyMarkerIds(): string[] {
+    return this.scene?.partyMarkerIds() ?? [];
   }
 
   labels(): WorldLabelView[] {

@@ -764,6 +764,7 @@ class WorldSession {
             this.clearPartyInvite();
           }
           this.updateState((previous) => ({ ...previous, party: snapshot.party }));
+          this.syncPartyMarkers();
         },
         onPartyInvite: (invite) => {
           this.partyInvite = invite;
@@ -1582,11 +1583,18 @@ class WorldSession {
     this.bridge.reset();
     this.game = createWorldGame(this.container, this.bridge, mapBundleFor(mapId));
     this.syncReachMarkers();
+    // The party survives a transfer, so the new scene gets the roster again.
+    this.syncPartyMarkers();
   }
 
   /** Mirrors the active arrival objectives into the scene and minimap. */
   private syncReachMarkers(): void {
     this.bridge.setQuestMarkers(reachMarkersFor(this.quests, this.mapId));
+  }
+
+  /** Members are matched to scene visuals by id; other maps have no visual. */
+  private syncPartyMarkers(): void {
+    this.bridge.setPartyMembers(this.party?.members.map((member) => member.playerId) ?? []);
   }
 
   private installDebugHooks(): void {
@@ -1628,6 +1636,7 @@ class WorldSession {
       npcScreenPoint: (npcId) => this.bridge.npcScreenPoint(npcId),
       questMarkers: () => this.bridge.questMarkers(),
       questMarkerScreenPoint: (questId) => this.bridge.questMarkerScreenPoint(questId),
+      partyMarkerIds: () => this.bridge.partyMarkerIds(),
       interactNpc: (npcId) => this.interactNpc(npcId),
       sendChat: (text, channel, targetPlayerId) => this.sendChat(text, channel, targetPlayerId),
       pickupDrop: (dropId) => this.pickup(dropId),

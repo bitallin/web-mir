@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FRIEND_LIST_MAX,
+  RECENT_TEAMMATES_MAX,
   friendAcceptCommandSchema,
   friendEntrySchema,
   friendListCommandSchema,
@@ -11,6 +12,7 @@ import {
   friendRequestCommandSchema,
   friendRequestViewSchema,
   friendSnapshotSchema,
+  recentTeammateViewSchema,
 } from './friends';
 
 const PLAYER = '018f0f3e-6a6f-7c4a-9b3e-3f1f2b7c9d01';
@@ -48,6 +50,41 @@ describe('friend contracts', () => {
     expect(snapshot.friends).toHaveLength(1);
     expect(snapshot.incoming[0]?.outgoing).toBe(false);
     expect(snapshot.outgoing[0]?.outgoing).toBe(true);
+    expect(snapshot.recent).toEqual([]);
+  });
+
+  it('carries former teammates and caps the list', () => {
+    const teammate = {
+      playerId: OTHER,
+      displayName: 'Former',
+      classId: 'taoist' as const,
+      level: 7,
+      online: true,
+      lastPlayedAt: 5_000,
+    };
+    expect(recentTeammateViewSchema.safeParse(teammate).success).toBe(true);
+    const snapshot = friendSnapshotSchema.parse({
+      friends: [],
+      incoming: [],
+      outgoing: [],
+      recent: [teammate],
+      serverTime: 6_000,
+    });
+    expect(snapshot.recent[0]?.displayName).toBe('Former');
+
+    const tooMany = Array.from({ length: RECENT_TEAMMATES_MAX + 1 }, (_value, index) => ({
+      ...teammate,
+      playerId: `018f0f3e-6a6f-7c4a-9b3e-3f1f2b7c9d${String(index).padStart(2, '0')}`,
+    }));
+    expect(
+      friendSnapshotSchema.safeParse({
+        friends: [],
+        incoming: [],
+        outgoing: [],
+        recent: tooMany,
+        serverTime: 1,
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects oversized rosters and unknown fields', () => {

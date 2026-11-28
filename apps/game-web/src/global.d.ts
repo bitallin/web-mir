@@ -53,6 +53,8 @@ declare global {
       /** Arrival markers currently drawn by the scene (TD-CLI-24). */
       questMarkers: () => ReachMarkerView[];
       questMarkerScreenPoint: (questId: string) => { x: number; y: number } | null;
+      /** Alive party members currently ringed in the world (ADR-047). */
+      partyMarkerIds: () => string[];
       npcScreenPoint: (npcId: string) => { x: number; y: number } | null;
       interactNpc: (npcId: string) => void;
       sendChat: (

@@ -4234,7 +4234,11 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     return this.combat.getPlayer(session.playerId) === undefined ? 'INVALID_SESSION' : null;
   }
 
-  /** Nearby players keep the ADR-035 rule; friends may be invited from any map. */
+  /**
+   * Nearby players keep the ADR-035 rule. Beyond range, only friends and
+   * former party members may be invited (ADR-045, ADR-047); there is no
+   * global name search, so a stranger never becomes reachable through this.
+   */
   private isInviteInRange(inviterId: string, targetId: string): boolean {
     const self = this.combat.getPlayer(inviterId);
     const other = this.combat.getPlayer(targetId);
@@ -4250,7 +4254,10 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     targetPlayerId: string,
   ): Promise<void> {
     if (!this.isInviteInRange(opened.session.playerId, targetPlayerId)) {
-      const friendly = await this.friends.areFriends(opened.session.playerId, targetPlayerId);
+      const known = this.parties.knowsTeammate(opened.session.playerId, targetPlayerId);
+      const friendly = known
+        ? true
+        : await this.friends.areFriends(opened.session.playerId, targetPlayerId);
       if (!friendly) {
         this.failPartyCommand(opened, 'PARTY_TARGET_UNAVAILABLE');
         return;
@@ -4671,10 +4678,28 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
           right.level - left.level ||
           left.displayName.localeCompare(right.displayName),
       );
+      // Presence wins over the recorded values: a former teammate now online
+      // shows their current class and level, an offline one keeps their last.
+      const recent = this.parties.recentPartners(session.playerId).map((record) => {
+        const presence = this.directory.presenceOf(record.playerId);
+        return {
+          playerId: record.playerId,
+          displayName: presence?.displayName ?? record.displayName,
+          classId: presence?.classId ?? record.classId,
+          level: presence?.level ?? record.level,
+          online: presence?.connected ?? false,
+          lastPlayedAt: record.lastPlayedAt,
+        };
+      });
+      recent.sort(
+        (left, right) =>
+          Number(right.online) - Number(left.online) || right.lastPlayedAt - left.lastPlayedAt,
+      );
       const snapshot: FriendSnapshot = {
         friends: friends.slice(0, FRIEND_LIST_MAX),
         incoming: relations.incoming.slice(0, FRIEND_REQUEST_LIST_MAX),
         outgoing: relations.outgoing.slice(0, FRIEND_REQUEST_LIST_MAX),
+        recent,
         serverTime: Date.now(),
       };
       const parsed = friendSnapshotSchema.safeParse(snapshot);

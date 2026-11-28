@@ -16,7 +16,11 @@ export type MinimapProps = {
   loot: LootView[];
   /** Active arrival objectives on this map (TD-CLI-24). */
   questMarkers: ReachMarker[];
+  /** Private party roster; only members visible on this map are drawn. */
+  partyPlayerIds: readonly string[];
 };
+
+const PARTY_COLOR = '#7fd08a';
 
 type Background = {
   mapId: string;
@@ -28,12 +32,25 @@ type Background = {
  * stamped once per map, then each snapshot only paints entities, so a 20Hz
  * state update never redraws the whole terrain.
  */
-export function Minimap({ mapId, selfId, players, monsters, loot, questMarkers }: MinimapProps) {
+export function Minimap({
+  mapId,
+  selfId,
+  players,
+  monsters,
+  loot,
+  questMarkers,
+  partyPlayerIds,
+}: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const backgroundRef = useRef<Background | null>(null);
   const bundle = useMemo(() => mapBundleFor(mapId), [mapId]);
   const manifest = bundle.manifest;
   const height = Math.round((MAP_WIDTH * manifest.height) / manifest.width);
+  const partyIds = useMemo(() => new Set(partyPlayerIds), [partyPlayerIds]);
+  const partyMarkers = useMemo(
+    () => players.filter((player) => player.alive && partyIds.has(player.playerId)),
+    [players, partyIds],
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -104,8 +121,18 @@ export function Minimap({ mapId, selfId, players, monsters, loot, questMarkers }
       if (!player.alive) {
         continue;
       }
-      const color = COLOR_HEX[player.colorIndex % COLOR_HEX.length] ?? COLOR_HEX[0];
+      const isPartyMember = partyIds.has(player.playerId);
+      const color = isPartyMember
+        ? PARTY_COLOR
+        : (COLOR_HEX[player.colorIndex % COLOR_HEX.length] ?? COLOR_HEX[0]);
       dot(player.x, player.y, player.playerId === selfId ? 3.2 : 2.4, color ?? '#9fc4e0');
+      if (isPartyMember && player.playerId !== selfId) {
+        context.beginPath();
+        context.arc((player.x / 1000) * scaleX, (player.y / 1000) * scaleY, 3.6, 0, Math.PI * 2);
+        context.strokeStyle = 'rgba(127, 208, 138, 0.55)';
+        context.lineWidth = 1.2;
+        context.stroke();
+      }
       if (player.playerId === selfId) {
         context.beginPath();
         context.arc((player.x / 1000) * scaleX, (player.y / 1000) * scaleY, 4.4, 0, Math.PI * 2);
@@ -114,7 +141,7 @@ export function Minimap({ mapId, selfId, players, monsters, loot, questMarkers }
         context.stroke();
       }
     }
-  }, [manifest, height, players, monsters, loot, questMarkers, selfId]);
+  }, [manifest, height, players, monsters, loot, questMarkers, selfId, partyIds]);
 
   const self = players.find((player) => player.playerId === selfId);
 
@@ -127,6 +154,8 @@ export function Minimap({ mapId, selfId, players, monsters, loot, questMarkers }
       data-self-y={self?.y ?? ''}
       data-quest-markers={String(questMarkers.length)}
       data-quest-tiles={questMarkers.map((marker) => `${marker.tile.x},${marker.tile.y}`).join(' ')}
+      data-party-markers={String(partyMarkers.length)}
+      data-party-ids={partyMarkers.map((player) => player.playerId).join(' ')}
     >
       <div className="minimap-heading">
         <span>小地图</span>
@@ -143,6 +172,7 @@ export function Minimap({ mapId, selfId, players, monsters, loot, questMarkers }
       <p className="minimap-legend">
         <span className="legend-self">你</span>
         <span className="legend-player">玩家</span>
+        <span className="legend-party">队友</span>
         <span className="legend-monster">怪物</span>
         <span className="legend-loot">掉落</span>
         <span className="legend-quest">任务目标</span>

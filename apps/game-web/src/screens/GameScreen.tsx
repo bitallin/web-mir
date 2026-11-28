@@ -331,6 +331,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const questSections = useMemo(() => groupQuestsByStatus(panelQuests), [panelQuests]);
   const availableQuest = useMemo(() => nextAvailableQuest(quests), [quests]);
   const questMarkers = useMemo(() => reachMarkersFor(quests, state.mapId), [quests, state.mapId]);
+  const partyPlayerIds = useMemo(
+    () => state.party?.members.map((member) => member.playerId) ?? [],
+    [state.party],
+  );
   const availableLocation = availableQuest === null ? null : locateNpc(availableQuest.giverNpcId);
   const questNavigation = state.questNavigation;
   const navigationQuest =
@@ -1099,6 +1103,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             monsters={state.monsters}
             loot={state.loot}
             questMarkers={questMarkers}
+            partyPlayerIds={partyPlayerIds}
           />
           <div className="panel-heading">
             <h2>附近玩家</h2>
@@ -2252,7 +2257,58 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   </li>
                 ))}
               </ul>
-              <p className="shop-hint">好友可以跨地图邀请组队；在线状态跟随当前区服。</p>
+              {state.friends.recent.length > 0 ? (
+                <section className="friend-section" data-testid="recent-teammates">
+                  <h3>最近同玩</h3>
+                  <ul>
+                    {state.friends.recent.map((teammate) => {
+                      const alreadyMember =
+                        state.party?.members.some(
+                          (member) => member.playerId === teammate.playerId,
+                        ) ?? false;
+                      const partyFull =
+                        state.party !== null &&
+                        state.party.members.length >= state.party.maxMembers;
+                      return (
+                        <li
+                          key={teammate.playerId}
+                          className="recent-teammate"
+                          data-testid="recent-teammate"
+                          data-player-id={teammate.playerId}
+                          data-name={teammate.displayName}
+                          data-online={teammate.online ? 'true' : 'false'}
+                        >
+                          <span
+                            className={`friend-dot${teammate.online ? ' online' : ''}`}
+                            aria-hidden="true"
+                          />
+                          <span className="friend-name">
+                            {teammate.displayName}
+                            {teammate.online ? null : <em>离线</em>}
+                          </span>
+                          <span className="friend-meta">Lv.{teammate.level}</span>
+                          <span className="friend-actions">
+                            <button
+                              type="button"
+                              data-testid="recent-invite"
+                              data-player-id={teammate.playerId}
+                              disabled={!teammate.online || alreadyMember || partyFull}
+                              onClick={() => {
+                                inviteToParty(teammate.playerId);
+                              }}
+                            >
+                              邀请
+                            </button>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ) : null}
+              <p className="shop-hint">
+                好友可以跨地图邀请组队；组过队的玩家会出现在「最近同玩」，可直接邀请。
+              </p>
             </>
           )}
         </aside>

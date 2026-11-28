@@ -11,6 +11,8 @@ import { characterClassSchema } from './character';
 /** Wire bounds keep a hostile client from requesting an unbounded roster. */
 export const FRIEND_LIST_MAX = 200 as const;
 export const FRIEND_REQUEST_LIST_MAX = 100 as const;
+/** Former party members kept per player; enough to re-invite, too few to farm. */
+export const RECENT_TEAMMATES_MAX = 20 as const;
 
 export const friendEntrySchema = z
   .object({
@@ -40,12 +42,36 @@ export const friendRequestViewSchema = z
 
 export type FriendRequestView = z.infer<typeof friendRequestViewSchema>;
 
-/** Sent after every relationship change and when the panel is opened. */
+/**
+ * Someone the player has actually shared a party with (ADR-047). The list is
+ * per player and never searchable globally, so it cannot be used to find
+ * strangers; it only restores a relationship the player already had.
+ */
+export const recentTeammateViewSchema = z
+  .object({
+    playerId: z.uuid(),
+    displayName: z.string().min(1).max(32),
+    classId: characterClassSchema,
+    level: z.number().int().min(1).max(100),
+    online: z.boolean(),
+    /** Epoch ms of the last time both players were in the same party. */
+    lastPlayedAt: z.number().nonnegative(),
+  })
+  .strict();
+
+export type RecentTeammateView = z.infer<typeof recentTeammateViewSchema>;
+
+/**
+ * Sent after every relationship change and when the panel is opened. `recent`
+ * defaults to empty so a snapshot produced before this field existed still
+ * parses.
+ */
 export const friendSnapshotSchema = z
   .object({
     friends: z.array(friendEntrySchema).max(FRIEND_LIST_MAX),
     incoming: z.array(friendRequestViewSchema).max(FRIEND_REQUEST_LIST_MAX),
     outgoing: z.array(friendRequestViewSchema).max(FRIEND_REQUEST_LIST_MAX),
+    recent: z.array(recentTeammateViewSchema).max(RECENT_TEAMMATES_MAX).default([]),
     serverTime: z.number().nonnegative(),
   })
   .strict();
