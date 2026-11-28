@@ -4586,3 +4586,54 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
 - `e4bcdef` `feat(alpha-03): add friend whispers through a process player
 directory`（私聊、PlayerDirectory、契约、服务端与客户端、测试、ADR-046、
   切片报告、计划/债务/经验/演进记录、负载与 E2E 证据），已推送 `origin/main`。
+
+### 2026-11-28 体验修复：聊天连续性与点击名字回复
+
+**背景**：试玩反馈三点——换地图后所有聊天记录消失；收到私聊后应能直接点对方
+名字回复；希望按同类 MMORPG 的常见习惯完善聊天体验。
+
+### 根本原因
+
+`useWorldSession.handleTransfer` 把 `messages`、`systemMessages`、`friends` 与
+`party` 当作地图状态一起清空。聊天只存在客户端内存，所以过图即丢失；好友
+快照清空还会让正在进行的私聊目标被自动取消。Phaser 场景重建是 TD-CLI-04 的
+另一半，与本轮反馈无关。
+
+### 实际改动（仅客户端）
+
+1. **跨图保留对话状态**：过图不再清空聊天、系统日志、好友与队伍；地图实体、
+   战斗、任务与商店仍重置。聊天上限 120、系统日志 60 不变。
+2. **点击名字回复**：日志中在线好友的作者名渲染为按钮，点击后切换私聊目标、
+   发言频道与日志筛选并聚焦输入框；非好友/离线保持普通文本。
+3. **未读提示**：私聊被当前筛选或收起面板隐藏时，「私聊」标签显示紫色圆点；
+   切到「全部 / 私聊」或展开后清除。
+4. **常见习惯**：新消息自动跟随到底部，向上翻看后暂停；`↑`/`↓` 召回最近
+   20 条输入；输入框旁 `×` 结束私聊并回到附近。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm exec playwright test tests/e2e/friends.spec.ts
+pnpm exec playwright test
+pnpm build
+```
+
+- 格式 / lint / 类型 / 单元与集成（626 测试）：通过。
+- 好友 E2E：1/1 通过（26.5 秒），覆盖过图保留记录、点击名字回复、跨图回报、
+  未读点、输入历史与结束私聊。
+- 全量 E2E：**51/51 通过（6.0 分钟，退出码 0）**；构建：通过。
+
+### 未改动
+
+- 过图仍销毁并重建 Phaser 场景（TD-CLI-04 场景部分）；聊天记录不落库，刷新
+  页面仍会丢失。
+- 非好友不能从聊天名字发起私聊；放开前需要黑名单/举报与更严格的限频。
+
+### 提交
+
+- `19383cf` `fix(alpha-03): keep chat history across maps and reply by name`
+  （客户端聊天连续性、点击名字回复、未读提示、输入历史、E2E 与截图）。
