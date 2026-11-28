@@ -82,6 +82,22 @@ export type {
   UpsertContentDraftInput,
 } from './content';
 
+export {
+  acceptFriendshipRequest,
+  areFriends,
+  canonicalPair,
+  declineFriendshipRequest,
+  deleteFriendshipBetween,
+  findFriendship,
+  findFriendshipById,
+  insertFriendshipRequest,
+  listAcceptedFriendIds,
+  listAcceptedFriendships,
+  listCharacterProfiles,
+  listPendingFriendships,
+} from './friendships';
+export type { CanonicalPair, CharacterProfile } from './friendships';
+
 export { findRealmByCode, findRealmById, listActiveRealms } from './realms';
 
 export {

@@ -10,6 +10,8 @@ import {
   TILE_UNITS,
   chatMessageSchema,
   commandRejectedSchema,
+  friendRefreshSchema,
+  friendSnapshotSchema,
   lootClaimedSchema,
   partyInviteViewSchema,
   partySnapshotSchema,
@@ -17,6 +19,8 @@ import {
   worldRoomNameFor,
   type ChatMessage,
   type CommandRejected,
+  type FriendRefresh,
+  type FriendSnapshot,
   type PartyInviteView,
   type PartySnapshot,
 } from '@web-legend/contracts';
@@ -137,6 +141,29 @@ function waitForParty(
     }, timeoutMs);
     unsubscribe = room.onMessage('party.snapshot', (payload: unknown) => {
       const parsed = partySnapshotSchema.parse(payload);
+      if (!predicate(parsed)) {
+        return;
+      }
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(parsed);
+    });
+  });
+}
+
+function waitForFriendSnapshot(
+  room: SdkRoom,
+  predicate: (snapshot: FriendSnapshot) => boolean,
+  timeoutMs = 5_000,
+): Promise<FriendSnapshot> {
+  return new Promise((resolve, reject) => {
+    let unsubscribe: () => void = () => undefined;
+    const timer = setTimeout(() => {
+      unsubscribe();
+      reject(new Error('Timed out waiting for a matching friend snapshot'));
+    }, timeoutMs);
+    unsubscribe = room.onMessage('friend.snapshot', (payload: unknown) => {
+      const parsed = friendSnapshotSchema.parse(payload);
       if (!predicate(parsed)) {
         return;
       }
@@ -524,6 +551,143 @@ describe.runIf(databaseUrl !== undefined)('world_map parties', () => {
       message: 'still here?',
     });
     expect((await rejected).code).toBe('PARTY_NOT_IN_PARTY');
+  });
+
+  it('adds a friend and invites them into the party from another map', async () => {
+    const alice = await actorAt(SAFE_TILE);
+    const bob = await actorAt({ x: 3, y: 16 });
+    // Carol stays far away so a later invite falls outside the nearby range.
+    const carol = await actorAt({ x: 20, y: 16 });
+    const roomA = await createWorld(alice.ticket);
+    const roomB = await joinWorld(roomA.roomId, bob.ticket);
+    const roomC = await joinWorld(roomA.roomId, carol.ticket);
+    await waitUntil(
+      () =>
+        roomA.state.players.has(bob.character.id) && roomC.state.players.has(carol.character.id),
+      10_000,
+      'friends visible in the wilds',
+    );
+
+    const initial = waitForFriendSnapshot(roomA, (snapshot) => snapshot.friends.length === 0);
+    roomA.send('friend.list', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+    });
+    await initial;
+
+    // Alice asks Bob; the server alerts Bob's room with a refresh.
+    const requestRefresh = waitForMessage<FriendRefresh>(roomB, 'friend.refresh', (payload) =>
+      friendRefreshSchema.parse(payload),
+    );
+    roomA.send('friend.request', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetPlayerId: bob.character.id,
+    });
+    await requestRefresh;
+
+    const incoming = waitForFriendSnapshot(roomB, (snapshot) => snapshot.incoming.length === 1);
+    roomB.send('friend.list', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+    });
+    const pending = await incoming;
+    const requestId = pending.incoming[0]?.requestId;
+    expect(requestId).toBeDefined();
+    expect(pending.incoming[0]?.displayName).toBe(alice.character.name);
+
+    const bobFriends = waitForFriendSnapshot(roomB, (snapshot) => snapshot.friends.length === 1);
+    const aliceRefresh = waitForMessage<FriendRefresh>(roomA, 'friend.refresh', (payload) =>
+      friendRefreshSchema.parse(payload),
+    );
+    roomB.send('friend.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      requestId: requestId as string,
+    });
+    await bobFriends;
+    await aliceRefresh;
+
+    const aliceFriends = waitForFriendSnapshot(
+      roomA,
+      (snapshot) => snapshot.friends.length === 1 && snapshot.friends[0]?.online === true,
+    );
+    roomA.send('friend.list', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+    });
+    expect((await aliceFriends).friends[0]?.playerId).toBe(bob.character.id);
+
+    // Bob crosses to town; Alice learns he is online there through presence.
+    const bobOnline = waitForMessage(
+      roomA,
+      'friend.presence',
+      (payload: unknown) => payload,
+      10_000,
+    );
+    const transfer = waitForMessage(
+      roomB,
+      'session.transfer',
+      (payload) => sessionTransferSchema.parse(payload),
+      20_000,
+    );
+    roomB.send('move.to', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetTileX: 1,
+      targetTileY: 16,
+    });
+    expect((await transfer).mapId).toBe(STARTER_TOWN_MAP_ID);
+    await roomB.leave();
+
+    const bobTicket = await issueTicket(db, bob);
+    const town = await createMapRoom(STARTER_TOWN_MAP_ID, bobTicket);
+    await waitUntil(() => town.state.players.has(bob.character.id), 10_000, 'bob joined the town');
+    await bobOnline;
+
+    // Friendship overrides the nearby-only invite rule.
+    const invite = waitForMessage<PartyInviteView>(town, 'party.invite', (payload) =>
+      partyInviteViewSchema.parse(payload),
+    );
+    roomA.send('party.invite', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetPlayerId: bob.character.id,
+    });
+    const received = await invite;
+    const joined = waitForParty(town, (snapshot) => snapshot.party?.members.length === 2);
+    town.send('party.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      inviteId: received.inviteId,
+    });
+    const party = await joined;
+    expect(party.party?.leaderId).toBe(alice.character.id);
+    expect(party.party?.members.map((member) => member.playerId)).toEqual(
+      expect.arrayContaining([alice.character.id, bob.character.id]),
+    );
+
+    // A stranger beyond the range cannot be invited even though the room is
+    // the same; only friends bypass the distance rule.
+    const rejected = waitForMessage<CommandRejected>(roomA, 'command.rejected', (payload) =>
+      commandRejectedSchema.parse(payload),
+    );
+    roomA.send('party.invite', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      targetPlayerId: carol.character.id,
+    });
+    expect((await rejected).code).toBe('PARTY_TARGET_UNAVAILABLE');
+    expect(roomC.state.players.has(carol.character.id)).toBe(true);
   });
 
   it('shares kill experience with nearby members only', async () => {

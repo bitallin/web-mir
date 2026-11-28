@@ -1,5 +1,13 @@
-export { AssetError } from './errors';
+export { AssetError, SocialError } from './errors';
 export { AssetService } from './assetService';
+export { FriendsService } from './friendsService';
+export type {
+  FriendAcceptOutcome,
+  FriendProfile,
+  FriendRelations,
+  FriendRequestOutcome,
+  FriendsServiceOptions,
+} from './friendsService';
 export type {
   AcceptQuestOutcome,
   AssetCommandOutcome,

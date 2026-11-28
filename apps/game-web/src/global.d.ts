@@ -1,6 +1,7 @@
 import type {
   EquipmentSlot,
   InventorySnapshot,
+  FriendSnapshot,
   PartyInviteView,
   PartyView,
   QuestNavigationPurpose,
@@ -70,6 +71,12 @@ declare global {
       partyInviteState: () => PartyInviteView | null;
       transferPartyLeader: (playerId: string) => boolean;
       kickPartyMember: (playerId: string) => boolean;
+      requestFriend: (playerId: string) => boolean;
+      acceptFriendRequest: (requestId: string) => boolean;
+      declineFriendRequest: (requestId: string) => boolean;
+      removeFriend: (playerId: string) => boolean;
+      refreshFriends: () => boolean;
+      friendState: () => FriendSnapshot | null;
       lootDrops: () => LootView[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
       lootIconFrame: (dropId: string) => number | null;

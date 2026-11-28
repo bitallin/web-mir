@@ -29,6 +29,8 @@ export {
   realmActiveContent,
 } from './content';
 export type { ContentActivation, ContentDraft, ContentRelease } from './content';
+export { FRIENDSHIP_STATUS_IDS, friendships } from './friendships';
+export type { Friendship, FriendshipStatusId, NewFriendship } from './friendships';
 export { gameTickets } from './gameTickets';
 export type { GameTicket } from './gameTickets';
 export {

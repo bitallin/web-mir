@@ -14,3 +14,17 @@ export class AssetError extends Error {
     this.name = 'AssetError';
   }
 }
+
+/**
+ * A rejected social (non-asset) operation. Kept separate from AssetError so a
+ * failure in the friend graph is never mistaken for an inventory change.
+ */
+export class SocialError extends Error {
+  constructor(
+    readonly code: CommandRejectionCode,
+    message: string = COMMAND_REJECTION_MESSAGES[code],
+  ) {
+    super(message);
+    this.name = 'SocialError';
+  }
+}

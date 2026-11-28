@@ -71,6 +71,8 @@ export type SessionRecord = {
   questRecords: Map<string, QuestRecordState>;
   /** Party command ids already applied by this session (ADR-035). */
   recentParty: Map<string, true>;
+  /** Friend command ids already applied by this session (ADR-045). */
+  recentFriends: Map<string, true>;
   hp: number;
   mp: number;
   /** Set by a moderator disconnect; such a session never enters the grace window. */

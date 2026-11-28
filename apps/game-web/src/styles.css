@@ -102,8 +102,14 @@ body {
 .player-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   margin-top: 10px;
+}
+
+/* Six actions must stay on one row so the status plate keeps its compact
+   footprint (hud.spec.ts asserts the plate never grows into the play area). */
+.player-actions .bag-toggle {
+  padding: 3px 7px;
 }
 
 .eyebrow {
@@ -442,6 +448,154 @@ body {
   border-color: #2b323a;
   color: var(--muted);
   cursor: not-allowed;
+}
+
+.player-friend {
+  padding: 2px 8px;
+  border: 1px solid #3f4f6b;
+  background: transparent;
+  color: #9db8e0;
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.player-friend:hover:not(:disabled) {
+  background: rgba(120, 160, 220, 0.14);
+}
+
+.player-friend:disabled {
+  border-color: #2b323a;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.friend-panel {
+  right: 40px;
+  top: 132px;
+  bottom: 84px;
+  z-index: 4;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #2b323a;
+  background: var(--ink-raised);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.friend-panel .panel-heading {
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.friend-section h3 {
+  margin: 8px 16px 0;
+  color: var(--gold);
+  font-family: var(--serif);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.friend-section ul,
+.friend-list {
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.friend-list {
+  flex: 1 1 auto;
+  min-height: 48px;
+  max-height: none;
+}
+
+.friend-list li,
+.friend-section li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 16px;
+  font-size: 12px;
+}
+
+.friend-section li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.friend-list li.empty,
+.friend-section li.empty {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.friend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4a4f55;
+}
+
+.friend-dot.online {
+  background: var(--ok);
+}
+
+.friend-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-name em {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.friend-meta {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.friend-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.friend-actions button {
+  padding: 1px 7px;
+  border: 1px solid #2b323a;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.friend-actions button:hover:not(:disabled) {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
+.friend-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.friend-badge {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #7a2f2f;
+  color: #fff;
+  font-size: 10px;
+  font-style: normal;
 }
 
 .party-panel {
@@ -1066,6 +1220,31 @@ body {
   border: 1px solid #33415c;
   color: #8fb4ff;
   font-size: 10px;
+}
+
+.chat-filters {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px 0;
+}
+
+.chat-filters button {
+  padding: 1px 8px;
+  border: 1px solid #2b323a;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.chat-filters button.active {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
+.chat-filters button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .chat-panel ul {
@@ -2695,7 +2874,8 @@ body {
 }
 
 @media (max-width: 860px) {
-  .quest-panel {
+  .quest-panel,
+  .friend-panel {
     right: 12px;
     left: 12px;
     top: auto;

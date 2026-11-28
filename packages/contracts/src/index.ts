@@ -331,6 +331,33 @@ export type {
 } from './quests';
 
 export {
+  FRIEND_LIST_MAX,
+  FRIEND_REQUEST_LIST_MAX,
+  friendAcceptCommandSchema,
+  friendDeclineCommandSchema,
+  friendEntrySchema,
+  friendListCommandSchema,
+  friendPresenceSchema,
+  friendRefreshSchema,
+  friendRemoveCommandSchema,
+  friendRequestCommandSchema,
+  friendRequestViewSchema,
+  friendSnapshotSchema,
+} from './friends';
+export type {
+  FriendAcceptCommand,
+  FriendDeclineCommand,
+  FriendEntry,
+  FriendListCommand,
+  FriendPresence,
+  FriendRefresh,
+  FriendRemoveCommand,
+  FriendRequestCommand,
+  FriendRequestView,
+  FriendSnapshot,
+} from './friends';
+
+export {
   PARTY_INVITE_RANGE_TILES,
   PARTY_INVITE_TTL_MS,
   PARTY_MAX_MEMBERS,

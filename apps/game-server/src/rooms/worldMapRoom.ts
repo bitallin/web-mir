@@ -8,6 +8,8 @@ import {
   DEFAULT_PATCH_RATE_MS,
   DEFAULT_TICK_HZ,
   FACING,
+  FRIEND_LIST_MAX,
+  FRIEND_REQUEST_LIST_MAX,
   MONSTER_STATE_CODES,
   PICKUP_RANGE_TILES,
   PLAYER_SPEED_UNITS_PER_SECOND,
@@ -29,6 +31,14 @@ import {
   commandAckSchema,
   commandRejectedSchema,
   DEFAULT_AUTO_PICKUP_RANGE_TILES,
+  friendAcceptCommandSchema,
+  friendDeclineCommandSchema,
+  friendListCommandSchema,
+  friendPresenceSchema,
+  friendRefreshSchema,
+  friendRemoveCommandSchema,
+  friendRequestCommandSchema,
+  friendSnapshotSchema,
   sessionKickedSchema,
   inventoryEquipSchema,
   inventorySnapshotSchema,
@@ -80,6 +90,8 @@ import {
   type CommandRejected,
   type CommandRejectionCode,
   type Facing,
+  type FriendPresence,
+  type FriendSnapshot,
   type InventorySnapshot,
   type LevelUp,
   type MapMonsterSpawn,
@@ -113,6 +125,8 @@ import {
 import {
   AssetError,
   AssetService,
+  FriendsService,
+  SocialError,
   type DeathPenaltyInput,
   type DeathPenaltyOutcome,
   type KillQuestUpdate,
@@ -173,6 +187,7 @@ import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket } from '../world/rateLimiter';
 import { PartyService } from '../world/partyService';
 import { type PartyManagementRejection, type PartyState } from '../world/partyRegistry';
+import { FriendNotifier, type FriendServerEvent } from '../world/friendNotifier';
 import { CommandGuard } from './commandGuard';
 import { SessionRegistry, type QuestNavigationState, type SessionRecord } from './sessionRegistry';
 import {
@@ -183,6 +198,13 @@ import {
   nextPortalToward,
 } from '../world/questRouting';
 import { StateViewPublisher } from './stateViewPublisher';
+
+/** A party command that passed the synchronous gate and is ready to apply. */
+type OpenSocialCommand = {
+  session: SessionRecord;
+  commandId: string;
+  clientSequence: number;
+};
 
 export type WorldMapRoomOptions = {
   database: Database;
@@ -195,6 +217,8 @@ export type WorldMapRoomOptions = {
   adminHub?: AdminCommandHub;
   /** Process-wide party table shared by every map room (ADR-036). */
   partyService?: PartyService;
+  /** Process-wide friend event router; rooms without one keep their own. */
+  friendNotifier?: FriendNotifier;
   /** Realm this process serves; characters from other realms are rejected. */
   realmCode?: string;
   /** Overrides the compiled map's monster spawns; tests use an empty list. */
@@ -385,6 +409,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private guard!: CommandGuard;
   private views!: StateViewPublisher;
   private parties!: PartyService;
+  private friends!: FriendsService;
+  private friendNotifier!: FriendNotifier;
   /** Current content snapshot's party rule; defaults keep the feature usable. */
   private partyRule: { maxMembers: number; assistSharePermille: number; assistRangeTiles: number } =
     { maxMembers: 4, assistSharePermille: 0, assistRangeTiles: 12 };
@@ -433,6 +459,14 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.autoPickupEnabled = options.autoPickup ?? true;
     this.parties =
       options.partyService ?? new PartyService({ maxMembers: this.partyRule.maxMembers });
+    this.friends = new FriendsService(options.database);
+    this.friendNotifier =
+      options.friendNotifier ?? new FriendNotifier((playerId) => this.parties.presenceOf(playerId));
+    this.friendNotifier.registerRoom(this.roomId, {
+      notify: (playerId, event) => {
+        this.sendFriendEvent(playerId, event);
+      },
+    });
     this.parties.registerRoom(this.roomId, {
       sendInvite: (playerId, invite) => {
         this.registry.findByPlayerId(playerId)?.client.send(SERVER_MESSAGES.partyInvite, invite);
@@ -622,6 +656,21 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.partyKick, (client, message) => {
       this.handlePartyKick(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.friendRequest, (client, message) => {
+      this.handleFriendRequest(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.friendAccept, (client, message) => {
+      this.handleFriendAccept(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.friendDecline, (client, message) => {
+      this.handleFriendDecline(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.friendRemove, (client, message) => {
+      this.handleFriendRemove(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.friendList, (client, message) => {
+      this.handleFriendList(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
@@ -806,6 +855,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       },
       questRecords: new Map(questRecords.map((record) => [record.questId, record])),
       recentParty: new Map(),
+      recentFriends: new Map(),
       hp: combatPlayer.hp,
       mp: combatPlayer.mp,
       terminated: null,
@@ -829,6 +879,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       connected: true,
       roomId: this.roomId,
     });
+    void this.notifyFriendPresence(auth.characterId, true).catch((error: unknown) => {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, playerId: auth.characterId },
+        'failed to notify friends of presence',
+      );
+    });
 
     const affected = this.interest.add(auth.characterId, spawn.tile);
     this.views.refresh(affected);
@@ -843,6 +899,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.sendShopCatalog(session.client, session);
         this.sendQuestSnapshot(session.client, session);
         this.sendPartySnapshot(session.client, session);
+        void this.sendFriendSnapshot(session.client, session);
         // An invitation sent while this character was between maps is still
         // open; deliver it once the new room has registered its listeners.
         const pendingInvite = this.parties.pendingInviteFor(auth.characterId);
@@ -925,6 +982,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       if (current !== undefined) {
         this.sendProfile(current.client, current.playerId);
         this.sendAssetSnapshot(current.client, current);
+        void this.sendFriendSnapshot(current.client, current);
       }
     }, 50);
 
@@ -1016,6 +1074,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   override async onDispose(): Promise<void> {
     this.options.adminHub?.unregister(this.roomId);
     this.parties.unregisterRoom(this.roomId);
+    this.friendNotifier.unregisterRoom(this.roomId);
     const sessionIds = [...this.registry.sessionIds()];
     await Promise.allSettled(sessionIds.map(async (sessionId) => this.removeSession(sessionId)));
     this.options.metrics.unregister(this.roomId);
@@ -4071,39 +4130,32 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
     const command = parsed.data;
-    this.runPartyCommand(
-      client,
-      command,
-      (session) => this.validatePartyInvite(session, command.targetPlayerId),
-      (session) => {
-        const result = this.parties.createInvite(session.playerId, command.targetPlayerId);
-        if (result.kind === 'rejected') {
-          return result.reason === 'party_full' ? 'PARTY_FULL' : 'PARTY_TARGET_BUSY';
-        }
-        // Delivery is routed by the service: the invited player may be hosted
-        // by another map room than the inviter.
-        this.parties.notifyInvite(result.invite);
-        const targetName = this.parties.presenceOf(command.targetPlayerId)?.displayName ?? '玩家';
-        this.sendSystemNotice(session.client, 'info', `已邀请 ${targetName} 组队`);
-        return null;
-      },
+    const opened = this.openPartyCommand(client, command, (session) =>
+      this.validatePartyInviteTarget(session, command.targetPlayerId),
     );
+    if (opened === null) {
+      return;
+    }
+    // A cross-map or out-of-range invite needs a friendship lookup, which is a
+    // database read and therefore cannot run inside the synchronous gate.
+    void this.finishPartyInvite(opened, command.targetPlayerId).catch((error: unknown) => {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, targetPlayerId: command.targetPlayerId },
+        'party invite failed',
+      );
+      this.failPartyCommand(opened, 'SERVICE_UNAVAILABLE');
+    });
   }
 
-  private validatePartyInvite(
+  private validatePartyInviteTarget(
     session: SessionRecord,
     targetPlayerId: string,
   ): CommandRejectionCode | null {
     if (targetPlayerId === session.playerId) {
       return 'PARTY_SELF';
     }
-    const target = this.registry.findByPlayerId(targetPlayerId);
-    const self = this.combat.getPlayer(session.playerId);
-    const other = this.combat.getPlayer(targetPlayerId);
-    if (target === undefined || other === undefined || self === undefined) {
-      return 'PARTY_TARGET_UNAVAILABLE';
-    }
-    if (this.state.players.get(targetPlayerId)?.connected !== true) {
+    const presence = this.parties.presenceOf(targetPlayerId);
+    if (presence === undefined || !presence.connected) {
       return 'PARTY_TARGET_UNAVAILABLE';
     }
     if (this.parties.isMember(targetPlayerId)) {
@@ -4113,8 +4165,66 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     if (selfParty !== undefined && selfParty.memberIds.length >= this.parties.maxMembers) {
       return 'PARTY_FULL';
     }
+    return this.combat.getPlayer(session.playerId) === undefined ? 'INVALID_SESSION' : null;
+  }
+
+  /** Nearby players keep the ADR-035 rule; friends may be invited from any map. */
+  private isInviteInRange(inviterId: string, targetId: string): boolean {
+    const self = this.combat.getPlayer(inviterId);
+    const other = this.combat.getPlayer(targetId);
+    if (self === undefined || other === undefined) {
+      return false;
+    }
     const distance = Math.hypot(self.x - other.x, self.y - other.y) / TILE_UNITS;
-    return distance > PARTY_INVITE_RANGE_TILES ? 'PARTY_TARGET_UNAVAILABLE' : null;
+    return distance <= PARTY_INVITE_RANGE_TILES;
+  }
+
+  private async finishPartyInvite(
+    opened: OpenSocialCommand,
+    targetPlayerId: string,
+  ): Promise<void> {
+    if (!this.isInviteInRange(opened.session.playerId, targetPlayerId)) {
+      const friendly = await this.friends.areFriends(opened.session.playerId, targetPlayerId);
+      if (!friendly) {
+        this.failPartyCommand(opened, 'PARTY_TARGET_UNAVAILABLE');
+        return;
+      }
+    }
+
+    // Re-check state after the async gap: the target may have gone offline or
+    // joined a party while the friendship query ran.
+    const presence = this.parties.presenceOf(targetPlayerId);
+    if (presence === undefined || !presence.connected) {
+      this.failPartyCommand(opened, 'PARTY_TARGET_UNAVAILABLE');
+      return;
+    }
+    if (this.parties.isMember(targetPlayerId)) {
+      this.failPartyCommand(opened, 'PARTY_TARGET_BUSY');
+      return;
+    }
+    const selfParty = this.parties.partyOf(opened.session.playerId);
+    if (selfParty !== undefined && selfParty.memberIds.length >= this.parties.maxMembers) {
+      this.failPartyCommand(opened, 'PARTY_FULL');
+      return;
+    }
+
+    const result = this.parties.createInvite(opened.session.playerId, targetPlayerId);
+    if (result.kind === 'rejected') {
+      this.failPartyCommand(
+        opened,
+        result.reason === 'party_full' ? 'PARTY_FULL' : 'PARTY_TARGET_BUSY',
+      );
+      return;
+    }
+    // Delivery is routed by the service: the invited player may be hosted by
+    // another map room than the inviter.
+    this.parties.notifyInvite(result.invite);
+    this.sendSystemNotice(
+      opened.session.client,
+      'info',
+      `已邀请 ${presence.displayName.length > 0 ? presence.displayName : '玩家'} 组队`,
+    );
+    this.completePartyCommand();
   }
 
   private handlePartyInviteReply(client: Client, raw: unknown, mode: 'accept' | 'decline'): void {
@@ -4304,6 +4414,261 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }
   }
 
+  private handleFriendRequest(client: Client, raw: unknown): void {
+    const parsed = friendRequestCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    const opened = this.openFriendCommand(client, command);
+    if (opened === null) {
+      return;
+    }
+    void this.applyFriendRequest(opened, command.targetPlayerId).catch((error: unknown) => {
+      this.failFriendCommand(opened, error);
+    });
+  }
+
+  private handleFriendAccept(client: Client, raw: unknown): void {
+    const parsed = friendAcceptCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    const opened = this.openFriendCommand(client, command);
+    if (opened === null) {
+      return;
+    }
+    void this.applyFriendAccept(opened, command.requestId).catch((error: unknown) => {
+      this.failFriendCommand(opened, error);
+    });
+  }
+
+  private handleFriendDecline(client: Client, raw: unknown): void {
+    const parsed = friendDeclineCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    const opened = this.openFriendCommand(client, command);
+    if (opened === null) {
+      return;
+    }
+    void this.applyFriendDecline(opened, command.requestId).catch((error: unknown) => {
+      this.failFriendCommand(opened, error);
+    });
+  }
+
+  private handleFriendRemove(client: Client, raw: unknown): void {
+    const parsed = friendRemoveCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const command = parsed.data;
+    const opened = this.openFriendCommand(client, command);
+    if (opened === null) {
+      return;
+    }
+    void this.applyFriendRemove(opened, command.friendPlayerId).catch((error: unknown) => {
+      this.failFriendCommand(opened, error);
+    });
+  }
+
+  private handleFriendList(client: Client, raw: unknown): void {
+    const parsed = friendListCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openFriendCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.sendFriendSnapshot(opened.session.client, opened.session).then(() => {
+      this.completeFriendCommand();
+    });
+  }
+
+  private async applyFriendRequest(
+    opened: OpenSocialCommand,
+    targetPlayerId: string,
+  ): Promise<void> {
+    const outcome = await this.friends.request(opened.session.playerId, targetPlayerId);
+    const targetName = this.parties.presenceOf(targetPlayerId)?.displayName ?? '玩家';
+    this.friendNotifier.notifyRefresh(targetPlayerId);
+    this.sendSystemNotice(
+      opened.session.client,
+      'info',
+      outcome.autoAccepted ? `你和 ${targetName} 已成为好友` : `已向 ${targetName} 发送好友申请`,
+    );
+    await this.sendFriendSnapshot(opened.session.client, opened.session);
+    this.completeFriendCommand();
+  }
+
+  private async applyFriendAccept(opened: OpenSocialCommand, requestId: string): Promise<void> {
+    const outcome = await this.friends.accept(opened.session.playerId, requestId);
+    const requesterName = this.parties.presenceOf(outcome.requesterId)?.displayName ?? '对方';
+    this.friendNotifier.notifyRefresh(outcome.requesterId);
+    this.sendSystemNotice(opened.session.client, 'info', `你和 ${requesterName} 已成为好友`);
+    await this.sendFriendSnapshot(opened.session.client, opened.session);
+    this.completeFriendCommand();
+  }
+
+  private async applyFriendDecline(opened: OpenSocialCommand, requestId: string): Promise<void> {
+    const outcome = await this.friends.decline(opened.session.playerId, requestId);
+    this.friendNotifier.notifyRefresh(outcome.requesterId);
+    this.sendSystemNotice(opened.session.client, 'info', '已拒绝好友申请');
+    await this.sendFriendSnapshot(opened.session.client, opened.session);
+    this.completeFriendCommand();
+  }
+
+  private async applyFriendRemove(
+    opened: OpenSocialCommand,
+    friendPlayerId: string,
+  ): Promise<void> {
+    const name = this.parties.presenceOf(friendPlayerId)?.displayName ?? '对方';
+    await this.friends.remove(opened.session.playerId, friendPlayerId);
+    this.friendNotifier.notifyRefresh(friendPlayerId);
+    this.sendSystemNotice(opened.session.client, 'info', `已把 ${name} 移出好友`);
+    await this.sendFriendSnapshot(opened.session.client, opened.session);
+    this.completeFriendCommand();
+  }
+
+  /**
+   * Friend commands share the party gate (protocol, duplicate id, sequence,
+   * rate limit) but do database work; they answer only after it commits.
+   */
+  private openFriendCommand(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+  ): OpenSocialCommand | null {
+    const meta = { commandId: command.commandId, clientSequence: command.clientSequence };
+    const session = this.registry.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, meta, 'INVALID_SESSION');
+      return null;
+    }
+    const gate = this.guard.check(session, command, session.recentFriends.has(command.commandId));
+    if (gate.kind === 'reject') {
+      this.sendRejection(client, meta, gate.code);
+      return null;
+    }
+    if (gate.kind === 'duplicate') {
+      void this.sendFriendSnapshot(client, session);
+      return null;
+    }
+    session.lastSequence = command.clientSequence;
+    this.guard.remember(session.recentFriends, command.commandId, true);
+    return { session, commandId: command.commandId, clientSequence: command.clientSequence };
+  }
+
+  private failFriendCommand(opened: OpenSocialCommand, error: unknown): void {
+    opened.session.recentFriends.delete(opened.commandId);
+    const meta = { commandId: opened.commandId, clientSequence: opened.clientSequence };
+    if (error instanceof SocialError) {
+      this.sendRejection(opened.session.client, meta, error.code, { message: error.message });
+      return;
+    }
+    this.options.logger.error(
+      { err: error, roomId: this.roomId, commandId: opened.commandId },
+      'friend command failed',
+    );
+    this.sendRejection(opened.session.client, meta, 'SERVICE_UNAVAILABLE');
+  }
+
+  private completeFriendCommand(): void {
+    this.metrics.recordAcceptedCommand();
+  }
+
+  /** Best-effort: a send or validation failure never rolls back a committed relation. */
+  private async sendFriendSnapshot(client: Client, session: SessionRecord): Promise<void> {
+    try {
+      const relations = await this.friends.relations(session.playerId);
+      const friends = relations.friends.map((friend) => {
+        const presence = this.parties.presenceOf(friend.playerId);
+        return {
+          playerId: friend.playerId,
+          displayName: friend.displayName,
+          classId: presence?.classId ?? friend.classId,
+          level: presence?.level ?? friend.level,
+          online: presence?.connected ?? false,
+          alive: presence?.alive ?? true,
+        };
+      });
+      friends.sort(
+        (left, right) =>
+          Number(right.online) - Number(left.online) ||
+          right.level - left.level ||
+          left.displayName.localeCompare(right.displayName),
+      );
+      const snapshot: FriendSnapshot = {
+        friends: friends.slice(0, FRIEND_LIST_MAX),
+        incoming: relations.incoming.slice(0, FRIEND_REQUEST_LIST_MAX),
+        outgoing: relations.outgoing.slice(0, FRIEND_REQUEST_LIST_MAX),
+        serverTime: Date.now(),
+      };
+      const parsed = friendSnapshotSchema.safeParse(snapshot);
+      if (!parsed.success) {
+        this.options.logger.error(
+          { roomId: this.roomId, issues: parsed.error.issues.length },
+          'friend snapshot failed validation',
+        );
+        return;
+      }
+      client.send(SERVER_MESSAGES.friendSnapshot, parsed.data);
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, playerId: session.playerId },
+        'friend snapshot failed',
+      );
+    }
+  }
+
+  private sendFriendEvent(playerId: string, event: FriendServerEvent): void {
+    const session = this.registry.findByPlayerId(playerId);
+    if (session === undefined) {
+      return;
+    }
+    if (event.type === 'refresh') {
+      session.client.send(
+        SERVER_MESSAGES.friendRefresh,
+        friendRefreshSchema.parse({ serverTime: Date.now() }),
+      );
+      return;
+    }
+    session.client.send(
+      SERVER_MESSAGES.friendPresence,
+      friendPresenceSchema.parse({ ...event.presence, serverTime: Date.now() }),
+    );
+  }
+
+  /**
+   * Notifies online friends when a character enters or leaves the world. A map
+   * transfer keeps the player online and deliberately sends nothing.
+   */
+  private async notifyFriendPresence(characterId: string, online: boolean): Promise<void> {
+    const friendIds = await this.friends.friendIds(characterId);
+    if (friendIds.length === 0) {
+      return;
+    }
+    const player = this.combat.getPlayer(characterId);
+    const presence: FriendPresence = {
+      playerId: characterId,
+      online,
+      ...(online && player !== undefined
+        ? { level: player.level, classId: player.classId, alive: player.alive }
+        : {}),
+      serverTime: Date.now(),
+    };
+    for (const friendId of friendIds) {
+      this.friendNotifier.notifyPresence(friendId, presence);
+    }
+  }
+
   /**
    * Party commands change only in-memory state, so they share the command gate
    * with assets (protocol, duplicate id, sequence, rate limit) but run
@@ -4315,35 +4680,59 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     validate: (session: SessionRecord) => CommandRejectionCode | null,
     apply: (session: SessionRecord) => CommandRejectionCode | null,
   ): void {
+    const opened = this.openPartyCommand(client, command, validate);
+    if (opened === null) {
+      return;
+    }
+    const outcome = apply(opened.session);
+    if (outcome !== null) {
+      this.failPartyCommand(opened, outcome);
+      return;
+    }
+    this.completePartyCommand();
+  }
+
+  /** Shared gate for party and friend commands (protocol, id, sequence, rate). */
+  private openPartyCommand(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+    validate: (session: SessionRecord) => CommandRejectionCode | null,
+  ): OpenSocialCommand | null {
     const meta = { commandId: command.commandId, clientSequence: command.clientSequence };
     const session = this.registry.get(client.sessionId);
     if (session === undefined) {
       this.sendRejection(client, meta, 'INVALID_SESSION');
-      return;
+      return null;
     }
     const gate = this.guard.check(session, command, session.recentParty.has(command.commandId));
     if (gate.kind === 'reject') {
       this.sendRejection(client, meta, gate.code);
-      return;
+      return null;
     }
     if (gate.kind === 'duplicate') {
       this.sendPartySnapshot(client, session);
-      return;
+      return null;
     }
     const rejection = validate(session);
     if (rejection !== null) {
       this.sendRejection(client, meta, rejection);
-      return;
+      return null;
     }
-
     session.lastSequence = command.clientSequence;
     this.guard.remember(session.recentParty, command.commandId, true);
-    const outcome = apply(session);
-    if (outcome !== null) {
-      session.recentParty.delete(command.commandId);
-      this.sendRejection(client, meta, outcome);
-      return;
-    }
+    return { session, commandId: command.commandId, clientSequence: command.clientSequence };
+  }
+
+  private failPartyCommand(opened: OpenSocialCommand, code: CommandRejectionCode): void {
+    opened.session.recentParty.delete(opened.commandId);
+    this.sendRejection(
+      opened.session.client,
+      { commandId: opened.commandId, clientSequence: opened.clientSequence },
+      code,
+    );
+  }
+
+  private completePartyCommand(): void {
     this.metrics.recordAcceptedCommand();
   }
 
@@ -4593,12 +4982,18 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     // removed session is already gone from the registry, so it cannot receive
     // its own departure.
     const formerParty = this.parties.partyOf(session.playerId);
-    if (formerParty !== undefined) {
-      if (session.transferring) {
-        this.parties.markOffline(session.playerId);
+    if (session.transferring) {
+      // The destination room reports presence again; friends and party
+      // rosters see the player as offline for the gap.
+      this.parties.markOffline(session.playerId);
+      if (formerParty !== undefined) {
         this.parties.refreshMembers(formerParty.memberIds);
-      } else {
-        this.parties.removePlayer(session.playerId);
+      }
+    } else {
+      // Presence also backs friend online state, so it must be dropped even
+      // for players who never joined a party.
+      this.parties.removePlayer(session.playerId);
+      if (formerParty !== undefined) {
         for (const memberId of formerParty.memberIds) {
           if (memberId === session.playerId) {
             continue;
@@ -4623,6 +5018,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     session.view.dispose();
 
     if (!session.transferring) {
+      void this.notifyFriendPresence(session.playerId, false).catch((error: unknown) => {
+        this.options.logger.error(
+          { err: error, roomId: this.roomId, playerId: session.playerId },
+          'failed to notify friends of going offline',
+        );
+      });
       if (player !== undefined) {
         try {
           await saveCharacterCheckpoint(this.options.database, {

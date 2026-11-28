@@ -162,6 +162,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatDraft, setChatDraft] = useState('');
   const [chatChannel, setChatChannel] = useState<'map' | 'party'>('map');
+  const [chatFilter, setChatFilter] = useState<'all' | 'map' | 'party'>('all');
+  const [friendsOpen, setFriendsOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
   const [bagSorted, setBagSorted] = useState(false);
@@ -201,6 +203,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     leaveParty,
     transferPartyLeader,
     kickPartyMember,
+    requestFriend,
+    acceptFriendRequest,
+    declineFriendRequest,
+    removeFriend,
+    refreshFriends,
     toggleSfx,
   } = useWorldSession(containerRef, {
     character,
@@ -358,6 +365,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     setQuestOpen(true);
     setShopOpen(false);
     setBagOpen(false);
+    setFriendsOpen(false);
   };
   const reviveSeconds =
     state.reviveAt === null ? null : Math.max(0, Math.ceil((state.reviveAt - now) / 1_000));
@@ -460,7 +468,32 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     if (state.party === null && chatChannel === 'party') {
       setChatChannel('map');
     }
-  }, [state.party, chatChannel]);
+    if (state.party === null && chatFilter === 'party') {
+      setChatFilter('all');
+    }
+  }, [state.party, chatChannel, chatFilter]);
+
+  // The server pushes snapshots on join and on changes; opening the panel also
+  // asks for one so online state is current after a while in the background.
+  useEffect(() => {
+    if (friendsOpen) {
+      refreshFriends();
+    }
+  }, [friendsOpen, refreshFriends]);
+
+  const friendIds = useMemo(
+    () => new Set(state.friends?.friends.map((friend) => friend.playerId) ?? []),
+    [state.friends],
+  );
+  const onlineFriendCount = state.friends?.friends.filter((friend) => friend.online).length ?? 0;
+  const friendTotal = state.friends?.friends.length ?? 0;
+  const visibleMessages = useMemo(
+    () =>
+      chatFilter === 'all'
+        ? state.messages
+        : state.messages.filter((message) => message.channel === chatFilter),
+    [chatFilter, state.messages],
+  );
 
   useEffect(() => {
     if (nearbyMerchant === null) {
@@ -569,6 +602,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                     // so opening the bag replaces them instead of stacking.
                     setShopOpen(false);
                     setQuestOpen(false);
+                    setFriendsOpen(false);
                   }
                 }}
               >
@@ -600,6 +634,28 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               >
                 任务 J
               </button>
+              <button
+                type="button"
+                className="bag-toggle"
+                data-testid="friend-toggle"
+                aria-expanded={friendsOpen}
+                onClick={() => {
+                  const next = !friendsOpen;
+                  setFriendsOpen(next);
+                  if (next) {
+                    setShopOpen(false);
+                    setQuestOpen(false);
+                    setBagOpen(false);
+                  }
+                }}
+              >
+                好友
+                {state.friends !== null && state.friends.incoming.length > 0 ? (
+                  <em className="friend-badge" data-testid="friend-badge">
+                    {state.friends.incoming.length}
+                  </em>
+                ) : null}
+              </button>
               {nearbyMerchant !== null ? (
                 <button
                   type="button"
@@ -613,6 +669,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                     if (next) {
                       setBagOpen(false);
                       setQuestOpen(false);
+                      setFriendsOpen(false);
                     }
                   }}
                 >
@@ -1009,6 +1066,27 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           邀请
                         </button>
                       ) : null}
+                      {player.connected && !friendIds.has(player.playerId) ? (
+                        state.friends?.outgoing.some(
+                          (request) => request.playerId === player.playerId,
+                        ) === true ? (
+                          <button type="button" className="player-friend" disabled>
+                            已申请
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="player-friend"
+                            data-testid="player-add-friend"
+                            data-player-id={player.playerId}
+                            onClick={() => {
+                              requestFriend(player.playerId);
+                            }}
+                          >
+                            加好友
+                          </button>
+                        )
+                      ) : null}
                     </span>
                   ) : null}
                 </li>
@@ -1347,15 +1425,40 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             ))}
           </ul>
         ) : null}
+        <div className="chat-filters" data-testid="chat-filters" aria-label="筛选聊天频道">
+          {(
+            [
+              ['all', '全部'],
+              ['map', '附近'],
+              ['party', '队伍'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              data-testid={`chat-filter-${key}`}
+              aria-pressed={chatFilter === key}
+              className={chatFilter === key ? 'active' : ''}
+              disabled={key === 'party' && state.party === null}
+              onClick={() => {
+                setChatFilter(key);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <ul data-testid="chat-log">
-          {state.messages.length === 0 ? (
+          {visibleMessages.length === 0 ? (
             <li className="empty">
-              {chatChannel === 'party'
+              {chatFilter === 'party'
                 ? '队伍消息只有队伍成员能看到'
-                : '同地图的玩家都能看到这里的消息'}
+                : chatFilter === 'map'
+                  ? '这里只有同地图频道的消息'
+                  : '同地图的玩家都能看到这里的消息'}
             </li>
           ) : null}
-          {state.messages.map((message) => (
+          {visibleMessages.map((message) => (
             <li
               key={message.messageId}
               data-testid="chat-message"
@@ -1796,6 +1899,146 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             接取后点「前往击杀」或「前往探索」自动寻路（击杀目标会自动战斗）；
             完成后点「回去交付」返回并自动交付。
           </p>
+        </aside>
+      ) : null}
+
+      {friendsOpen ? (
+        <aside className="hud friend-panel" data-testid="friend-panel" aria-label="好友">
+          <div className="panel-heading">
+            <h2>好友</h2>
+            <span data-testid="friend-count">
+              {onlineFriendCount}/{friendTotal} 在线
+            </span>
+            <button
+              type="button"
+              className="panel-close"
+              data-testid="friend-close"
+              onClick={() => {
+                setFriendsOpen(false);
+              }}
+            >
+              关闭
+            </button>
+          </div>
+          {state.friends === null ? (
+            <p className="target-empty">正在同步好友…</p>
+          ) : (
+            <>
+              {state.friends.incoming.length > 0 ? (
+                <section className="friend-section" data-testid="friend-requests">
+                  <h3>好友申请</h3>
+                  <ul>
+                    {state.friends.incoming.map((request) => (
+                      <li
+                        key={request.requestId}
+                        data-testid="friend-request"
+                        data-request-id={request.requestId}
+                        data-name={request.displayName}
+                      >
+                        <span className="friend-name">
+                          {request.displayName}
+                          <em>Lv.{request.level}</em>
+                        </span>
+                        <span className="friend-actions">
+                          <button
+                            type="button"
+                            data-testid="friend-accept"
+                            onClick={() => {
+                              acceptFriendRequest(request.requestId);
+                            }}
+                          >
+                            接受
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="friend-decline"
+                            onClick={() => {
+                              declineFriendRequest(request.requestId);
+                            }}
+                          >
+                            拒绝
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              {state.friends.outgoing.length > 0 ? (
+                <section className="friend-section" data-testid="friend-outgoing">
+                  <h3>已发送</h3>
+                  <ul>
+                    {state.friends.outgoing.map((request) => (
+                      <li
+                        key={request.requestId}
+                        data-testid="friend-outgoing-item"
+                        data-name={request.displayName}
+                      >
+                        <span className="friend-name">{request.displayName}</span>
+                        <span className="friend-meta">等待接受</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              <ul className="friend-list" data-testid="friend-list">
+                {state.friends.friends.length === 0 ? (
+                  <li className="empty">还没有好友，在附近玩家或队伍里添加</li>
+                ) : null}
+                {state.friends.friends.map((friend) => (
+                  <li
+                    key={friend.playerId}
+                    data-testid="friend"
+                    data-player-id={friend.playerId}
+                    data-name={friend.displayName}
+                    data-online={friend.online ? 'true' : 'false'}
+                  >
+                    <span
+                      className={`friend-dot${friend.online ? ' online' : ''}`}
+                      aria-hidden="true"
+                    />
+                    <span className="friend-name">
+                      {friend.displayName}
+                      {friend.online ? null : <em>离线</em>}
+                    </span>
+                    <span className="friend-meta">Lv.{friend.level}</span>
+                    <span className="friend-actions">
+                      {friend.online ? (
+                        <button
+                          type="button"
+                          data-testid="friend-invite"
+                          data-player-id={friend.playerId}
+                          disabled={
+                            state.party !== null &&
+                            (state.party.members.some(
+                              (member) => member.playerId === friend.playerId,
+                            ) ||
+                              state.party.members.length >= state.party.maxMembers)
+                          }
+                          onClick={() => {
+                            inviteToParty(friend.playerId);
+                          }}
+                        >
+                          邀请
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        data-testid="friend-remove"
+                        data-player-id={friend.playerId}
+                        onClick={() => {
+                          removeFriend(friend.playerId);
+                        }}
+                      >
+                        删除
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="shop-hint">好友可以跨地图邀请组队；在线状态跟随当前区服。</p>
+            </>
+          )}
         </aside>
       ) : null}
 

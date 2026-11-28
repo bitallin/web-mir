@@ -4,6 +4,8 @@ import type {
   CharacterProgress,
   ChatChannel,
   ChatMessage,
+  FriendPresence,
+  FriendSnapshot,
   CombatEvent,
   CombatProfile,
   CombatTargetChanged,
@@ -98,6 +100,8 @@ export type SessionState = {
   party: PartyView | null;
   /** An unanswered party invitation addressed to the local player. */
   partyInvite: PartyInviteView | null;
+  /** Server-owned friend list with merged online presence (ADR-045). */
+  friends: FriendSnapshot | null;
   levelUpNotice: LevelUp | null;
   /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
   notices: SessionNotice[];
@@ -169,6 +173,7 @@ function initialState(character: CharacterView): SessionState {
     questRequest: null,
     party: null,
     partyInvite: null,
+    friends: null,
     levelUpNotice: null,
     notices: [],
     autoAttack: null,
@@ -373,6 +378,7 @@ class WorldSession {
   private quests: QuestView[] = [];
   private party: PartyView | null = null;
   private partyInvite: PartyInviteView | null = null;
+  private friends: FriendSnapshot | null = null;
   private partyInviteTimer: number | null = null;
   private levelBannerTimer: number | null = null;
   private systemMessageSequence = 0;
@@ -767,6 +773,18 @@ class WorldSession {
             this.clearPartyInvite();
           }, remaining);
           this.updateState((previous) => ({ ...previous, partyInvite: invite }));
+        },
+        onFriendSnapshot: (snapshot) => {
+          this.friends = snapshot;
+          this.updateState((previous) => ({ ...previous, friends: snapshot }));
+        },
+        onFriendPresence: (presence) => {
+          this.applyFriendPresence(presence);
+        },
+        onFriendRefresh: () => {
+          // The server can only tell us that something changed; the snapshot
+          // carries the merged presence and request state.
+          this.client?.sendFriendList();
         },
         onAssetResult: (result) => {
           this.inventory = result.snapshot;
@@ -1254,6 +1272,56 @@ class WorldSession {
     return sent;
   }
 
+  requestFriend(targetPlayerId: string): boolean {
+    return this.sendFriendIntent(this.client?.sendFriendRequest(targetPlayerId) ?? false);
+  }
+
+  acceptFriendRequest(requestId: string): boolean {
+    return this.sendFriendIntent(this.client?.sendFriendAccept(requestId) ?? false);
+  }
+
+  declineFriendRequest(requestId: string): boolean {
+    return this.sendFriendIntent(this.client?.sendFriendDecline(requestId) ?? false);
+  }
+
+  removeFriend(friendPlayerId: string): boolean {
+    return this.sendFriendIntent(this.client?.sendFriendRemove(friendPlayerId) ?? false);
+  }
+
+  /** Re-opens the panel with fresh online state; also used after a refresh. */
+  refreshFriends(): boolean {
+    return this.client?.sendFriendList() ?? false;
+  }
+
+  private sendFriendIntent(sent: boolean): boolean {
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  private applyFriendPresence(presence: FriendPresence): void {
+    const current = this.friends;
+    if (current === null) {
+      return;
+    }
+    const friends = current.friends.map((friend) =>
+      friend.playerId === presence.playerId
+        ? {
+            ...friend,
+            online: presence.online,
+            ...(presence.level === undefined ? {} : { level: presence.level }),
+            ...(presence.classId === undefined ? {} : { classId: presence.classId }),
+            ...(presence.alive === undefined ? {} : { alive: presence.alive }),
+          }
+        : friend,
+    );
+    const next = { ...current, friends };
+    this.friends = next;
+    this.updateState((previous) => ({ ...previous, friends: next }));
+  }
+
   private clearPartyInvite(): void {
     if (this.partyInviteTimer !== null) {
       window.clearTimeout(this.partyInviteTimer);
@@ -1492,6 +1560,7 @@ class WorldSession {
       questRequest: null,
       party: null,
       partyInvite: null,
+      friends: null,
       levelUpNotice: null,
       notices: [],
       autoAttack: null,
@@ -1570,6 +1639,12 @@ class WorldSession {
       leaveParty: () => this.leaveParty(),
       transferPartyLeader: (playerId) => this.transferPartyLeader(playerId),
       kickPartyMember: (playerId) => this.kickPartyMember(playerId),
+      requestFriend: (playerId) => this.requestFriend(playerId),
+      acceptFriendRequest: (requestId) => this.acceptFriendRequest(requestId),
+      declineFriendRequest: (requestId) => this.declineFriendRequest(requestId),
+      removeFriend: (playerId) => this.removeFriend(playerId),
+      refreshFriends: () => this.refreshFriends(),
+      friendState: () => this.friends,
       partyState: () => this.party,
       partyInviteState: () => this.partyInvite,
       lootDrops: () => this.latestLoot,
@@ -1615,6 +1690,11 @@ export type WorldSessionControls = {
   leaveParty: () => boolean;
   transferPartyLeader: (targetPlayerId: string) => boolean;
   kickPartyMember: (targetPlayerId: string) => boolean;
+  requestFriend: (targetPlayerId: string) => boolean;
+  acceptFriendRequest: (requestId: string) => boolean;
+  declineFriendRequest: (requestId: string) => boolean;
+  removeFriend: (friendPlayerId: string) => boolean;
+  refreshFriends: () => boolean;
   toggleSfx: () => void;
 };
 
@@ -1739,6 +1819,23 @@ export function useWorldSession(
     (targetPlayerId: string) => sessionRef.current?.kickPartyMember(targetPlayerId) ?? false,
     [],
   );
+  const requestFriend = useCallback(
+    (targetPlayerId: string) => sessionRef.current?.requestFriend(targetPlayerId) ?? false,
+    [],
+  );
+  const acceptFriendRequest = useCallback(
+    (requestId: string) => sessionRef.current?.acceptFriendRequest(requestId) ?? false,
+    [],
+  );
+  const declineFriendRequest = useCallback(
+    (requestId: string) => sessionRef.current?.declineFriendRequest(requestId) ?? false,
+    [],
+  );
+  const removeFriend = useCallback(
+    (friendPlayerId: string) => sessionRef.current?.removeFriend(friendPlayerId) ?? false,
+    [],
+  );
+  const refreshFriends = useCallback(() => sessionRef.current?.refreshFriends() ?? false, []);
   const toggleSfx = useCallback(() => {
     sessionRef.current?.toggleSfx();
   }, []);
@@ -1769,6 +1866,11 @@ export function useWorldSession(
     leaveParty,
     transferPartyLeader,
     kickPartyMember,
+    requestFriend,
+    acceptFriendRequest,
+    declineFriendRequest,
+    removeFriend,
+    refreshFriends,
     toggleSfx,
   };
 }

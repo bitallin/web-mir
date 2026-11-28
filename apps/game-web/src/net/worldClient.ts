@@ -12,6 +12,9 @@ import {
   combatTargetChangedSchema,
   commandAckSchema,
   commandRejectedSchema,
+  friendPresenceSchema,
+  friendRefreshSchema,
+  friendSnapshotSchema,
   inventorySnapshotSchema,
   levelUpSchema,
   lootClaimedSchema,
@@ -36,6 +39,9 @@ import {
   type CommandAck,
   type CommandRejected,
   type EquipmentSlot,
+  type FriendPresence,
+  type FriendRefresh,
+  type FriendSnapshot,
   type InventorySnapshot,
   type LevelUp,
   type LootClaimed,
@@ -142,6 +148,9 @@ export type WorldClientCallbacks = {
   onQuestNavigation: (navigation: QuestNavigation) => void;
   onPartySnapshot: (snapshot: PartySnapshot) => void;
   onPartyInvite: (invite: PartyInviteView) => void;
+  onFriendSnapshot: (snapshot: FriendSnapshot) => void;
+  onFriendPresence: (presence: FriendPresence) => void;
+  onFriendRefresh: (refresh: FriendRefresh) => void;
   onAssetResult: (result: AssetResult) => void;
   onProgress: (progress: CharacterProgress) => void;
   onLevelUp: (levelUp: LevelUp) => void;
@@ -499,30 +508,50 @@ export class WorldClient {
   }
 
   sendPartyInvite(targetPlayerId: string): boolean {
-    return this.sendPartyCommand(CLIENT_MESSAGES.partyInvite, { targetPlayerId });
+    return this.sendSocialCommand(CLIENT_MESSAGES.partyInvite, { targetPlayerId });
   }
 
   sendPartyAccept(inviteId: string): boolean {
-    return this.sendPartyCommand(CLIENT_MESSAGES.partyAccept, { inviteId });
+    return this.sendSocialCommand(CLIENT_MESSAGES.partyAccept, { inviteId });
   }
 
   sendPartyDecline(inviteId: string): boolean {
-    return this.sendPartyCommand(CLIENT_MESSAGES.partyDecline, { inviteId });
+    return this.sendSocialCommand(CLIENT_MESSAGES.partyDecline, { inviteId });
   }
 
   sendPartyLeave(): boolean {
-    return this.sendPartyCommand(CLIENT_MESSAGES.partyLeave, {});
+    return this.sendSocialCommand(CLIENT_MESSAGES.partyLeave, {});
   }
 
   sendPartyTransferLeader(targetPlayerId: string): boolean {
-    return this.sendPartyCommand(CLIENT_MESSAGES.partyTransferLeader, { targetPlayerId });
+    return this.sendSocialCommand(CLIENT_MESSAGES.partyTransferLeader, { targetPlayerId });
   }
 
   sendPartyKick(targetPlayerId: string): boolean {
-    return this.sendPartyCommand(CLIENT_MESSAGES.partyKick, { targetPlayerId });
+    return this.sendSocialCommand(CLIENT_MESSAGES.partyKick, { targetPlayerId });
   }
 
-  private sendPartyCommand(kind: string, fields: Record<string, string>): boolean {
+  sendFriendRequest(targetPlayerId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.friendRequest, { targetPlayerId });
+  }
+
+  sendFriendAccept(requestId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.friendAccept, { requestId });
+  }
+
+  sendFriendDecline(requestId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.friendDecline, { requestId });
+  }
+
+  sendFriendRemove(friendPlayerId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.friendRemove, { friendPlayerId });
+  }
+
+  sendFriendList(): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.friendList, {});
+  }
+
+  private sendSocialCommand(kind: string, fields: Record<string, string>): boolean {
     const room = this.room;
     if (room === null || this.stopped || this.transferring) {
       return false;
@@ -798,6 +827,33 @@ export class WorldClient {
         const parsed = partyInviteViewSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onPartyInvite(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.friendSnapshot, (payload: unknown) => {
+        const parsed = friendSnapshotSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onFriendSnapshot(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.friendPresence, (payload: unknown) => {
+        const parsed = friendPresenceSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onFriendPresence(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.friendRefresh, (payload: unknown) => {
+        const parsed = friendRefreshSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onFriendRefresh(parsed.data);
         }
       }),
     );

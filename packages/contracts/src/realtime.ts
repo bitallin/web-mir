@@ -37,6 +37,11 @@ export const CLIENT_MESSAGES = {
   partyLeave: 'party.leave',
   partyTransferLeader: 'party.transfer',
   partyKick: 'party.kick',
+  friendRequest: 'friend.request',
+  friendAccept: 'friend.accept',
+  friendDecline: 'friend.decline',
+  friendRemove: 'friend.remove',
+  friendList: 'friend.list',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -60,6 +65,9 @@ export const SERVER_MESSAGES = {
   questNavigation: 'quest.navigation',
   partySnapshot: 'party.snapshot',
   partyInvite: 'party.invite',
+  friendSnapshot: 'friend.snapshot',
+  friendPresence: 'friend.presence',
+  friendRefresh: 'friend.refresh',
 } as const;
 
 /**
@@ -263,6 +271,12 @@ export const COMMAND_REJECTION_CODES = [
   'PARTY_NOT_LEADER',
   'PARTY_TARGET_NOT_MEMBER',
   'PARTY_TARGET_SELF',
+  'FRIEND_SELF',
+  'FRIEND_TARGET_NOT_FOUND',
+  'FRIEND_ALREADY_FRIENDS',
+  'FRIEND_REQUEST_PENDING',
+  'FRIEND_REQUEST_NOT_FOUND',
+  'FRIEND_NOT_FRIENDS',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -315,6 +329,12 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   PARTY_NOT_LEADER: '只有队长可以执行该操作',
   PARTY_TARGET_NOT_MEMBER: '对方不在你的队伍中',
   PARTY_TARGET_SELF: '不能对自己执行该操作',
+  FRIEND_SELF: '不能添加自己为好友',
+  FRIEND_TARGET_NOT_FOUND: '找不到该玩家',
+  FRIEND_ALREADY_FRIENDS: '对方已经是你的好友',
+  FRIEND_REQUEST_PENDING: '好友申请已经发送过了',
+  FRIEND_REQUEST_NOT_FOUND: '好友申请不存在或已处理',
+  FRIEND_NOT_FRIENDS: '对方不是你的好友',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 
