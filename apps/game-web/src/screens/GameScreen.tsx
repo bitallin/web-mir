@@ -160,6 +160,12 @@ function dailyResetLabel(quest: QuestView): string | null {
 
 export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatLogRef = useRef<HTMLUListElement>(null);
+  /** Follow new lines unless the player scrolled up to read history. */
+  const chatPinnedRef = useRef(true);
+  const chatHistoryRef = useRef<string[]>([]);
+  const chatHistoryIndexRef = useRef(-1);
   const [chatDraft, setChatDraft] = useState('');
   const [chatFilter, setChatFilter] = useState<'all' | 'map' | 'party' | 'whisper'>('all');
   const [chatSendChannel, setChatSendChannel] = useState<'map' | 'party' | 'whisper'>('map');
@@ -167,6 +173,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     playerId: string;
     displayName: string;
   } | null>(null);
+  const [whisperUnread, setWhisperUnread] = useState(false);
+  const seenWhisperIdRef = useRef<string | null>(null);
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
@@ -458,17 +466,44 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   );
 
   const submitChat = useCallback(() => {
-    const draft = chatDraft;
-    if (draft.trim().length === 0) {
+    const draft = chatDraft.trim();
+    if (draft.length === 0) {
       return;
     }
     if (chatSendChannel === 'whisper' && whisperTarget === null) {
       return;
     }
-    if (sendChat(draft, chatSendChannel, whisperTarget?.playerId)) {
-      setChatDraft('');
+    if (!sendChat(draft, chatSendChannel, whisperTarget?.playerId)) {
+      return;
     }
+    // Keep a shell-like history for ArrowUp/ArrowDown; consecutive repeats
+    // collapse so recalling recent lines stays useful.
+    const history = chatHistoryRef.current;
+    if (history[history.length - 1] !== draft) {
+      history.push(draft);
+      if (history.length > 20) {
+        history.shift();
+      }
+    }
+    chatHistoryIndexRef.current = -1;
+    setChatDraft('');
   }, [chatDraft, chatSendChannel, whisperTarget, sendChat]);
+
+  const startWhisperTo = useCallback((playerId: string, displayName: string) => {
+    setWhisperTarget({ playerId, displayName });
+    setChatSendChannel('whisper');
+    setChatFilter('whisper');
+    setChatOpen(true);
+    window.requestAnimationFrame(() => {
+      chatInputRef.current?.focus();
+    });
+  }, []);
+
+  const endWhisper = useCallback(() => {
+    setWhisperTarget(null);
+    setChatSendChannel((channel) => (channel === 'whisper' ? 'map' : channel));
+    setChatFilter((filter) => (filter === 'whisper' ? 'all' : filter));
+  }, []);
 
   // Leaving or losing the party must not leave the view or composer on a dead
   // channel; the log itself defaults to showing every channel.
@@ -513,6 +548,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     () => new Set(state.friends?.friends.map((friend) => friend.playerId) ?? []),
     [state.friends],
   );
+  const onlineFriendIds = useMemo(
+    () =>
+      new Set(
+        state.friends?.friends.filter((friend) => friend.online).map((friend) => friend.playerId) ??
+          [],
+      ),
+    [state.friends],
+  );
   const onlineFriendCount = state.friends?.friends.filter((friend) => friend.online).length ?? 0;
   const friendTotal = state.friends?.friends.length ?? 0;
   // The log shows every channel by default; the header tabs only narrow what
@@ -524,6 +567,42 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         : state.messages.filter((message) => message.channel === chatFilter),
     [chatFilter, state.messages],
   );
+
+  // Follow the newest line unless the player scrolled up to read history.
+  useEffect(() => {
+    if (!chatOpen) {
+      return;
+    }
+    const log = chatLogRef.current;
+    if (log !== null && chatPinnedRef.current) {
+      log.scrollTop = log.scrollHeight;
+    }
+  }, [visibleMessages, chatOpen]);
+
+  // A whisper hidden by the current tab (or a collapsed panel) must still be
+  // discoverable; the tab gets a dot until it is actually visible.
+  const lastMessage = state.messages[state.messages.length - 1];
+  useEffect(() => {
+    if (lastMessage === undefined) {
+      return;
+    }
+    if (lastMessage.channel !== 'whisper' || lastMessage.playerId === state.selfId) {
+      return;
+    }
+    if (seenWhisperIdRef.current === lastMessage.messageId) {
+      return;
+    }
+    seenWhisperIdRef.current = lastMessage.messageId;
+    if (!chatOpen || (chatFilter !== 'all' && chatFilter !== 'whisper')) {
+      setWhisperUnread(true);
+    }
+  }, [lastMessage, chatOpen, chatFilter, state.selfId]);
+
+  useEffect(() => {
+    if (chatOpen && (chatFilter === 'all' || chatFilter === 'whisper')) {
+      setWhisperUnread(false);
+    }
+  }, [chatOpen, chatFilter, state.messages]);
 
   useEffect(() => {
     if (nearbyMerchant === null) {
@@ -1423,10 +1502,18 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   key === 'party' && state.party === null ? '加入队伍后可查看队伍消息' : undefined
                 }
                 onClick={() => {
+                  chatPinnedRef.current = true;
                   setChatFilter(key);
                 }}
               >
                 {label}
+                {key === 'whisper' && whisperUnread ? (
+                  <span
+                    className="chat-unread"
+                    data-testid="chat-unread-whisper"
+                    aria-label="有新的私聊"
+                  />
+                ) : null}
               </button>
             ))}
           </div>
@@ -1459,7 +1546,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             ))}
           </ul>
         ) : null}
-        <ul data-testid="chat-log">
+        <ul
+          data-testid="chat-log"
+          ref={chatLogRef}
+          onScroll={(event) => {
+            const log = event.currentTarget;
+            chatPinnedRef.current = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+          }}
+        >
           {visibleMessages.length === 0 ? (
             <li className="empty">
               {chatFilter === 'party'
@@ -1488,7 +1582,22 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                     : '私聊'}
                 </span>
               ) : null}
-              <span className="chat-author">{message.displayName}</span>
+              {message.playerId !== state.selfId && onlineFriendIds.has(message.playerId) ? (
+                <button
+                  type="button"
+                  className="chat-author chat-author-action"
+                  data-testid="chat-author-whisper"
+                  data-player-id={message.playerId}
+                  title={`点击私聊 ${message.displayName}`}
+                  onClick={() => {
+                    startWhisperTo(message.playerId, message.displayName);
+                  }}
+                >
+                  {message.displayName}
+                </button>
+              ) : (
+                <span className="chat-author">{message.displayName}</span>
+              )}
               <span className="chat-text">{message.message}</span>
             </li>
           ))}
@@ -1524,8 +1633,20 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               {whisperTarget === null ? '私聊（未选择）' : `私聊·${whisperTarget.displayName}`}
             </option>
           </select>
+          {whisperTarget !== null ? (
+            <button
+              type="button"
+              className="chat-whisper-close"
+              data-testid="chat-whisper-close"
+              title="结束私聊"
+              onClick={endWhisper}
+            >
+              ×
+            </button>
+          ) : null}
           <input
             type="text"
+            ref={chatInputRef}
             data-testid="chat-input"
             placeholder={
               chatSendChannel === 'party'
@@ -1538,6 +1659,33 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             value={chatDraft}
             onChange={(event) => {
               setChatDraft(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowUp') {
+                const history = chatHistoryRef.current;
+                if (history.length === 0) {
+                  return;
+                }
+                event.preventDefault();
+                chatHistoryIndexRef.current =
+                  chatHistoryIndexRef.current < 0
+                    ? history.length - 1
+                    : Math.max(0, chatHistoryIndexRef.current - 1);
+                setChatDraft(history[chatHistoryIndexRef.current] ?? '');
+              } else if (event.key === 'ArrowDown') {
+                if (chatHistoryIndexRef.current < 0) {
+                  return;
+                }
+                event.preventDefault();
+                const next = chatHistoryIndexRef.current + 1;
+                if (next >= chatHistoryRef.current.length) {
+                  chatHistoryIndexRef.current = -1;
+                  setChatDraft('');
+                } else {
+                  chatHistoryIndexRef.current = next;
+                  setChatDraft(chatHistoryRef.current[next] ?? '');
+                }
+              }
             }}
           />
           <button type="submit" data-testid="chat-send">
@@ -2062,13 +2210,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                           data-player-id={friend.playerId}
                           className={whisperTarget?.playerId === friend.playerId ? 'active' : ''}
                           onClick={() => {
-                            setWhisperTarget({
-                              playerId: friend.playerId,
-                              displayName: friend.displayName,
-                            });
-                            setChatSendChannel('whisper');
-                            setChatFilter('whisper');
-                            setChatOpen(true);
+                            startWhisperTo(friend.playerId, friend.displayName);
                           }}
                         >
                           私聊

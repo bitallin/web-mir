@@ -1529,6 +1529,9 @@ class WorldSession {
       window.clearTimeout(timer);
     }
     this.noticeTimers.clear();
+    // Chat history, the friend snapshot and the party roster are conversation
+    // state, not map state: a map transfer must keep them so scrollback and an
+    // open whisper survive (TD-CLI-04). Map entities, combat and quests reset.
     this.updateState((previous) => ({
       ...previous,
       status: 'connecting',
@@ -1537,8 +1540,6 @@ class WorldSession {
       players: [],
       monsters: [],
       loot: [],
-      messages: [],
-      systemMessages: [],
       roomPlayerCount: 0,
       combatProfile: null,
       combatLog: [],
@@ -1558,9 +1559,7 @@ class WorldSession {
               serverTime: Date.now(),
             },
       questRequest: null,
-      party: null,
       partyInvite: null,
-      friends: null,
       levelUpNotice: null,
       notices: [],
       autoAttack: null,

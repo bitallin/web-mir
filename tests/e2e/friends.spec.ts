@@ -170,7 +170,14 @@ test('players add a friend, invite them to a party, and filter chat channels', a
     .filter({ hasText: 'whisper hello from alice' });
   await expect(bobWhisper).toHaveCount(1, { timeout: 10_000 });
   await expect(bobWhisper).toContainText('私聊');
-  await friendRow(bob.page, alice.name).getByTestId('friend-whisper').click();
+  // Clicking the sender's name starts the reply directly, without reopening
+  // the friend panel.
+  await bobWhisper.getByTestId('chat-author-whisper').click();
+  await expect(bob.page.getByTestId('chat-send-channel')).toHaveValue('whisper');
+  await expect(bob.page.getByTestId('chat-input')).toHaveAttribute(
+    'placeholder',
+    `发送给 ${alice.name}…`,
+  );
   await bob.page.getByTestId('chat-input').fill('whisper reply from bob');
   await bob.page.getByTestId('chat-send').click();
 
@@ -187,5 +194,55 @@ test('players add a friend, invite them to a party, and filter chat channels', a
       .locator('[data-testid="chat-message"][data-channel="whisper"]')
       .filter({ hasText: 'whisper reply from bob' }),
   ).toHaveCount(0);
+
+  // Scrollback and the open whisper survive a map change. Alice walks through
+  // the town portal; the earlier map, party and whisper lines must remain.
+  await alice.page.getByTestId('chat-filter-all').click();
+  await alice.page.evaluate(() => window.__webLegendDebug?.moveToTile(38, 15));
+  await expect
+    .poll(() => alice.page.evaluate(() => window.__webLegendDebug?.currentMapId() ?? ''), {
+      timeout: 20_000,
+    })
+    .toBe('starter_wilds');
+  await expect(alice.page.getByTestId('connection-status')).toHaveAttribute(
+    'data-status',
+    'connected',
+    { timeout: 20_000 },
+  );
+  await expect(alice.page.getByTestId('chat-filter-all')).toHaveAttribute('aria-selected', 'true');
+  const aliceLog = alice.page.locator('[data-testid="chat-message"]');
+  await expect(aliceLog.filter({ hasText: 'map hello from alice' })).toHaveCount(1);
+  await expect(aliceLog.filter({ hasText: 'party hello from alice' })).toHaveCount(1);
+  const oldWhisper = alice.page
+    .locator('[data-testid="chat-message"][data-channel="whisper"]')
+    .filter({ hasText: 'whisper reply from bob' });
+  await expect(oldWhisper).toHaveCount(1);
+
+  // Reply from an old whisper line after the transfer: Alice is in the wilds,
+  // Bob is still in town, and the name click still targets him.
+  await oldWhisper.getByTestId('chat-author-whisper').click();
+  await expect(alice.page.getByTestId('chat-send-channel')).toHaveValue('whisper');
+  await alice.page.getByTestId('chat-input').fill('after transfer from alice');
+  await alice.page.getByTestId('chat-send').click();
+  // Bob is looking at the map tab, so the whisper is surfaced on the tab
+  // instead of silently disappearing behind the filter.
+  await expect(bob.page.getByTestId('chat-unread-whisper')).toHaveCount(1, {
+    timeout: 10_000,
+  });
+  await bob.page.getByTestId('chat-filter-whisper').click();
+  await expect(bob.page.getByTestId('chat-unread-whisper')).toHaveCount(0);
+  await expect(
+    bob.page
+      .locator('[data-testid="chat-message"][data-channel="whisper"]')
+      .filter({ hasText: 'after transfer from alice' }),
+  ).toHaveCount(1, { timeout: 10_000 });
+
+  // Shell-style input history and an explicit way to end the conversation.
+  await alice.page.getByTestId('chat-input').press('ArrowUp');
+  await expect(alice.page.getByTestId('chat-input')).toHaveValue('after transfer from alice');
+  await alice.page.getByTestId('chat-input').press('ArrowDown');
+  await expect(alice.page.getByTestId('chat-input')).toHaveValue('');
+  await alice.page.getByTestId('chat-whisper-close').click();
+  await expect(alice.page.getByTestId('chat-send-channel')).toHaveValue('map');
   await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-whisper.png') });
 });
