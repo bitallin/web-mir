@@ -15,6 +15,7 @@ import {
   friendPresenceSchema,
   friendRefreshSchema,
   friendSnapshotSchema,
+  guildDirectorySchema,
   guildInviteViewSchema,
   guildPresenceSchema,
   guildRefreshSchema,
@@ -46,6 +47,7 @@ import {
   type FriendPresence,
   type FriendRefresh,
   type FriendSnapshot,
+  type GuildDirectory,
   type GuildInviteView,
   type GuildPresence,
   type GuildRefresh,
@@ -163,6 +165,7 @@ export type WorldClientCallbacks = {
   onGuildInvite: (invite: GuildInviteView) => void;
   onGuildPresence: (presence: GuildPresence) => void;
   onGuildRefresh: (refresh: GuildRefresh) => void;
+  onGuildDirectory: (directory: GuildDirectory) => void;
   onAssetResult: (result: AssetResult) => void;
   onProgress: (progress: CharacterProgress) => void;
   onLevelUp: (levelUp: LevelUp) => void;
@@ -595,6 +598,22 @@ export class WorldClient {
     return this.sendSocialCommand(CLIENT_MESSAGES.guildList, {});
   }
 
+  sendGuildDirectory(): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildDirectory, {});
+  }
+
+  sendGuildApply(guildId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildApply, { guildId });
+  }
+
+  sendGuildApplicationAccept(applicationId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildApplicationAccept, { applicationId });
+  }
+
+  sendGuildApplicationDecline(applicationId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildApplicationDecline, { applicationId });
+  }
+
   private sendSocialCommand(kind: string, fields: Record<string, string>): boolean {
     const room = this.room;
     if (room === null || this.stopped || this.transferring) {
@@ -936,6 +955,15 @@ export class WorldClient {
         const parsed = guildRefreshSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onGuildRefresh(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.guildDirectory, (payload: unknown) => {
+        const parsed = guildDirectorySchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onGuildDirectory(parsed.data);
         }
       }),
     );

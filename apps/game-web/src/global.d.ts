@@ -2,7 +2,9 @@ import type {
   EquipmentSlot,
   InventorySnapshot,
   FriendSnapshot,
+  GuildApplicationView,
   GuildInviteView,
+  GuildSummaryView,
   GuildView,
   PartyInviteView,
   PartyView,
@@ -95,6 +97,11 @@ declare global {
       friendState: () => FriendSnapshot | null;
       guildState: () => GuildView | null;
       guildInviteState: () => GuildInviteView | null;
+      guildDirectoryState: () => GuildSummaryView[] | null;
+      guildApplicationsState: () => GuildApplicationView[];
+      applyToGuild: (guildId: string) => boolean;
+      acceptGuildApplication: (applicationId: string) => boolean;
+      declineGuildApplication: (applicationId: string) => boolean;
       createGuild: (name: string) => boolean;
       inviteToGuild: (playerId: string) => boolean;
       acceptGuildInvite: () => boolean;

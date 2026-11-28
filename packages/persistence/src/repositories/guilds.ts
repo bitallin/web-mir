@@ -1,7 +1,15 @@
-import { and, asc, count, eq, ne } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ne, sql } from 'drizzle-orm';
 
 import type { DbExecutor } from '../client';
-import { characters, guildMembers, guilds, type Guild, type GuildRoleId } from '../schema/index';
+import {
+  characters,
+  guildApplications,
+  guildMembers,
+  guilds,
+  type Guild,
+  type GuildApplication,
+  type GuildRoleId,
+} from '../schema/index';
 
 export type GuildMemberProfile = {
   characterId: string;
@@ -182,4 +190,161 @@ export async function deleteGuildById(executor: DbExecutor, guildId: string): Pr
     .where(eq(guilds.id, guildId))
     .returning({ id: guilds.id });
   return rows.length > 0;
+}
+
+export type GuildApplicationProfile = {
+  applicationId: string;
+  characterId: string;
+  name: string;
+  classId: string;
+  level: number;
+  createdAt: Date;
+};
+
+export type GuildSummary = {
+  guildId: string;
+  name: string;
+  leaderName: string | null;
+  memberCount: number;
+  createdAt: Date;
+};
+
+export async function insertGuildApplication(
+  executor: DbExecutor,
+  input: { guildId: string; characterId: string; createdAt: Date },
+): Promise<GuildApplication | undefined> {
+  const [row] = await executor
+    .insert(guildApplications)
+    .values(input)
+    .onConflictDoNothing({
+      target: [guildApplications.guildId, guildApplications.characterId],
+    })
+    .returning();
+  return row;
+}
+
+export async function findGuildApplication(
+  executor: DbExecutor,
+  guildId: string,
+  characterId: string,
+): Promise<GuildApplication | undefined> {
+  const [row] = await executor
+    .select()
+    .from(guildApplications)
+    .where(
+      and(eq(guildApplications.guildId, guildId), eq(guildApplications.characterId, characterId)),
+    )
+    .limit(1);
+  return row;
+}
+
+export async function findGuildApplicationById(
+  executor: DbExecutor,
+  applicationId: string,
+): Promise<GuildApplication | undefined> {
+  const [row] = await executor
+    .select()
+    .from(guildApplications)
+    .where(eq(guildApplications.id, applicationId))
+    .limit(1);
+  return row;
+}
+
+/** Leader-facing list; capped by the caller's wire limit. */
+export async function listGuildApplications(
+  executor: DbExecutor,
+  guildId: string,
+  limit: number,
+): Promise<GuildApplicationProfile[]> {
+  return executor
+    .select({
+      applicationId: guildApplications.id,
+      characterId: guildApplications.characterId,
+      name: characters.name,
+      classId: characters.classId,
+      level: characters.level,
+      createdAt: guildApplications.createdAt,
+    })
+    .from(guildApplications)
+    .innerJoin(characters, eq(characters.id, guildApplications.characterId))
+    .where(eq(guildApplications.guildId, guildId))
+    .orderBy(asc(guildApplications.createdAt), asc(guildApplications.id))
+    .limit(limit);
+}
+
+/** Guild ids this character has applied to; used to mark the directory. */
+export async function listGuildApplicationGuildIds(
+  executor: DbExecutor,
+  characterId: string,
+): Promise<string[]> {
+  const rows = await executor
+    .select({ guildId: guildApplications.guildId })
+    .from(guildApplications)
+    .where(eq(guildApplications.characterId, characterId));
+  return rows.map((row) => row.guildId);
+}
+
+export async function deleteGuildApplication(
+  executor: DbExecutor,
+  applicationId: string,
+): Promise<boolean> {
+  const rows = await executor
+    .delete(guildApplications)
+    .where(eq(guildApplications.id, applicationId))
+    .returning({ id: guildApplications.id });
+  return rows.length > 0;
+}
+
+/** Accepting one guild or joining elsewhere clears every other application. */
+export async function deleteGuildApplicationsForCharacter(
+  executor: DbExecutor,
+  characterId: string,
+): Promise<number> {
+  const rows = await executor
+    .delete(guildApplications)
+    .where(eq(guildApplications.characterId, characterId))
+    .returning({ id: guildApplications.id });
+  return rows.length;
+}
+
+/**
+ * Public realm directory: one aggregate row per guild, ordered by size then
+ * age. The roster and online state are deliberately not exposed (ADR-049).
+ */
+export async function listGuildSummaries(
+  executor: DbExecutor,
+  realmId: string,
+  limit: number,
+): Promise<GuildSummary[]> {
+  const rows = await executor
+    .select({
+      guildId: guilds.id,
+      name: guilds.name,
+      createdAt: guilds.createdAt,
+      memberCount: count(guildMembers.characterId),
+      leaderName: sql<
+        string | null
+      >`max(case when ${guildMembers.role} = 'leader' then ${characters.name} end)`,
+    })
+    .from(guilds)
+    .leftJoin(guildMembers, eq(guildMembers.guildId, guilds.id))
+    .leftJoin(characters, eq(characters.id, guildMembers.characterId))
+    .where(eq(guilds.realmId, realmId))
+    .groupBy(guilds.id, guilds.name, guilds.createdAt)
+    .orderBy(desc(count(guildMembers.characterId)), asc(guilds.createdAt))
+    .limit(limit);
+  return rows.map((row) => ({ ...row, memberCount: Number(row.memberCount) }));
+}
+
+export async function findGuildLeader(
+  executor: DbExecutor,
+  guildId: string,
+): Promise<{ characterId: string; name: string } | undefined> {
+  const [row] = await executor
+    .select({ characterId: guildMembers.characterId, name: characters.name })
+    .from(guildMembers)
+    .innerJoin(characters, eq(characters.id, guildMembers.characterId))
+    .where(and(eq(guildMembers.guildId, guildId), eq(guildMembers.role, 'leader')))
+    .limit(1);
+  return row;
 }

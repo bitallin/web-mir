@@ -235,6 +235,10 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     kickGuildMember,
     disbandGuild,
     refreshGuild,
+    refreshGuildDirectory,
+    applyToGuild,
+    acceptGuildApplication,
+    declineGuildApplication,
     toggleSfx,
   } = useWorldSession(containerRef, {
     character,
@@ -575,8 +579,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   useEffect(() => {
     if (guildOpen) {
       refreshGuild();
+      if (state.guild === null) {
+        refreshGuildDirectory();
+      }
     }
-  }, [guildOpen, refreshGuild]);
+  }, [guildOpen, state.guild, refreshGuild, refreshGuildDirectory]);
 
   const friendIds = useMemo(
     () => new Set(state.friends?.friends.map((friend) => friend.playerId) ?? []),
@@ -2319,6 +2326,50 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   </span>
                 </section>
               ) : null}
+              <section className="friend-section guild-directory" data-testid="guild-directory">
+                <h3>行会列表</h3>
+                {state.guildDirectory === null ? (
+                  <p className="empty">正在同步行会…</p>
+                ) : state.guildDirectory.length === 0 ? (
+                  <p className="empty">本区还没有行会，创建第一个吧</p>
+                ) : (
+                  <ul>
+                    {state.guildDirectory.map((summary) => {
+                      const full = summary.memberCount >= summary.memberLimit;
+                      return (
+                        <li
+                          key={summary.guildId}
+                          className="guild-directory-row"
+                          data-testid="guild-directory-row"
+                          data-guild-id={summary.guildId}
+                          data-name={summary.name}
+                          data-applied={summary.applied ? 'true' : 'false'}
+                          data-full={full ? 'true' : 'false'}
+                        >
+                          <span className="friend-name">
+                            {summary.name}
+                            <em>
+                              {summary.memberCount}/{summary.memberLimit} 人
+                            </em>
+                          </span>
+                          <span className="friend-meta">会长 {summary.leaderName}</span>
+                          <button
+                            type="button"
+                            data-testid="guild-apply"
+                            data-guild-id={summary.guildId}
+                            disabled={summary.applied || full}
+                            onClick={() => {
+                              applyToGuild(summary.guildId);
+                            }}
+                          >
+                            {summary.applied ? '申请中' : full ? '已满' : '申请'}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
             </>
           ) : (
             <>
@@ -2358,6 +2409,52 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   ) : null}
                 </span>
               </div>
+              {state.guildApplications.length > 0 ? (
+                <section
+                  className="friend-section guild-applications"
+                  data-testid="guild-applications"
+                >
+                  <h3>入会申请</h3>
+                  <ul>
+                    {state.guildApplications.map((application) => (
+                      <li
+                        key={application.applicationId}
+                        data-testid="guild-application"
+                        data-application-id={application.applicationId}
+                        data-player-id={application.playerId}
+                        data-name={application.displayName}
+                      >
+                        <span className="friend-name">
+                          {application.displayName}
+                          <em>Lv.{application.level}</em>
+                        </span>
+                        <span className="friend-actions">
+                          <button
+                            type="button"
+                            data-testid="guild-application-accept"
+                            data-application-id={application.applicationId}
+                            onClick={() => {
+                              acceptGuildApplication(application.applicationId);
+                            }}
+                          >
+                            接受
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="guild-application-decline"
+                            data-application-id={application.applicationId}
+                            onClick={() => {
+                              declineGuildApplication(application.applicationId);
+                            }}
+                          >
+                            拒绝
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
               <ul className="friend-list guild-member-list" data-testid="guild-members">
                 {state.guild.members.map((member) => (
                   <li

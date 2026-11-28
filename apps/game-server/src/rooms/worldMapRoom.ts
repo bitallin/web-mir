@@ -40,8 +40,13 @@ import {
   friendRequestCommandSchema,
   friendSnapshotSchema,
   guildAcceptCommandSchema,
+  guildApplicationAcceptCommandSchema,
+  guildApplicationDeclineCommandSchema,
+  guildApplyCommandSchema,
   guildCreateCommandSchema,
   guildDeclineCommandSchema,
+  guildDirectoryCommandSchema,
+  guildDirectorySchema,
   guildDisbandCommandSchema,
   guildInviteCommandSchema,
   guildKickCommandSchema,
@@ -102,6 +107,7 @@ import {
   type Facing,
   type FriendPresence,
   type FriendSnapshot,
+  type GuildApplicationView,
   type GuildMemberView,
   type GuildPresence,
   type GuildView,
@@ -703,6 +709,18 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     });
     this.onMessage<unknown>(CLIENT_MESSAGES.guildList, (client, message) => {
       this.handleGuildList(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildDirectory, (client, message) => {
+      this.handleGuildDirectory(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildApply, (client, message) => {
+      this.handleGuildApply(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildApplicationAccept, (client, message) => {
+      this.handleGuildApplicationReply(client, message, 'accept');
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildApplicationDecline, (client, message) => {
+      this.handleGuildApplicationReply(client, message, 'decline');
     });
 
     this.clock.setInterval(() => {
@@ -5031,6 +5049,68 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     });
   }
 
+  private handleGuildDirectory(client: Client, raw: unknown): void {
+    const parsed = guildDirectoryCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.sendGuildDirectory(opened.session.client, opened.session).then(() => {
+      this.completeGuildCommand();
+    });
+  }
+
+  private handleGuildApply(client: Client, raw: unknown): void {
+    const parsed = guildApplyCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.applyGuildApplication(opened, parsed.data.guildId).catch((error: unknown) => {
+      this.failGuildCommand(opened, error);
+    });
+  }
+
+  private handleGuildApplicationReply(
+    client: Client,
+    raw: unknown,
+    mode: 'accept' | 'decline',
+  ): void {
+    const parsed =
+      mode === 'accept'
+        ? guildApplicationAcceptCommandSchema.safeParse(raw)
+        : guildApplicationDeclineCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    if (mode === 'decline') {
+      void this.applyGuildApplicationDecline(opened, parsed.data.applicationId).catch(
+        (error: unknown) => {
+          this.failGuildCommand(opened, error);
+        },
+      );
+      return;
+    }
+    void this.applyGuildApplicationAccept(opened, parsed.data.applicationId).catch(
+      (error: unknown) => {
+        this.failGuildCommand(opened, error);
+      },
+    );
+  }
+
   private async applyGuildCreate(opened: OpenSocialCommand, name: string): Promise<void> {
     const record = await this.guilds.create(opened.session.playerId, name);
     this.sendSystemNotice(opened.session.client, 'info', `行会「${record.name}」已创建`);
@@ -5071,6 +5151,55 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       throw new SocialError('GUILD_INVITE_EXPIRED');
     }
     this.sendSystemNotice(opened.session.client, 'info', '已拒绝行会邀请');
+    this.completeGuildCommand();
+  }
+
+  private async applyGuildApplication(opened: OpenSocialCommand, guildId: string): Promise<void> {
+    const outcome = await this.guilds.apply(opened.session.playerId, guildId);
+    // The leader may be on another map or offline; the application is already
+    // persisted, so this only refreshes their open panel.
+    this.notifyGuildRefresh([outcome.leaderId]);
+    this.notifyPlayerNotice(
+      outcome.leaderId,
+      'info',
+      `${outcome.characterName} 申请加入行会「${outcome.guildName}」`,
+    );
+    this.sendSystemNotice(
+      opened.session.client,
+      'info',
+      `已向行会「${outcome.guildName}」提交入会申请`,
+    );
+    await this.sendGuildDirectory(opened.session.client, opened.session);
+    this.completeGuildCommand();
+  }
+
+  private async applyGuildApplicationAccept(
+    opened: OpenSocialCommand,
+    applicationId: string,
+  ): Promise<void> {
+    const outcome = await this.guilds.acceptApplication(opened.session.playerId, applicationId);
+    this.notifyGuildRefresh(outcome.memberIds);
+    this.notifyPlayerNotice(outcome.applicantId, 'info', `你已加入行会「${outcome.guildName}」`);
+    this.sendSystemNotice(opened.session.client, 'info', `${outcome.applicantName} 已加入行会`);
+    this.completeGuildCommand();
+  }
+
+  private async applyGuildApplicationDecline(
+    opened: OpenSocialCommand,
+    applicationId: string,
+  ): Promise<void> {
+    const outcome = await this.guilds.declineApplication(opened.session.playerId, applicationId);
+    this.notifyGuildRefresh([opened.session.playerId]);
+    this.notifyPlayerNotice(
+      outcome.applicantId,
+      'warning',
+      `你加入行会「${outcome.guildName}」的申请被拒绝`,
+    );
+    this.sendSystemNotice(
+      opened.session.client,
+      'info',
+      `已拒绝 ${outcome.applicantName} 的入会申请`,
+    );
     this.completeGuildCommand();
   }
 
@@ -5190,7 +5319,16 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         memberLimit: record.memberLimit,
         members,
       };
-      const parsed = guildSnapshotSchema.safeParse({ guild, serverTime: Date.now() });
+      // Applications are leader-only data and never leave this private message.
+      const applications: GuildApplicationView[] =
+        record.leaderId === session.playerId
+          ? await this.guilds.applications(session.playerId)
+          : [];
+      const parsed = guildSnapshotSchema.safeParse({
+        guild,
+        applications,
+        serverTime: Date.now(),
+      });
       if (!parsed.success) {
         this.options.logger.error(
           { roomId: this.roomId, issues: parsed.error.issues.length },
@@ -5203,6 +5341,29 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       this.options.logger.error(
         { err: error, roomId: this.roomId, playerId: session.playerId },
         'guild snapshot failed',
+      );
+    }
+  }
+
+  private async sendGuildDirectory(client: Client, session: SessionRecord): Promise<void> {
+    try {
+      const directory = await this.guilds.directory(session.playerId);
+      const parsed = guildDirectorySchema.safeParse({
+        guilds: directory.guilds,
+        serverTime: Date.now(),
+      });
+      if (!parsed.success) {
+        this.options.logger.error(
+          { roomId: this.roomId, issues: parsed.error.issues.length },
+          'guild directory failed validation',
+        );
+        return;
+      }
+      client.send(SERVER_MESSAGES.guildDirectory, parsed.data);
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, playerId: session.playerId },
+        'guild directory failed',
       );
     }
   }

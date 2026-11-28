@@ -92,6 +92,13 @@
       "when": 1795866818640,
       "tag": "0012_smart_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795869940080,
+      "tag": "0013_thick_wallow",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,11 @@ export { AssetService } from './assetService';
 export { FriendsService } from './friendsService';
 export { GuildService } from './guildService';
 export type {
+  GuildApplicationAcceptOutcome,
+  GuildApplicationDeclineOutcome,
+  GuildApplicationRecord,
+  GuildApplyOutcome,
+  GuildDirectoryRecord,
   GuildDisbandOutcome,
   GuildInviteFacts,
   GuildKickOutcome,
@@ -10,6 +15,7 @@ export type {
   GuildMemberRecord,
   GuildRecord,
   GuildServiceOptions,
+  GuildSummaryRecord,
 } from './guildService';
 export type {
   FriendAcceptOutcome,

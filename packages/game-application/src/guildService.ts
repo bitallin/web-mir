@@ -1,22 +1,34 @@
 import type { CharacterClass } from '@web-legend/contracts';
 import {
+  GUILD_APPLICATION_LIST_MAX,
   GUILD_CREATE_MIN_LEVEL,
+  GUILD_DIRECTORY_MAX,
   GUILD_MEMBER_LIMIT,
   normalizeGuildName,
 } from '@web-legend/contracts';
 import {
   countGuildMembers,
+  deleteGuildApplication,
+  deleteGuildApplicationsForCharacter,
   deleteGuildById,
   deleteGuildMember,
   findCharacterById,
+  findGuildApplication,
+  findGuildApplicationById,
+  findGuildById,
   findGuildByNormalizedName,
+  findGuildLeader,
   findGuildMembership,
   findOldestGuildMemberId,
   insertGuild,
+  insertGuildApplication,
   insertGuildMember,
   isUniqueViolation,
+  listGuildApplicationGuildIds,
+  listGuildApplications,
   listGuildMemberIds,
   listGuildMembers,
+  listGuildSummaries,
   lockGuildById,
   updateGuildMemberRole,
   type Database,
@@ -69,6 +81,50 @@ export type GuildKickOutcome = {
 export type GuildDisbandOutcome = {
   guildId: string;
   memberIds: string[];
+};
+
+export type GuildSummaryRecord = {
+  guildId: string;
+  name: string;
+  leaderName: string;
+  memberCount: number;
+  memberLimit: number;
+  applied: boolean;
+};
+
+export type GuildDirectoryRecord = {
+  guilds: GuildSummaryRecord[];
+};
+
+export type GuildApplicationRecord = {
+  applicationId: string;
+  playerId: string;
+  displayName: string;
+  classId: CharacterClass;
+  level: number;
+  createdAt: number;
+};
+
+export type GuildApplyOutcome = {
+  guildId: string;
+  guildName: string;
+  leaderId: string;
+  characterName: string;
+};
+
+export type GuildApplicationAcceptOutcome = {
+  guildId: string;
+  guildName: string;
+  memberIds: string[];
+  applicantId: string;
+  applicantName: string;
+};
+
+export type GuildApplicationDeclineOutcome = {
+  guildId: string;
+  guildName: string;
+  applicantId: string;
+  applicantName: string;
 };
 
 export type GuildServiceOptions = {
@@ -143,6 +199,8 @@ export class GuildService {
           role: 'leader',
           joinedAt: this.now(),
         });
+        // A character that creates a guild is no longer looking for one.
+        await deleteGuildApplicationsForCharacter(tx, characterId);
         return created;
       });
       const record = await this.viewOf(guild);
@@ -232,12 +290,193 @@ export class GuildService {
         }
         throw error;
       }
+      // Joining one guild withdraws every pending application elsewhere.
+      await deleteGuildApplicationsForCharacter(tx, characterId);
       return this.viewOf(guild, tx);
     });
     if (record === null) {
       throw new SocialError('SERVICE_UNAVAILABLE');
     }
     return record;
+  }
+
+  /** Public realm directory; applications are only marked, not listed. */
+  async directory(characterId: string): Promise<GuildDirectoryRecord> {
+    const character = await findCharacterById(this.database, characterId);
+    if (character === undefined) {
+      throw new SocialError('INVALID_SESSION');
+    }
+    const [summaries, appliedGuildIds] = await Promise.all([
+      listGuildSummaries(this.database, character.realmId, GUILD_DIRECTORY_MAX),
+      listGuildApplicationGuildIds(this.database, characterId),
+    ]);
+    const applied = new Set(appliedGuildIds);
+    return {
+      guilds: summaries.map((summary) => ({
+        guildId: summary.guildId,
+        name: summary.name,
+        leaderName: summary.leaderName ?? '未知',
+        memberCount: summary.memberCount,
+        memberLimit: this.memberLimit,
+        applied: applied.has(summary.guildId),
+      })),
+    };
+  }
+
+  /**
+   * A guildless character applies to one guild. Applying to several guilds is
+   * allowed; a repeated application to the same guild is idempotent.
+   */
+  async apply(characterId: string, guildId: string): Promise<GuildApplyOutcome> {
+    const character = await findCharacterById(this.database, characterId);
+    if (character === undefined) {
+      throw new SocialError('INVALID_SESSION');
+    }
+    if ((await findGuildMembership(this.database, characterId)) !== undefined) {
+      throw new SocialError('GUILD_ALREADY_IN_GUILD');
+    }
+    const guild = await findGuildById(this.database, guildId);
+    if (guild === undefined || guild.realmId !== character.realmId) {
+      throw new SocialError('GUILD_NOT_FOUND');
+    }
+    if ((await countGuildMembers(this.database, guildId)) >= this.memberLimit) {
+      throw new SocialError('GUILD_FULL');
+    }
+    const leader = await findGuildLeader(this.database, guildId);
+    if (leader === undefined) {
+      throw new SocialError('GUILD_NOT_FOUND');
+    }
+    const existing = await findGuildApplication(this.database, guildId, characterId);
+    if (existing === undefined) {
+      await insertGuildApplication(this.database, {
+        guildId,
+        characterId,
+        createdAt: this.now(),
+      });
+    }
+    return {
+      guildId,
+      guildName: guild.name,
+      leaderId: leader.characterId,
+      characterName: character.name,
+    };
+  }
+
+  /** Leader-only application list; empty for members and guildless players. */
+  async applications(characterId: string): Promise<GuildApplicationRecord[]> {
+    const membership = await findGuildMembership(this.database, characterId);
+    if (membership === undefined || membership.role !== 'leader') {
+      return [];
+    }
+    const rows = await listGuildApplications(
+      this.database,
+      membership.guild.id,
+      GUILD_APPLICATION_LIST_MAX,
+    );
+    return rows.map((row) => ({
+      applicationId: row.applicationId,
+      playerId: row.characterId,
+      displayName: row.name,
+      classId: row.classId as CharacterClass,
+      level: row.level,
+      createdAt: row.createdAt.getTime(),
+    }));
+  }
+
+  /** Accepts a pending application; capacity and one-guild-per-character hold. */
+  async acceptApplication(
+    actorId: string,
+    applicationId: string,
+  ): Promise<GuildApplicationAcceptOutcome> {
+    const result = await this.database.transaction(
+      async (
+        tx,
+      ): Promise<
+        { kind: 'joined'; outcome: GuildApplicationAcceptOutcome } | { kind: 'already' }
+      > => {
+        const actor = await findGuildMembership(tx, actorId);
+        if (actor === undefined) {
+          throw new SocialError('GUILD_NOT_IN_GUILD');
+        }
+        if (actor.role !== 'leader') {
+          throw new SocialError('GUILD_NOT_LEADER');
+        }
+        await lockGuildById(tx, actor.guild.id);
+        const application = await findGuildApplicationById(tx, applicationId);
+        if (application === undefined || application.guildId !== actor.guild.id) {
+          throw new SocialError('GUILD_APPLICATION_NOT_FOUND');
+        }
+        const applicant = await findCharacterById(tx, application.characterId);
+        if (applicant === undefined || applicant.realmId !== actor.guild.realmId) {
+          throw new SocialError('GUILD_APPLICATION_NOT_FOUND');
+        }
+        if ((await findGuildMembership(tx, applicant.id)) !== undefined) {
+          // The applicant joined elsewhere while the request was pending; drop
+          // the stale row, then report the rejection after the commit.
+          await deleteGuildApplication(tx, application.id);
+          return { kind: 'already' };
+        }
+        if ((await countGuildMembers(tx, actor.guild.id)) >= this.memberLimit) {
+          throw new SocialError('GUILD_FULL');
+        }
+        try {
+          await insertGuildMember(tx, {
+            guildId: actor.guild.id,
+            characterId: applicant.id,
+            role: 'member',
+            joinedAt: this.now(),
+          });
+        } catch (error) {
+          if (isUniqueViolation(error)) {
+            throw new SocialError('GUILD_ALREADY_IN_GUILD');
+          }
+          throw error;
+        }
+        await deleteGuildApplicationsForCharacter(tx, applicant.id);
+        const remaining = await listGuildMemberIds(tx, actor.guild.id);
+        return {
+          kind: 'joined',
+          outcome: {
+            guildId: actor.guild.id,
+            guildName: actor.guild.name,
+            memberIds: remaining,
+            applicantId: applicant.id,
+            applicantName: applicant.name,
+          },
+        };
+      },
+    );
+    if (result.kind === 'already') {
+      throw new SocialError('GUILD_ALREADY_IN_GUILD');
+    }
+    return result.outcome;
+  }
+
+  async declineApplication(
+    actorId: string,
+    applicationId: string,
+  ): Promise<GuildApplicationDeclineOutcome> {
+    return this.database.transaction(async (tx) => {
+      const actor = await findGuildMembership(tx, actorId);
+      if (actor === undefined) {
+        throw new SocialError('GUILD_NOT_IN_GUILD');
+      }
+      if (actor.role !== 'leader') {
+        throw new SocialError('GUILD_NOT_LEADER');
+      }
+      const application = await findGuildApplicationById(tx, applicationId);
+      if (application === undefined || application.guildId !== actor.guild.id) {
+        throw new SocialError('GUILD_APPLICATION_NOT_FOUND');
+      }
+      const applicant = await findCharacterById(tx, application.characterId);
+      await deleteGuildApplication(tx, application.id);
+      return {
+        guildId: actor.guild.id,
+        guildName: actor.guild.name,
+        applicantId: application.characterId,
+        applicantName: applicant?.name ?? '玩家',
+      };
+    });
   }
 
   /**

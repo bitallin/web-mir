@@ -552,6 +552,32 @@ body {
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
 }
 
+.guild-directory-row {
+  grid-template-columns: minmax(0, 1fr) auto auto !important;
+}
+
+.guild-directory-row button,
+.guild-applications button {
+  padding: 2px 8px;
+  border: 1px solid #6b5a33;
+  background: transparent;
+  color: #e0c88f;
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.guild-directory-row button:disabled {
+  border-color: #2b323a;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.guild-directory-row button:hover:not(:disabled),
+.guild-applications button:hover:not(:disabled) {
+  background: rgba(200, 170, 100, 0.14);
+}
+
 .friend-panel {
   right: 40px;
   top: 132px;

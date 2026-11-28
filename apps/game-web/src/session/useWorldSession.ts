@@ -6,8 +6,10 @@ import type {
   ChatMessage,
   FriendPresence,
   FriendSnapshot,
+  GuildApplicationView,
   GuildInviteView,
   GuildPresence,
+  GuildSummaryView,
   GuildView,
   CombatEvent,
   CombatProfile,
@@ -110,6 +112,10 @@ export type SessionState = {
   guild: GuildView | null;
   /** An unanswered guild invitation addressed to the local player. */
   guildInvite: GuildInviteView | null;
+  /** Realm guild directory while the player has no guild (ADR-049). */
+  guildDirectory: GuildSummaryView[] | null;
+  /** Pending applications, populated only for the guild leader. */
+  guildApplications: GuildApplicationView[];
   levelUpNotice: LevelUp | null;
   /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
   notices: SessionNotice[];
@@ -184,6 +190,8 @@ function initialState(character: CharacterView): SessionState {
     friends: null,
     guild: null,
     guildInvite: null,
+    guildDirectory: null,
+    guildApplications: [],
     levelUpNotice: null,
     notices: [],
     autoAttack: null,
@@ -391,6 +399,8 @@ class WorldSession {
   private friends: FriendSnapshot | null = null;
   private guild: GuildView | null = null;
   private guildInvite: GuildInviteView | null = null;
+  private guildDirectory: GuildSummaryView[] | null = null;
+  private lastGuildApplications: GuildApplicationView[] = [];
   private partyInviteTimer: number | null = null;
   private guildInviteTimer: number | null = null;
   private levelBannerTimer: number | null = null;
@@ -804,10 +814,23 @@ class WorldSession {
         },
         onGuildSnapshot: (snapshot) => {
           this.guild = snapshot.guild;
+          this.lastGuildApplications = snapshot.applications;
           if (snapshot.guild !== null) {
             this.clearGuildInvite();
+            this.guildDirectory = null;
+            this.updateState((previous) => ({
+              ...previous,
+              guild: snapshot.guild,
+              guildDirectory: null,
+              guildApplications: snapshot.applications,
+            }));
+            return;
           }
-          this.updateState((previous) => ({ ...previous, guild: snapshot.guild }));
+          this.updateState((previous) => ({
+            ...previous,
+            guild: null,
+            guildApplications: [],
+          }));
         },
         onGuildInvite: (invite) => {
           this.guildInvite = invite;
@@ -826,6 +849,16 @@ class WorldSession {
         },
         onGuildRefresh: () => {
           this.client?.sendGuildList();
+          if (this.guild === null) {
+            this.client?.sendGuildDirectory();
+          }
+        },
+        onGuildDirectory: (directory) => {
+          this.guildDirectory = directory.guilds;
+          this.updateState((previous) => ({
+            ...previous,
+            guildDirectory: directory.guilds,
+          }));
         },
         onAssetResult: (result) => {
           this.inventory = result.snapshot;
@@ -1434,6 +1467,26 @@ class WorldSession {
     return this.client?.sendGuildList() ?? false;
   }
 
+  /** Directory is only meaningful while guildless, but harmless to refresh. */
+  refreshGuildDirectory(): boolean {
+    return this.client?.sendGuildDirectory() ?? false;
+  }
+
+  applyToGuild(guildId: string): boolean {
+    if (this.guild !== null) {
+      return false;
+    }
+    return this.sendGuildIntent(this.client?.sendGuildApply(guildId) ?? false);
+  }
+
+  acceptGuildApplication(applicationId: string): boolean {
+    return this.sendGuildIntent(this.client?.sendGuildApplicationAccept(applicationId) ?? false);
+  }
+
+  declineGuildApplication(applicationId: string): boolean {
+    return this.sendGuildIntent(this.client?.sendGuildApplicationDecline(applicationId) ?? false);
+  }
+
   private sendGuildIntent(sent: boolean): boolean {
     if (sent) {
       this.commandCount += 1;
@@ -1461,6 +1514,11 @@ class WorldSession {
     const next = { ...current, members };
     this.guild = next;
     this.updateState((previous) => ({ ...previous, guild: next }));
+  }
+
+  /** Debug/E2E view; the visible list lives in SessionState. */
+  private stateApplications(): GuildApplicationView[] {
+    return this.lastGuildApplications;
   }
 
   private clearGuildInvite(): void {
@@ -1807,6 +1865,11 @@ class WorldSession {
       friendState: () => this.friends,
       guildState: () => this.guild,
       guildInviteState: () => this.guildInvite,
+      guildDirectoryState: () => this.guildDirectory,
+      guildApplicationsState: () => this.stateApplications(),
+      applyToGuild: (guildId) => this.applyToGuild(guildId),
+      acceptGuildApplication: (applicationId) => this.acceptGuildApplication(applicationId),
+      declineGuildApplication: (applicationId) => this.declineGuildApplication(applicationId),
       createGuild: (name) => this.createGuild(name),
       inviteToGuild: (playerId) => this.inviteToGuild(playerId),
       acceptGuildInvite: () => this.acceptGuildInvite(),
@@ -1872,6 +1935,10 @@ export type WorldSessionControls = {
   kickGuildMember: (targetPlayerId: string) => boolean;
   disbandGuild: () => boolean;
   refreshGuild: () => boolean;
+  refreshGuildDirectory: () => boolean;
+  applyToGuild: (guildId: string) => boolean;
+  acceptGuildApplication: (applicationId: string) => boolean;
+  declineGuildApplication: (applicationId: string) => boolean;
   toggleSfx: () => void;
 };
 
@@ -2033,6 +2100,22 @@ export function useWorldSession(
   );
   const disbandGuild = useCallback(() => sessionRef.current?.disbandGuild() ?? false, []);
   const refreshGuild = useCallback(() => sessionRef.current?.refreshGuild() ?? false, []);
+  const refreshGuildDirectory = useCallback(
+    () => sessionRef.current?.refreshGuildDirectory() ?? false,
+    [],
+  );
+  const applyToGuild = useCallback(
+    (guildId: string) => sessionRef.current?.applyToGuild(guildId) ?? false,
+    [],
+  );
+  const acceptGuildApplication = useCallback(
+    (applicationId: string) => sessionRef.current?.acceptGuildApplication(applicationId) ?? false,
+    [],
+  );
+  const declineGuildApplication = useCallback(
+    (applicationId: string) => sessionRef.current?.declineGuildApplication(applicationId) ?? false,
+    [],
+  );
   const toggleSfx = useCallback(() => {
     sessionRef.current?.toggleSfx();
   }, []);
@@ -2076,6 +2159,10 @@ export function useWorldSession(
     kickGuildMember,
     disbandGuild,
     refreshGuild,
+    refreshGuildDirectory,
+    applyToGuild,
+    acceptGuildApplication,
+    declineGuildApplication,
     toggleSfx,
   };
 }

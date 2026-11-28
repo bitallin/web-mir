@@ -50,6 +50,10 @@ export const CLIENT_MESSAGES = {
   guildKick: 'guild.kick',
   guildDisband: 'guild.disband',
   guildList: 'guild.list',
+  guildDirectory: 'guild.directory',
+  guildApply: 'guild.apply',
+  guildApplicationAccept: 'guild.apply.accept',
+  guildApplicationDecline: 'guild.apply.decline',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -80,6 +84,7 @@ export const SERVER_MESSAGES = {
   guildInvite: 'guild.invite',
   guildPresence: 'guild.presence',
   guildRefresh: 'guild.refresh',
+  guildDirectory: 'guild.directory',
 } as const;
 
 /**
@@ -327,6 +332,7 @@ export const COMMAND_REJECTION_CODES = [
   'GUILD_INVITE_EXPIRED',
   'GUILD_NOT_FOUND',
   'GUILD_TARGET_NOT_MEMBER',
+  'GUILD_APPLICATION_NOT_FOUND',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -398,6 +404,7 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   GUILD_INVITE_EXPIRED: '行会邀请已过期或不存在',
   GUILD_NOT_FOUND: '行会不存在或已经解散',
   GUILD_TARGET_NOT_MEMBER: '对方不在你的行会中',
+  GUILD_APPLICATION_NOT_FOUND: '入会申请不存在或已处理',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

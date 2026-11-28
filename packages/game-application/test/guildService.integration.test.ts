@@ -5,6 +5,7 @@ import {
   findGuildById,
   insertAccount,
   insertCharacter,
+  insertGuildApplication,
   realms,
   type CharacterClassId,
   type Database,
@@ -223,6 +224,148 @@ describe.runIf(databaseUrl !== undefined)('GuildService with PostgreSQL', () => 
     expect(disbanded.memberIds).toHaveLength(2);
     expect(await findGuildById(db, guild.guildId)).toBeUndefined();
     expect(await service.view(leader.id)).toBeNull();
+  });
+
+  it('lists realm guilds with leader, size and the applicant flag', async () => {
+    const leader = await createCharacter(db);
+    const member = await createCharacter(db);
+    const applicant = await createCharacter(db);
+    const guild = await service.create(leader.id, '目录行会');
+    await service.join(guild.guildId, member.id);
+
+    const before = await service.directory(applicant.id);
+    const summary = before.guilds.find((row) => row.guildId === guild.guildId);
+    expect(summary).toMatchObject({
+      name: '目录行会',
+      leaderName: leader.name,
+      memberCount: 2,
+      memberLimit: 3,
+      applied: false,
+    });
+
+    await service.apply(applicant.id, guild.guildId);
+    const after = await service.directory(applicant.id);
+    expect(after.guilds.find((row) => row.guildId === guild.guildId)?.applied).toBe(true);
+  });
+
+  it('accepts applications from multiple guilds and cleans them on join', async () => {
+    const leaderA = await createCharacter(db);
+    const leaderB = await createCharacter(db);
+    const applicant = await createCharacter(db);
+    const guildA = await service.create(leaderA.id, '甲行会');
+    const guildB = await service.create(leaderB.id, '乙行会');
+
+    await service.apply(applicant.id, guildA.guildId);
+    await service.apply(applicant.id, guildB.guildId);
+    // Repeating one application is idempotent.
+    await service.apply(applicant.id, guildA.guildId);
+    expect(await service.applications(leaderA.id)).toHaveLength(1);
+    expect(await service.applications(leaderB.id)).toHaveLength(1);
+    const appliedDirectory = await service.directory(applicant.id);
+    expect(appliedDirectory.guilds.find((row) => row.guildId === guildA.guildId)?.applied).toBe(
+      true,
+    );
+    expect(appliedDirectory.guilds.find((row) => row.guildId === guildB.guildId)?.applied).toBe(
+      true,
+    );
+
+    const [application] = await service.applications(leaderA.id);
+    const accepted = await service.acceptApplication(leaderA.id, application!.applicationId);
+    expect(accepted.applicantId).toBe(applicant.id);
+    expect(accepted.memberIds).toEqual(expect.arrayContaining([leaderA.id, applicant.id]));
+
+    // Joining one guild withdraws the other application.
+    expect(await service.applications(leaderB.id)).toEqual([]);
+    const directory = await service.directory(applicant.id);
+    expect(directory.guilds.every((row) => row.applied === false)).toBe(true);
+    expect(await service.view(applicant.id)).not.toBeNull();
+  });
+
+  it('rejects applications from guilded players, to full guilds, and across realms', async () => {
+    const leader = await createCharacter(db);
+    const first = await createCharacter(db);
+    const second = await createCharacter(db);
+    const third = await createCharacter(db);
+    const guild = await service.create(leader.id, '满员申请');
+    await service.join(guild.guildId, first.id);
+    await service.join(guild.guildId, second.id);
+
+    await expectSocialError(service.apply(third.id, guild.guildId), 'GUILD_FULL');
+    await expectSocialError(service.apply(leader.id, guild.guildId), 'GUILD_ALREADY_IN_GUILD');
+
+    const foreignLeader = await createCharacter(db, { realmCode: SECOND_REALM_CODE });
+    const foreignGuild = await service.create(foreignLeader.id, '异区行会');
+    await expectSocialError(service.apply(third.id, foreignGuild.guildId), 'GUILD_NOT_FOUND');
+  });
+
+  it('accepts only as leader, under the member limit, and declines cleanly', async () => {
+    const leader = await createCharacter(db);
+    const member = await createCharacter(db);
+    const applicant = await createCharacter(db);
+    const otherApplicant = await createCharacter(db);
+    const guild = await service.create(leader.id, '审批行会');
+    await service.join(guild.guildId, member.id);
+    await service.apply(applicant.id, guild.guildId);
+
+    const application = (await service.applications(leader.id))[0]!;
+    await expectSocialError(
+      service.acceptApplication(member.id, application.applicationId),
+      'GUILD_NOT_LEADER',
+    );
+    await expectSocialError(
+      service.acceptApplication(leader.id, '018f0f3e-6a6f-7c4a-9b3e-3f1f2b7c9d99'),
+      'GUILD_APPLICATION_NOT_FOUND',
+    );
+
+    const accepted = await service.acceptApplication(leader.id, application.applicationId);
+    expect(accepted.applicantName).toBe(applicant.name);
+    expect(await service.applications(leader.id)).toEqual([]);
+
+    // The guild is now full; a new application can be declined but not accepted.
+    expect((await service.view(leader.id))?.members).toHaveLength(3);
+    await expectSocialError(service.apply(otherApplicant.id, guild.guildId), 'GUILD_FULL');
+
+    const second = await createCharacter(db);
+    const secondMember = await createCharacter(db);
+    const secondGuild = await service.create(second.id, '拒绝行会');
+    await service.join(secondGuild.guildId, secondMember.id);
+    await service.apply(otherApplicant.id, secondGuild.guildId);
+    const secondApplication = (await service.applications(second.id))[0]!;
+    await expectSocialError(
+      service.declineApplication(secondMember.id, secondApplication.applicationId),
+      'GUILD_NOT_LEADER',
+    );
+    const declined = await service.declineApplication(second.id, secondApplication.applicationId);
+    expect(declined.applicantId).toBe(otherApplicant.id);
+    expect(await service.applications(second.id)).toEqual([]);
+    await expectSocialError(
+      service.declineApplication(second.id, secondApplication.applicationId),
+      'GUILD_APPLICATION_NOT_FOUND',
+    );
+  });
+
+  it('removes a stale application when the applicant already joined elsewhere', async () => {
+    const leaderA = await createCharacter(db);
+    const leaderB = await createCharacter(db);
+    const applicant = await createCharacter(db);
+    const guildA = await service.create(leaderA.id, '旧申请甲');
+    const guildB = await service.create(leaderB.id, '旧申请乙');
+    await service.apply(applicant.id, guildA.guildId);
+    await service.join(guildB.guildId, applicant.id);
+
+    // Simulate the race the accept path defends against: the applicant joined
+    // another guild while this request was still pending in the database.
+    await insertGuildApplication(db, {
+      guildId: guildA.guildId,
+      characterId: applicant.id,
+      createdAt: new Date(),
+    });
+    const stale = (await service.applications(leaderA.id))[0]!;
+    await expectSocialError(
+      service.acceptApplication(leaderA.id, stale.applicationId),
+      'GUILD_ALREADY_IN_GUILD',
+    );
+    expect(await service.applications(leaderA.id)).toEqual([]);
   });
 
   it('reports chat recipients and online guildmates from membership', async () => {

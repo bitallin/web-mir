@@ -389,14 +389,22 @@ export type {
 } from './party';
 
 export {
+  GUILD_APPLICATION_LIST_MAX,
   GUILD_CREATE_MIN_LEVEL,
+  GUILD_DIRECTORY_MAX,
   GUILD_INVITE_TTL_MS,
   GUILD_MEMBER_LIMIT,
   GUILD_NAME_MAX_LENGTH,
   GUILD_NAME_MIN_LENGTH,
   guildAcceptCommandSchema,
+  guildApplicationAcceptCommandSchema,
+  guildApplicationDeclineCommandSchema,
+  guildApplicationViewSchema,
+  guildApplyCommandSchema,
   guildCreateCommandSchema,
   guildDeclineCommandSchema,
+  guildDirectoryCommandSchema,
+  guildDirectorySchema,
   guildDisbandCommandSchema,
   guildInviteCommandSchema,
   guildInviteViewSchema,
@@ -408,13 +416,20 @@ export {
   guildPresenceSchema,
   guildRefreshSchema,
   guildSnapshotSchema,
+  guildSummaryViewSchema,
   guildViewSchema,
   normalizeGuildName,
 } from './guild';
 export type {
   GuildAcceptCommand,
+  GuildApplicationAcceptCommand,
+  GuildApplicationDeclineCommand,
+  GuildApplicationView,
+  GuildApplyCommand,
   GuildCreateCommand,
   GuildDeclineCommand,
+  GuildDirectory,
+  GuildDirectoryCommand,
   GuildDisbandCommand,
   GuildInviteCommand,
   GuildInviteView,
@@ -425,6 +440,7 @@ export type {
   GuildPresence,
   GuildRefresh,
   GuildSnapshot,
+  GuildSummaryView,
   GuildView,
 } from './guild';
 

@@ -8,12 +8,14 @@ import {
   STARTER_WILDS_MAP_ID,
   chatMessageSchema,
   commandRejectedSchema,
+  guildDirectorySchema,
   guildInviteViewSchema,
   guildSnapshotSchema,
   systemNoticeSchema,
   worldRoomNameFor,
   type ChatMessage,
   type CommandRejected,
+  type GuildDirectory,
   type GuildInviteView,
   type GuildSnapshot,
   type SystemNotice,
@@ -112,6 +114,29 @@ function waitForGuildSnapshot(
     }, timeoutMs);
     unsubscribe = room.onMessage('guild.snapshot', (payload: unknown) => {
       const parsed = guildSnapshotSchema.parse(payload);
+      if (!predicate(parsed)) {
+        return;
+      }
+      clearTimeout(timer);
+      unsubscribe();
+      resolve(parsed);
+    });
+  });
+}
+
+function waitForGuildDirectory(
+  room: SdkRoom,
+  predicate: (directory: GuildDirectory) => boolean,
+  timeoutMs = 5_000,
+): Promise<GuildDirectory> {
+  return new Promise((resolve, reject) => {
+    let unsubscribe: () => void = () => undefined;
+    const timer = setTimeout(() => {
+      unsubscribe();
+      reject(new Error('Timed out waiting for a matching guild directory'));
+    }, timeoutMs);
+    unsubscribe = room.onMessage('guild.directory', (payload: unknown) => {
+      const parsed = guildDirectorySchema.parse(payload);
       if (!predicate(parsed)) {
         return;
       }
@@ -567,5 +592,132 @@ describe.runIf(databaseUrl !== undefined)('world_map guilds', () => {
       .where(eq(guildMembers.characterId, member.character.id))
       .orderBy(asc(guildMembers.joinedAt));
     expect(remaining).toEqual([]);
+  });
+
+  it('lists guilds, applies across maps, and lets the leader approve or decline', async () => {
+    const leader = await actorInTown(SAFE_TILE);
+    const applicant = await actorInWilds({ x: 2, y: 16 });
+    const outsider = await actorInTown({ x: 3, y: 16 });
+    const leaderRoom = await createTown(leader.ticket);
+    await waitUntil(
+      () => leaderRoom.state.players.has(leader.character.id),
+      10_000,
+      'leader joined',
+    );
+    const applicantRoom = await createWilds(applicant.ticket);
+    await waitUntil(
+      () => applicantRoom.state.players.has(applicant.character.id),
+      10_000,
+      'applicant joined',
+    );
+    const outsiderRoom = await createTown(outsider.ticket);
+    await waitUntil(
+      () => outsiderRoom.state.players.has(outsider.character.id),
+      10_000,
+      'outsider joined',
+    );
+
+    const name = `目录${randomUUID().slice(0, 4)}`;
+    await createGuild(leaderRoom, leader, name);
+
+    // The guildless applicant sees the public summary from another map.
+    const directory = waitForGuildDirectory(applicantRoom, (payload) =>
+      payload.guilds.some((row) => row.name === name),
+    );
+    applicantRoom.send('guild.directory', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+    });
+    const listed = await directory;
+    const summary = listed.guilds.find((row) => row.name === name);
+    expect(summary).toMatchObject({
+      leaderName: leader.character.name,
+      memberCount: 1,
+      applied: false,
+    });
+    expect(summary).not.toHaveProperty('members');
+
+    // Applying keeps the request on the leader's private snapshot.
+    const appliedDirectory = waitForGuildDirectory(applicantRoom, (payload) =>
+      payload.guilds.some((row) => row.name === name && row.applied),
+    );
+    const leaderSeesApplication = waitForGuildSnapshot(
+      leaderRoom,
+      (snapshot) => snapshot.applications.length === 1,
+    );
+    applicantRoom.send('guild.apply', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      guildId: summary!.guildId,
+    });
+    await appliedDirectory;
+    const applicationSnapshot = await leaderSeesApplication;
+    const application = applicationSnapshot.applications[0]!;
+    expect(application.playerId).toBe(applicant.character.id);
+
+    // The leader accepts; both sides converge on a two-member roster.
+    const applicantJoined = waitForGuildSnapshot(
+      applicantRoom,
+      (snapshot) => snapshot.guild?.members.length === 2,
+    );
+    const leaderRoster = waitForGuildSnapshot(
+      leaderRoom,
+      (snapshot) => snapshot.guild?.members.length === 2,
+    );
+    leaderRoom.send('guild.apply.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      applicationId: application.applicationId,
+    });
+    expect((await applicantJoined).guild?.members).toHaveLength(2);
+    expect((await leaderRoster).applications).toEqual([]);
+
+    // A second applicant can be declined, and the applicant is told.
+    const secondApplication = waitForGuildSnapshot(
+      leaderRoom,
+      (snapshot) =>
+        snapshot.applications.length === 1 &&
+        snapshot.applications[0]?.playerId === outsider.character.id,
+    );
+    outsiderRoom.send('guild.apply', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      guildId: summary!.guildId,
+    });
+    const pending = await secondApplication;
+
+    // A plain member cannot approve applications.
+    const memberCannotApprove = waitForMessage<CommandRejected>(
+      applicantRoom,
+      'command.rejected',
+      (payload) => commandRejectedSchema.parse(payload),
+    );
+    applicantRoom.send('guild.apply.accept', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      applicationId: pending.applications[0]!.applicationId,
+    });
+    expect((await memberCannotApprove).code).toBe('GUILD_NOT_LEADER');
+
+    const declinedNotice = waitForSystemNotice(outsiderRoom, (notice) =>
+      notice.message.includes('申请被拒绝'),
+    );
+    const cleared = waitForGuildSnapshot(
+      leaderRoom,
+      (snapshot) => snapshot.applications.length === 0,
+    );
+    leaderRoom.send('guild.apply.decline', {
+      protocolVersion: PROTOCOL_VERSION,
+      commandId: randomUUID(),
+      clientSequence: nextSequence(),
+      applicationId: pending.applications[0]!.applicationId,
+    });
+    expect((await declinedNotice).message).toContain(name);
+    expect((await cleared).applications).toEqual([]);
   });
 });

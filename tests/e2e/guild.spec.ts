@@ -143,4 +143,29 @@ test('players create a guild, invite across the room, and chat in the guild chan
   await expect(bob.page.getByTestId('guild-member')).toHaveCount(0);
   await expect(bob.page.getByTestId('chat-filter-guild')).toBeDisabled();
   await expect(alice.page.getByTestId('guild-member')).toHaveCount(1, { timeout: 10_000 });
+
+  // The guildless player sees the realm directory and can apply to join.
+  const directoryRow = bob.page.locator(
+    `[data-testid="guild-directory-row"][data-name="${guildName}"]`,
+  );
+  await expect(directoryRow).toHaveCount(1, { timeout: 10_000 });
+  await expect(directoryRow).toHaveAttribute('data-applied', 'false');
+  await bob.page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-guild-directory.png') });
+  await directoryRow.getByTestId('guild-apply').click();
+  await expect(directoryRow).toHaveAttribute('data-applied', 'true', { timeout: 10_000 });
+  await expect(directoryRow.getByTestId('guild-apply')).toHaveText('申请中');
+
+  // The leader sees the pending application and accepts it.
+  const applicationRow = alice.page.locator(
+    `[data-testid="guild-application"][data-name="${bob.name}"]`,
+  );
+  await expect(applicationRow).toHaveCount(1, { timeout: 10_000 });
+  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-guild-application.png') });
+  await applicationRow.getByTestId('guild-application-accept').click();
+
+  await expect(bob.page.getByTestId('guild-name')).toHaveText(guildName, { timeout: 10_000 });
+  await expect(bob.page.getByTestId('guild-member')).toHaveCount(2, { timeout: 10_000 });
+  await expect(alice.page.getByTestId('guild-member')).toHaveCount(2, { timeout: 10_000 });
+  await expect(alice.page.getByTestId('guild-application')).toHaveCount(0);
+  await alice.page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-guild-approved.png') });
 });

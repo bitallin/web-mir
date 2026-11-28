@@ -68,3 +68,33 @@ export const guildMembers = pgTable(
 
 export type GuildMember = typeof guildMembers.$inferSelect;
 export type NewGuildMember = typeof guildMembers.$inferInsert;
+
+/**
+ * A pending join request (ADR-049). A player may apply to several guilds; the
+ * unique pair keeps a repeated application to one guild idempotent. Rows are
+ * removed when any guild accepts the player, the player joins elsewhere, the
+ * guild deletes the application, or the guild is disbanded.
+ */
+export const guildApplications = pgTable(
+  'guild_applications',
+  {
+    id: uuid('id')
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    guildId: uuid('guild_id')
+      .notNull()
+      .references(() => guilds.id, { onDelete: 'cascade' }),
+    characterId: uuid('character_id')
+      .notNull()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('guild_applications_guild_character_unique').on(table.guildId, table.characterId),
+    index('guild_applications_guild_idx').on(table.guildId, table.createdAt),
+    index('guild_applications_character_idx').on(table.characterId),
+  ],
+);
+
+export type GuildApplication = typeof guildApplications.$inferSelect;
+export type NewGuildApplication = typeof guildApplications.$inferInsert;

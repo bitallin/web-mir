@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  GUILD_APPLICATION_LIST_MAX,
+  GUILD_DIRECTORY_MAX,
   GUILD_MEMBER_LIMIT,
   guildAcceptCommandSchema,
+  guildApplicationAcceptCommandSchema,
+  guildApplicationDeclineCommandSchema,
+  guildApplicationViewSchema,
+  guildApplyCommandSchema,
   guildCreateCommandSchema,
+  guildDirectoryCommandSchema,
+  guildDirectorySchema,
   guildInviteCommandSchema,
   guildInviteViewSchema,
   guildKickCommandSchema,
@@ -11,6 +19,7 @@ import {
   guildNameSchema,
   guildPresenceSchema,
   guildSnapshotSchema,
+  guildSummaryViewSchema,
   guildViewSchema,
   normalizeGuildName,
 } from './guild';
@@ -60,7 +69,51 @@ describe('guild contracts', () => {
 
     const snapshot = guildSnapshotSchema.parse({ guild, serverTime: 2_000 });
     expect(snapshot.guild?.name).toBe('黎明');
+    expect(snapshot.applications).toEqual([]);
     expect(guildSnapshotSchema.parse({ guild: null, serverTime: 3_000 }).guild).toBeNull();
+  });
+
+  it('carries a leader-only application list with an empty default', () => {
+    const application = {
+      applicationId: INVITE,
+      playerId: OTHER,
+      displayName: 'Applicant',
+      classId: 'taoist' as const,
+      level: 4,
+      createdAt: 1_500,
+    };
+    expect(guildApplicationViewSchema.safeParse(application).success).toBe(true);
+    const snapshot = guildSnapshotSchema.parse({
+      guild: null,
+      applications: [application],
+      serverTime: 2_000,
+    });
+    expect(snapshot.applications).toHaveLength(1);
+
+    const tooMany = Array.from({ length: GUILD_APPLICATION_LIST_MAX + 1 }, () => application);
+    expect(
+      guildSnapshotSchema.safeParse({ guild: null, applications: tooMany, serverTime: 2_000 })
+        .success,
+    ).toBe(false);
+  });
+
+  it('parses a public directory without roster data', () => {
+    const summary = {
+      guildId: GUILD,
+      name: '黎明',
+      leaderName: 'Guardian',
+      memberCount: 3,
+      memberLimit: GUILD_MEMBER_LIMIT,
+      applied: true,
+    };
+    expect(guildSummaryViewSchema.safeParse(summary).success).toBe(true);
+    const directory = guildDirectorySchema.parse({ guilds: [summary], serverTime: 2_000 });
+    expect(directory.guilds[0]?.applied).toBe(true);
+
+    const tooMany = Array.from({ length: GUILD_DIRECTORY_MAX + 1 }, () => summary);
+    expect(guildDirectorySchema.safeParse({ guilds: tooMany, serverTime: 2_000 }).success).toBe(
+      false,
+    );
   });
 
   it('rejects a roster larger than the member limit', () => {
@@ -94,6 +147,24 @@ describe('guild contracts', () => {
     expect(
       guildInviteCommandSchema.safeParse({ ...commandBase, targetPlayerId: 'nope' }).success,
     ).toBe(false);
+  });
+
+  it('parses directory, apply and application handling commands', () => {
+    expect(guildDirectoryCommandSchema.safeParse(commandBase).success).toBe(true);
+    expect(guildApplyCommandSchema.safeParse({ ...commandBase, guildId: GUILD }).success).toBe(
+      true,
+    );
+    expect(
+      guildApplicationAcceptCommandSchema.safeParse({ ...commandBase, applicationId: INVITE })
+        .success,
+    ).toBe(true);
+    expect(
+      guildApplicationDeclineCommandSchema.safeParse({ ...commandBase, applicationId: INVITE })
+        .success,
+    ).toBe(true);
+    expect(guildApplyCommandSchema.safeParse({ ...commandBase, guildId: 'nope' }).success).toBe(
+      false,
+    );
   });
 
   it('carries an invite and a guildmate presence transition', () => {
