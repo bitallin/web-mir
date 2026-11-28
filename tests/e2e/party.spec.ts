@@ -171,6 +171,11 @@ test('party leaders hand over command, kick, and chat privately', async ({ brows
   await alice.page.getByTestId('chat-input').fill('follow me to the east gate');
   await alice.page.getByTestId('chat-send').click();
 
+  // The channel selector drives both the log and the composer: Bob switches to
+  // the party channel to see the private line.
+  await bob.page.getByTestId('chat-channel-party').click();
+  await expect(bob.page.getByTestId('chat-channel-party')).toHaveAttribute('aria-selected', 'true');
+
   const partyMessages = (page: Page) =>
     page.locator('[data-testid="chat-message"][data-channel="party"]');
   await expect(

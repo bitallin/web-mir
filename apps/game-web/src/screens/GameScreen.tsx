@@ -162,7 +162,6 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatDraft, setChatDraft] = useState('');
   const [chatChannel, setChatChannel] = useState<'map' | 'party'>('map');
-  const [chatFilter, setChatFilter] = useState<'all' | 'map' | 'party'>('all');
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
@@ -468,10 +467,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     if (state.party === null && chatChannel === 'party') {
       setChatChannel('map');
     }
-    if (state.party === null && chatFilter === 'party') {
-      setChatFilter('all');
-    }
-  }, [state.party, chatChannel, chatFilter]);
+  }, [state.party, chatChannel]);
 
   // The server pushes snapshots on join and on changes; opening the panel also
   // asks for one so online state is current after a while in the background.
@@ -487,12 +483,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   );
   const onlineFriendCount = state.friends?.friends.filter((friend) => friend.online).length ?? 0;
   const friendTotal = state.friends?.friends.length ?? 0;
+  // One selector drives both what the log shows and where a new line goes, so
+  // the player never types into a channel they are not looking at.
   const visibleMessages = useMemo(
-    () =>
-      chatFilter === 'all'
-        ? state.messages
-        : state.messages.filter((message) => message.channel === chatFilter),
-    [chatFilter, state.messages],
+    () => state.messages.filter((message) => message.channel === chatChannel),
+    [chatChannel, state.messages],
   );
 
   useEffect(() => {
@@ -1368,7 +1363,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
 
       <aside
         className={`hud chat-panel${chatOpen ? '' : ' collapsed'}`}
-        aria-label="同图聊天"
+        aria-label="聊天"
         data-testid="chat-panel"
       >
         <div className="panel-heading">
@@ -1425,37 +1420,12 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             ))}
           </ul>
         ) : null}
-        <div className="chat-filters" data-testid="chat-filters" aria-label="筛选聊天频道">
-          {(
-            [
-              ['all', '全部'],
-              ['map', '附近'],
-              ['party', '队伍'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              data-testid={`chat-filter-${key}`}
-              aria-pressed={chatFilter === key}
-              className={chatFilter === key ? 'active' : ''}
-              disabled={key === 'party' && state.party === null}
-              onClick={() => {
-                setChatFilter(key);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
         <ul data-testid="chat-log">
           {visibleMessages.length === 0 ? (
             <li className="empty">
-              {chatFilter === 'party'
+              {chatChannel === 'party'
                 ? '队伍消息只有队伍成员能看到'
-                : chatFilter === 'map'
-                  ? '这里只有同地图频道的消息'
-                  : '同地图的玩家都能看到这里的消息'}
+                : '同地图的玩家都能看到这里的消息'}
             </li>
           ) : null}
           {visibleMessages.map((message) => (

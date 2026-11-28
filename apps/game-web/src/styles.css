@@ -1222,31 +1222,6 @@ body {
   font-size: 10px;
 }
 
-.chat-filters {
-  display: flex;
-  gap: 4px;
-  padding: 6px 12px 0;
-}
-
-.chat-filters button {
-  padding: 1px 8px;
-  border: 1px solid #2b323a;
-  background: transparent;
-  color: var(--muted);
-  font-size: 10px;
-  cursor: pointer;
-}
-
-.chat-filters button.active {
-  border-color: var(--gold-dim);
-  color: var(--gold);
-}
-
-.chat-filters button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .chat-panel ul {
   margin: 0;
   padding: 6px 0;

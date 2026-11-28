@@ -122,14 +122,15 @@ test('players add a friend, invite them to a party, and filter chat channels', a
   const partyMessage = bob.page
     .locator('[data-testid="chat-message"][data-channel="party"]')
     .filter({ hasText: 'party hello from alice' });
+  // Bob starts on the nearby channel: only the map line is visible.
   await expect(mapMessage).toHaveCount(1, { timeout: 10_000 });
-  await expect(partyMessage).toHaveCount(1, { timeout: 10_000 });
-
-  await bob.page.getByTestId('chat-filter-map').click();
-  await expect(mapMessage).toHaveCount(1);
   await expect(partyMessage).toHaveCount(0);
-  await bob.page.getByTestId('chat-filter-party').click();
+
+  // Switching to the party channel changes both the log and the composer.
+  await bob.page.getByTestId('chat-channel-party').click();
+  await expect(bob.page.getByTestId('chat-channel-party')).toHaveAttribute('aria-selected', 'true');
   await expect(mapMessage).toHaveCount(0);
-  await expect(partyMessage).toHaveCount(1);
+  await expect(partyMessage).toHaveCount(1, { timeout: 10_000 });
+  await expect(bob.page.getByTestId('chat-input')).toHaveAttribute('placeholder', '发送到队伍…');
   await bob.page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-chat-filter.png') });
 });
