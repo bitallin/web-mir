@@ -27,6 +27,7 @@ import {
 } from '@web-legend/contracts';
 import { STARTER_WILDS_MAP } from '@web-legend/contracts/maps';
 import { WorldState, type WorldStateInstance } from '@web-legend/contracts/world-state';
+import { findPath, type MovementGrid } from '@web-legend/game-simulation';
 import { eq } from 'drizzle-orm';
 import {
   createDatabase,
@@ -242,6 +243,40 @@ function pickTile(tiles: readonly Tile[], random: () => number): Tile {
   return tile;
 }
 
+const WILDS_GRID: MovementGrid = {
+  width: STARTER_WILDS_MAP.width,
+  height: STARTER_WILDS_MAP.height,
+  isWalkable: (x, y) => STARTER_WILDS_MAP.layers.collision[y * STARTER_WILDS_MAP.width + x] === 0,
+};
+
+const WILDS_PORTAL_KEYS = new Set(
+  STARTER_WILDS_MAP.portals.map((portal) => `${String(portal.tile.x)}:${String(portal.tile.y)}`),
+);
+
+function tileKey(tile: Tile): string {
+  return `${String(tile.x)}:${String(tile.y)}`;
+}
+
+/**
+ * The server transfers a player who steps on a portal tile, which would remove
+ * them from the measured wilds room. Shortest paths are allowed to cross that
+ * tile, so the scenario rejects targets whose planned route does.
+ */
+function pathCrossesPortal(from: Tile, to: Tile): boolean {
+  const path = findPath(WILDS_GRID, from, to);
+  return path === null || path.some((tile) => WILDS_PORTAL_KEYS.has(tileKey(tile)));
+}
+
+function safeTarget(from: Tile, tiles: readonly Tile[], random: () => number): Tile {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const target = pickTile(tiles, random);
+    if (!pathCrossesPortal(from, target)) {
+      return target;
+    }
+  }
+  return from;
+}
+
 function units(tile: Tile): { x: number; y: number } {
   return {
     x: tile.x * TILE_UNITS + TILE_UNITS / 2,
@@ -455,7 +490,12 @@ async function main(): Promise<void> {
   while (Date.now() - startedAt < options.durationMs) {
     const loopStart = Date.now();
     for (const client of clients) {
-      const target = pickTile(tiles, Math.random);
+      const self = client.room.state.players.get(client.characterId);
+      const from =
+        self === undefined
+          ? (STARTER_WILDS_MAP.spawnPoints[0] ?? { x: 0, y: 0 })
+          : { x: Math.floor(self.x / TILE_UNITS), y: Math.floor(self.y / TILE_UNITS) };
+      const target = safeTarget(from, tiles, Math.random);
       client.sequence += 1;
       client.room.send('move.to', {
         protocolVersion: PROTOCOL_VERSION,
@@ -471,12 +511,17 @@ async function main(): Promise<void> {
       }
       const monster = nearestMonster(client.room, client.characterId);
       client.sequence += 1;
+      const player = client.room.state.players.get(client.characterId);
+      const from =
+        player === undefined
+          ? (STARTER_WILDS_MAP.spawnPoints[0] ?? { x: 0, y: 0 })
+          : { x: Math.floor(player.x / TILE_UNITS), y: Math.floor(player.y / TILE_UNITS) };
       if (monster === null) {
         const spawn =
           STARTER_WILDS_MAP.monsterSpawns[
             Math.floor(Math.random() * STARTER_WILDS_MAP.monsterSpawns.length)
           ];
-        const target = spawn?.tile ?? pickTile(tiles, Math.random);
+        const target = safeTarget(from, spawn === undefined ? tiles : [spawn.tile], Math.random);
         client.room.send('move.to', {
           protocolVersion: PROTOCOL_VERSION,
           commandId: randomUUID(),
@@ -488,18 +533,24 @@ async function main(): Promise<void> {
         // Approach before swinging: attacking from across the map only
         // produces OUT_OF_RANGE rejections and makes the acceptance metric
         // meaningless (TD-QA-02).
-        const player = client.room.state.players.get(client.characterId);
         const distance =
           player === undefined
             ? Number.POSITIVE_INFINITY
             : Math.hypot(monster.x - player.x, monster.y - player.y);
         if (distance > 1.2 * TILE_UNITS) {
+          const monsterTile = {
+            x: Math.floor(monster.x / TILE_UNITS),
+            y: Math.floor(monster.y / TILE_UNITS),
+          };
+          const target = pathCrossesPortal(from, monsterTile)
+            ? safeTarget(from, tiles, Math.random)
+            : monsterTile;
           client.room.send('move.to', {
             protocolVersion: PROTOCOL_VERSION,
             commandId: randomUUID(),
             clientSequence: client.sequence,
-            targetTileX: Math.floor(monster.x / TILE_UNITS),
-            targetTileY: Math.floor(monster.y / TILE_UNITS),
+            targetTileX: target.x,
+            targetTileY: target.y,
           });
         } else {
           client.room.send('combat.basicAttack', {
@@ -652,9 +703,13 @@ async function main(): Promise<void> {
       client.room.connection.close();
     }
   }
+  // The report is committed above; the SDK can leave ping timers or sockets
+  // alive after a transfer, which would otherwise keep this CLI process
+  // running long after the measured window.
+  process.exit(0);
 }
 
 main().catch((error: unknown) => {
   process.stderr.write(`world scenario failed: ${String(error)}\n`);
-  process.exitCode = 1;
+  process.exit(1);
 });
