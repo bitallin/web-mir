@@ -4583,5 +4583,6 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
 
 ### 提交
 
-- 待提交（S4-C 私聊与在线目录、ADR-046、切片报告、状态/日志/债务/经验与
-  E2E 证据）。
+- `e4bcdef` `feat(alpha-03): add friend whispers through a process player
+directory`（私聊、PlayerDirectory、契约、服务端与客户端、测试、ADR-046、
+  切片报告、计划/债务/经验/演进记录、负载与 E2E 证据），已推送 `origin/main`。
