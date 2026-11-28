@@ -161,7 +161,8 @@ function dailyResetLabel(quest: QuestView): string | null {
 export function GameScreen({ character, onExit }: GameScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [chatDraft, setChatDraft] = useState('');
-  const [chatChannel, setChatChannel] = useState<'map' | 'party'>('map');
+  const [chatFilter, setChatFilter] = useState<'all' | 'map' | 'party'>('all');
+  const [chatSendChannel, setChatSendChannel] = useState<'map' | 'party'>('map');
   const [friendsOpen, setFriendsOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
@@ -457,17 +458,21 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     if (draft.trim().length === 0) {
       return;
     }
-    if (sendChat(draft, chatChannel)) {
+    if (sendChat(draft, chatSendChannel)) {
       setChatDraft('');
     }
-  }, [chatChannel, chatDraft, sendChat]);
+  }, [chatDraft, chatSendChannel, sendChat]);
 
-  // Leaving or losing the party must not leave the composer on a dead channel.
+  // Leaving or losing the party must not leave the view or composer on a dead
+  // channel; the log itself defaults to showing every channel.
   useEffect(() => {
-    if (state.party === null && chatChannel === 'party') {
-      setChatChannel('map');
+    if (state.party === null && chatFilter === 'party') {
+      setChatFilter('all');
     }
-  }, [state.party, chatChannel]);
+    if (state.party === null && chatSendChannel === 'party') {
+      setChatSendChannel('map');
+    }
+  }, [state.party, chatFilter, chatSendChannel]);
 
   // The server pushes snapshots on join and on changes; opening the panel also
   // asks for one so online state is current after a while in the background.
@@ -483,11 +488,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   );
   const onlineFriendCount = state.friends?.friends.filter((friend) => friend.online).length ?? 0;
   const friendTotal = state.friends?.friends.length ?? 0;
-  // One selector drives both what the log shows and where a new line goes, so
-  // the player never types into a channel they are not looking at.
+  // The log shows every channel by default; the header tabs only narrow what
+  // is visible, while the composer owns the send channel.
   const visibleMessages = useMemo(
-    () => state.messages.filter((message) => message.channel === chatChannel),
-    [chatChannel, state.messages],
+    () =>
+      chatFilter === 'all'
+        ? state.messages
+        : state.messages.filter((message) => message.channel === chatFilter),
+    [chatFilter, state.messages],
   );
 
   useEffect(() => {
@@ -1367,37 +1375,34 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         data-testid="chat-panel"
       >
         <div className="panel-heading">
-          <div className="chat-channel-tabs" role="tablist" aria-label="聊天频道">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={chatChannel === 'map'}
-              className={chatChannel === 'map' ? 'active' : ''}
-              data-testid="chat-channel-map"
-              onClick={() => {
-                setChatChannel('map');
-              }}
-            >
-              附近
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={chatChannel === 'party'}
-              className={chatChannel === 'party' ? 'active' : ''}
-              data-testid="chat-channel-party"
-              disabled={state.party === null}
-              title={state.party === null ? '加入队伍后可发送队伍消息' : undefined}
-              onClick={() => {
-                setChatChannel('party');
-              }}
-            >
-              队伍
-            </button>
+          <div className="chat-channel-tabs" role="tablist" aria-label="筛选聊天频道">
+            {(
+              [
+                ['all', '全部'],
+                ['map', '附近'],
+                ['party', '队伍'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={chatFilter === key}
+                className={chatFilter === key ? 'active' : ''}
+                data-testid={`chat-filter-${key}`}
+                disabled={key === 'party' && state.party === null}
+                title={
+                  key === 'party' && state.party === null ? '加入队伍后可查看队伍消息' : undefined
+                }
+                onClick={() => {
+                  setChatFilter(key);
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <span>
-            {chatChannel === 'party' ? `${state.party?.members.length ?? 0} 人` : mapName}
-          </span>
+          <span>{chatFilter === 'party' ? `${state.party?.members.length ?? 0} 人` : mapName}</span>
           <button
             type="button"
             className="chat-toggle"
@@ -1423,9 +1428,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
         <ul data-testid="chat-log">
           {visibleMessages.length === 0 ? (
             <li className="empty">
-              {chatChannel === 'party'
+              {chatFilter === 'party'
                 ? '队伍消息只有队伍成员能看到'
-                : '同地图的玩家都能看到这里的消息'}
+                : chatFilter === 'map'
+                  ? '同地图的玩家都能看到这里的消息'
+                  : '附近与队伍频道的消息会一起显示在这里'}
             </li>
           ) : null}
           {visibleMessages.map((message) => (
@@ -1448,10 +1455,24 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             submitChat();
           }}
         >
+          <select
+            className="chat-send-channel"
+            data-testid="chat-send-channel"
+            aria-label="发言频道"
+            value={chatSendChannel}
+            onChange={(event) => {
+              setChatSendChannel(event.currentTarget.value === 'party' ? 'party' : 'map');
+            }}
+          >
+            <option value="map">附近</option>
+            <option value="party" disabled={state.party === null}>
+              队伍
+            </option>
+          </select>
           <input
             type="text"
             data-testid="chat-input"
-            placeholder={chatChannel === 'party' ? '发送到队伍…' : '说点什么…'}
+            placeholder={chatSendChannel === 'party' ? '发送到队伍…' : '说点什么…'}
             maxLength={CHAT_MESSAGE_MAX_LENGTH}
             value={chatDraft}
             onChange={(event) => {

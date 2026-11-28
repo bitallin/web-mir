@@ -161,20 +161,14 @@ test('party leaders hand over command, kick, and chat privately', async ({ brows
   await expect(alice.page.getByTestId('party-member')).toHaveCount(2, { timeout: 10_000 });
   await expect(bob.page.getByTestId('party-member')).toHaveCount(2, { timeout: 10_000 });
 
-  // The party channel is private to members and shows a channel tag.
-  await expect(bob.page.getByTestId('chat-channel-party')).toBeEnabled({ timeout: 10_000 });
-  await alice.page.getByTestId('chat-channel-party').click();
-  await expect(alice.page.getByTestId('chat-channel-party')).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
+  // The party channel is private to members and shows a channel tag. The
+  // composer select chooses where the line goes; the log still shows every
+  // channel by default, so Bob needs no extra switch to read it.
+  await expect(bob.page.getByTestId('chat-filter-party')).toBeEnabled({ timeout: 10_000 });
+  await alice.page.getByTestId('chat-send-channel').selectOption('party');
+  await expect(alice.page.getByTestId('chat-send-channel')).toHaveValue('party');
   await alice.page.getByTestId('chat-input').fill('follow me to the east gate');
   await alice.page.getByTestId('chat-send').click();
-
-  // The channel selector drives both the log and the composer: Bob switches to
-  // the party channel to see the private line.
-  await bob.page.getByTestId('chat-channel-party').click();
-  await expect(bob.page.getByTestId('chat-channel-party')).toHaveAttribute('aria-selected', 'true');
 
   const partyMessages = (page: Page) =>
     page.locator('[data-testid="chat-message"][data-channel="party"]');
@@ -205,8 +199,9 @@ test('party leaders hand over command, kick, and chat privately', async ({ brows
   await expect(alice.page.getByTestId('party-panel')).toHaveCount(0, { timeout: 10_000 });
   await expect(bob.page.getByTestId('party-member')).toHaveCount(1);
   await expect(bob.page.getByTestId('party-size')).toHaveText('1/4');
-  // The kicked player's composer falls back to map chat.
-  await expect(alice.page.getByTestId('chat-channel-party')).toBeDisabled();
-  await expect(alice.page.getByTestId('chat-channel-map')).toHaveAttribute('aria-selected', 'true');
+  // The kicked player loses the party view and the composer falls back to map.
+  await expect(alice.page.getByTestId('chat-filter-party')).toBeDisabled();
+  await expect(alice.page.getByTestId('chat-filter-all')).toHaveAttribute('aria-selected', 'true');
+  await expect(alice.page.getByTestId('chat-send-channel')).toHaveValue('map');
   await bob.page.screenshot({ path: join(socialDir, 'e2e-member-kicked.png') });
 });

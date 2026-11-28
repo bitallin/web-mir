@@ -108,11 +108,12 @@ test('players add a friend, invite them to a party, and filter chat channels', a
   await expect(alice.page.getByTestId('party-member')).toHaveCount(2, { timeout: 10_000 });
   await expect(bob.page.getByTestId('party-member')).toHaveCount(2, { timeout: 10_000 });
 
-  // Chat stays private by channel, and the client can filter the log.
-  await alice.page.getByTestId('chat-channel-map').click();
+  // Chat stays private by channel. The log shows every channel by default;
+  // the composer select chooses where the next line goes.
   await alice.page.getByTestId('chat-input').fill('map hello from alice');
   await alice.page.getByTestId('chat-send').click();
-  await alice.page.getByTestId('chat-channel-party').click();
+  await alice.page.getByTestId('chat-send-channel').selectOption('party');
+  await expect(alice.page.getByTestId('chat-send-channel')).toHaveValue('party');
   await alice.page.getByTestId('chat-input').fill('party hello from alice');
   await alice.page.getByTestId('chat-send').click();
 
@@ -122,15 +123,22 @@ test('players add a friend, invite them to a party, and filter chat channels', a
   const partyMessage = bob.page
     .locator('[data-testid="chat-message"][data-channel="party"]')
     .filter({ hasText: 'party hello from alice' });
-  // Bob starts on the nearby channel: only the map line is visible.
+  // Bob's log defaults to “all”, so both channels are visible at once.
   await expect(mapMessage).toHaveCount(1, { timeout: 10_000 });
-  await expect(partyMessage).toHaveCount(0);
-
-  // Switching to the party channel changes both the log and the composer.
-  await bob.page.getByTestId('chat-channel-party').click();
-  await expect(bob.page.getByTestId('chat-channel-party')).toHaveAttribute('aria-selected', 'true');
-  await expect(mapMessage).toHaveCount(0);
   await expect(partyMessage).toHaveCount(1, { timeout: 10_000 });
+
+  // Filtering narrows the log only; it must not change where a line is sent.
+  await bob.page.getByTestId('chat-filter-map').click();
+  await expect(bob.page.getByTestId('chat-filter-map')).toHaveAttribute('aria-selected', 'true');
+  await expect(mapMessage).toHaveCount(1);
+  await expect(partyMessage).toHaveCount(0);
+  await expect(bob.page.getByTestId('chat-send-channel')).toHaveValue('map');
+
+  await bob.page.getByTestId('chat-filter-party').click();
+  await expect(mapMessage).toHaveCount(0);
+  await expect(partyMessage).toHaveCount(1);
+  await expect(bob.page.getByTestId('chat-send-channel')).toHaveValue('map');
+  await bob.page.getByTestId('chat-send-channel').selectOption('party');
   await expect(bob.page.getByTestId('chat-input')).toHaveAttribute('placeholder', '发送到队伍…');
   await bob.page.screenshot({ path: join(ARTIFACT_DIR, 'e2e-chat-filter.png') });
 });
