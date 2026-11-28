@@ -4875,3 +4875,87 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
 ### 提交
 
 - `0dfebf4` `feat(alpha-03): add persistent guilds with invites and guild chat`。
+
+## 2026-11-28 Alpha 0.3 S5-B：行会目录与入会申请
+
+### 目标
+
+试玩反馈：玩家点击「行会」时应该看到所有行会，并可以申请入会。S5-A 只能由
+在线会长邀请，本切片补上发现与申请入口，同时保持成员名单、在线状态与申请
+列表私有。
+
+### 实际改动
+
+1. **ADR**：新增 ADR-049，确定公开目录摘要、持久化多行会申请、仅会长审批、
+   接受时事务加入并清理其他申请。
+2. **契约**：`guild.ts` 增加目录摘要/目录快照/申请视图与 `applications`
+   （默认空）、四条命令；`realtime.ts` 增加对应消息、频道无关的拒绝码
+   `GUILD_APPLICATION_NOT_FOUND`。
+3. **持久化**：`guild_applications` 表（行会+角色唯一、级联删除）与迁移
+   `0013`；目录聚合查询、申请 CRUD、会长/申请人查询。
+4. **应用**：`GuildService` 增加 `directory`、`apply`、`applications`、
+   `acceptApplication`、`declineApplication`；加入行会或创建行会时清理申请人
+   的其他申请；过期申请在事务提交后删除再报错。
+5. **服务端**：`guild.directory` 命令与消息、`guild.apply` / `guild.apply.accept`
+   / `guild.apply.decline`；会长快照携带申请；申请时刷新会长并提示；接受/拒绝
+   通知申请人。
+6. **客户端**：未入会时行会面板显示本区行会列表与申请/申请中/已满；会长看到
+   「入会申请」及接受/拒绝；申请与审批后名单即时更新。
+7. **工具**：压测脚本站位目标与攻击接近路径避免经过传送门；报告写完后显式
+   退出，避免进程悬挂。
+
+### 命令与结果
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm exec playwright test tests/e2e/guild.spec.ts
+pnpm test:e2e
+pnpm build
+pnpm db:migrate
+pnpm verify:invariants
+LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
+  LOAD_OUTPUT=docs/phase-reports/alpha-03/guild/load-50p2a-directory.json \
+  pnpm --filter @web-legend/game-server load:scenario
+```
+
+- 格式 / lint / 类型检查：通过（本容器实际 Node v24.22.2；Node 26 安装不完整）。
+- 单元/集成：89 文件、**659 测试**通过。
+- 行会 E2E：1/1 通过（16.2 秒）；全量 **52/52 通过（6.3 分钟）**。
+- 构建：通过。
+- 容量：50 人 × 2 分钟 50/50、接受率 98.8%、201 击杀、0 资产失败；
+  tick p50 1.42ms / p95 **3.8ms** / p99 5.12ms / max 5.76ms；资产事务
+  p95 52.49ms（`guild/load-50p2a-directory.json`）。
+- 资产不变量：7/7 为 0（`guild/database-invariants.txt`）。
+- 开发栈：迁移 `0013` 已应用；84–87 已重启到本切片代码，4 个健康 200；
+  8584 双浏览器实测目录→申请→会长接受→名单 2 人通过
+  （`guild/dev-8584-guild-directory.png`）。
+
+### 遇到的问题及解决方法
+
+1. **过期申请删除被回滚**：接受时若申请人已加入其他行会，事务内删除后直接
+   抛错会回滚删除；改为事务返回“已加入”标记，提交后再抛错。
+2. **压测机器人被传送门带走**：首跑 4 人走进主城传送门，野区只剩 46 人；移动
+   与接近路径先寻路，经过传送门就改选安全目标；复跑 50/50。
+3. **压测脚本写完报告不退出**：SDK 残留定时器/套接字；teardown 末尾显式退出，
+   2 人 3 秒冒烟验证。
+4. **全量 E2E 首轮 combat 技能冷却抖动**：单跑与次轮全量通过，属于既有共享
+   刷点/时序抖动（TD-QA-11），未降低断言。
+
+### 尚未解决
+
+- 真人长时间试玩；申请过期/数量限制、目录分页/搜索（TD-SRV-18）。
+- 行会公告、副会长/职位、改名（TD-CLI-25 剩余）；远端 CI 与 Node 26 复跑。
+
+### 下一步计划
+
+1. 玩家交易最小版（先 ADR）。
+2. 3 人副本实例或排行榜最小版。
+3. 按试玩反馈决定行会公告/职位/搜索；正式美术与八方向角色帧。
+
+### 提交
+
+- `8100200` `feat(alpha-03): add a guild directory and join applications`。
+- `5b765d2` `fix(game-server): keep load bots off the portal and exit cleanly`。

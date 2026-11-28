@@ -1,9 +1,9 @@
-# database invariants, 2026-11-28T12:23:04Z
+# database invariants, 2026-11-28T13:18:41Z
 Pager usage is off.
 counts
-{ "accounts" : 4465, "characters" : 4300, "items" : 4044, "drops" : 566, "wallets" : 590, "ledger" : 11139, "releases" : 49, "outbox" : 52, "audits" : 279, "realms" : 9 }
+{ "accounts" : 4571, "characters" : 4406, "items" : 4181, "drops" : 691, "wallets" : 614, "ledger" : 11540, "releases" : 49, "outbox" : 52, "audits" : 279, "realms" : 9 }
 containers
-{ "ground" : 6, "equipment" : 79, "inventory" : 3959 }
+{ "ground" : 2, "equipment" : 79, "inventory" : 4100 }
 wallet-ledger-mismatch
 0
 negative-wallets
