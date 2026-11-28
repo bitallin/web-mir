@@ -5038,4 +5038,4 @@ LOAD_PLAYERS=50 LOAD_ATTACKERS=10 LOAD_DURATION_MS=120000 \
 
 ### 提交
 
-- 待提交：`feat(alpha-03): add face-to-face player trading`。
+- `4f50f2b` `feat(alpha-03): add face-to-face player trading`。

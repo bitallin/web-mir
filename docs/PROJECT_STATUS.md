@@ -24,9 +24,9 @@
   `docs/ADR/ADR-050-face-to-face-player-trading.md`。
 - **正在工作**：开发栈 84–87 已重启到本切片代码（14:59），4 个服务健康 200，
   内容 `2026.11.27.7`；可在 8584 双浏览器试玩交易。
-- **最近提交**：`fd2ed43` 行会目录文档；`8100200` `feat(alpha-03): add a guild
-directory and join applications`；`5b765d2` 压测脚本修复；更早的行会闭环与
-  文档已推送 `origin/main`。本切片提交见 `docs/WORKLOG.md`。
+- **最近提交**：`4f50f2b` `feat(alpha-03): add face-to-face player trading`；
+  `fd2ed43` 行会目录文档；`8100200` `feat(alpha-03): add a guild directory and
+join applications`；更早的行会闭环文档已推送 `origin/main`。
 - **未完成/阻塞**：完整人工试玩交易（跨图、断线、报价修改）；1,000 次交易
   经济压力测试（Alpha 0.3 版本门禁）；交易税/历史/部分数量/黑名单/拍卖行
   （TD-ECO-06）；交易会话仅 Room 内存（TD-SRV-19）；
