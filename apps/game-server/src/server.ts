@@ -25,6 +25,7 @@ import { renderGameServerPrometheus } from './prometheus';
 import { DiagnosticsRoom } from './rooms/diagnosticsRoom';
 import { WorldMapRoom } from './rooms/worldMapRoom';
 import { ContentStore, type ContentProvider } from './world/contentStore';
+import { GuildInviteService } from './world/guildInvites';
 import { createMapInstances } from './world/mapRegistry';
 import { PlayerDirectory } from './world/playerDirectory';
 import { PartyService } from './world/partyService';
@@ -120,6 +121,7 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
   // on the process rather than in a room (ADR-036, ADR-045, ADR-046).
   const playerDirectory = new PlayerDirectory();
   const partyService = new PartyService({ directory: playerDirectory });
+  const guildInviteService = new GuildInviteService({ directory: playerDirectory });
 
   const server = new Server({
     // index.ts owns SIGTERM/SIGINT so it can drain rooms, stop metrics and
@@ -254,6 +256,7 @@ export function createGameServer(options: CreateGameServerOptions): GameServerRu
       contentStore,
       adminHub,
       partyService,
+      guildInviteService,
       playerDirectory,
       realmCode: env.GAME_SERVER_REALM,
       ...options.world,

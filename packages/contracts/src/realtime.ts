@@ -42,6 +42,14 @@ export const CLIENT_MESSAGES = {
   friendDecline: 'friend.decline',
   friendRemove: 'friend.remove',
   friendList: 'friend.list',
+  guildCreate: 'guild.create',
+  guildInvite: 'guild.invite',
+  guildAccept: 'guild.accept',
+  guildDecline: 'guild.decline',
+  guildLeave: 'guild.leave',
+  guildKick: 'guild.kick',
+  guildDisband: 'guild.disband',
+  guildList: 'guild.list',
 } as const;
 
 export const SERVER_MESSAGES = {
@@ -68,6 +76,10 @@ export const SERVER_MESSAGES = {
   friendSnapshot: 'friend.snapshot',
   friendPresence: 'friend.presence',
   friendRefresh: 'friend.refresh',
+  guildSnapshot: 'guild.snapshot',
+  guildInvite: 'guild.invite',
+  guildPresence: 'guild.presence',
+  guildRefresh: 'guild.refresh',
 } as const;
 
 /**
@@ -147,10 +159,11 @@ export type MoveStopCommand = z.infer<typeof moveStopCommandSchema>;
 export const CHAT_MESSAGE_MAX_LENGTH = 120 as const;
 
 /**
- * Map chat reaches everyone in the room; party chat is routed to members only;
- * whisper reaches one friend through whichever room hosts them (ADR-046).
+ * Map chat reaches everyone in the room; party and guild chat are routed to
+ * members only; whisper reaches one friend through whichever room hosts them
+ * (ADR-046, ADR-048).
  */
-export const CHAT_CHANNELS = ['map', 'party', 'whisper'] as const;
+export const CHAT_CHANNELS = ['map', 'party', 'guild', 'whisper'] as const;
 export const chatChannelSchema = z.enum(CHAT_CHANNELS);
 export type ChatChannel = z.infer<typeof chatChannelSchema>;
 
@@ -302,6 +315,18 @@ export const COMMAND_REJECTION_CODES = [
   'FRIEND_REQUEST_NOT_FOUND',
   'FRIEND_NOT_FRIENDS',
   'CHAT_TARGET_UNAVAILABLE',
+  'GUILD_NAME_TAKEN',
+  'GUILD_ALREADY_IN_GUILD',
+  'GUILD_NOT_IN_GUILD',
+  'GUILD_LEVEL_TOO_LOW',
+  'GUILD_NOT_LEADER',
+  'GUILD_TARGET_SELF',
+  'GUILD_TARGET_IN_GUILD',
+  'GUILD_TARGET_UNAVAILABLE',
+  'GUILD_FULL',
+  'GUILD_INVITE_EXPIRED',
+  'GUILD_NOT_FOUND',
+  'GUILD_TARGET_NOT_MEMBER',
   'SERVICE_UNAVAILABLE',
 ] as const;
 
@@ -361,6 +386,18 @@ export const COMMAND_REJECTION_MESSAGES: Record<CommandRejectionCode, string> = 
   FRIEND_REQUEST_NOT_FOUND: '好友申请不存在或已处理',
   FRIEND_NOT_FRIENDS: '对方不是你的好友',
   CHAT_TARGET_UNAVAILABLE: '对方不在线，或你们还不是好友',
+  GUILD_NAME_TAKEN: '该行会名已被占用',
+  GUILD_ALREADY_IN_GUILD: '你已经在行会中',
+  GUILD_NOT_IN_GUILD: '你当前不在行会中',
+  GUILD_LEVEL_TOO_LOW: '等级不足，无法创建行会',
+  GUILD_NOT_LEADER: '只有会长可以执行该操作',
+  GUILD_TARGET_SELF: '不能对自己执行该操作',
+  GUILD_TARGET_IN_GUILD: '对方已经加入了行会',
+  GUILD_TARGET_UNAVAILABLE: '对方不在线，或不在本区服',
+  GUILD_FULL: '行会人数已满',
+  GUILD_INVITE_EXPIRED: '行会邀请已过期或不存在',
+  GUILD_NOT_FOUND: '行会不存在或已经解散',
+  GUILD_TARGET_NOT_MEMBER: '对方不在你的行会中',
   SERVICE_UNAVAILABLE: '资产服务暂不可用，请稍后重试',
 };
 

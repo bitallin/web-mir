@@ -103,13 +103,13 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 10px;
+  margin-top: 7px;
 }
 
-/* Six actions must stay on one row so the status plate keeps its compact
-   footprint (hud.spec.ts asserts the plate never grows into the play area). */
+/* Seven actions (plus the merchant when nearby) must stay compact so the
+   status plate never grows into the play area (hud.spec.ts). */
 .player-actions .bag-toggle {
-  padding: 3px 7px;
+  padding: 2px 6px;
 }
 
 .eyebrow {
@@ -468,6 +468,88 @@ body {
   border-color: #2b323a;
   color: var(--muted);
   cursor: not-allowed;
+}
+
+.player-guild {
+  padding: 2px 8px;
+  border: 1px solid #6b5a33;
+  background: transparent;
+  color: #e0c88f;
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.player-guild:hover:not(:disabled) {
+  background: rgba(200, 170, 100, 0.14);
+}
+
+.guild-invite {
+  border-color: #6b5a33;
+}
+
+.guild-create {
+  padding: 8px 16px;
+}
+
+.guild-create h3 {
+  margin: 0 0 8px;
+  color: var(--gold);
+  font-family: var(--serif);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.guild-create form {
+  display: flex;
+  gap: 8px;
+}
+
+.guild-create input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #2b323a;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.guild-create button {
+  padding: 4px 12px;
+  border: 1px solid #6b5a33;
+  background: transparent;
+  color: #e0c88f;
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.guild-create button:disabled {
+  border-color: #2b323a;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.guild-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 16px;
+  border-bottom: 1px solid #2b323a;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.guild-summary .friend-actions {
+  margin-left: auto;
+}
+
+.guild-member-list li {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
 }
 
 .friend-panel {
@@ -1244,6 +1326,11 @@ body {
 .chat-channel-tag.whisper {
   border-color: #5c4a7a;
   color: #c9a7ff;
+}
+
+.chat-channel-tag.guild {
+  border-color: #6b5a33;
+  color: #e0c88f;
 }
 
 .chat-panel ul {

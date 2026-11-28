@@ -168,8 +168,12 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const chatHistoryRef = useRef<string[]>([]);
   const chatHistoryIndexRef = useRef(-1);
   const [chatDraft, setChatDraft] = useState('');
-  const [chatFilter, setChatFilter] = useState<'all' | 'map' | 'party' | 'whisper'>('all');
-  const [chatSendChannel, setChatSendChannel] = useState<'map' | 'party' | 'whisper'>('map');
+  const [chatFilter, setChatFilter] = useState<'all' | 'map' | 'party' | 'guild' | 'whisper'>(
+    'all',
+  );
+  const [chatSendChannel, setChatSendChannel] = useState<'map' | 'party' | 'guild' | 'whisper'>(
+    'map',
+  );
   const [whisperTarget, setWhisperTarget] = useState<{
     playerId: string;
     displayName: string;
@@ -177,6 +181,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
   const [whisperUnread, setWhisperUnread] = useState(false);
   const seenWhisperIdRef = useRef<string | null>(null);
   const [friendsOpen, setFriendsOpen] = useState(false);
+  const [guildOpen, setGuildOpen] = useState(false);
+  const [guildDraft, setGuildDraft] = useState('');
   const [now, setNow] = useState(() => Date.now());
   const [bagOpen, setBagOpen] = useState(false);
   const [bagSorted, setBagSorted] = useState(false);
@@ -221,6 +227,14 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     declineFriendRequest,
     removeFriend,
     refreshFriends,
+    createGuild,
+    inviteToGuild,
+    acceptGuildInvite,
+    declineGuildInvite,
+    leaveGuild,
+    kickGuildMember,
+    disbandGuild,
+    refreshGuild,
     toggleSfx,
   } = useWorldSession(containerRef, {
     character,
@@ -238,6 +252,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
 
   const classDefinition = CHARACTER_CLASS_CATALOG[character.classId];
   const partyLeaderId = state.party?.leaderId ?? null;
+  const isGuildLeader = state.guild !== null && state.guild.leaderId === state.selfId;
   const self = state.players.find((player) => player.playerId === state.selfId);
   const selfName = self?.displayName;
   const mapName = mapNameFor(state.mapId);
@@ -384,6 +399,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     setShopOpen(false);
     setBagOpen(false);
     setFriendsOpen(false);
+    setGuildOpen(false);
   };
   const reviveSeconds =
     state.reviveAt === null ? null : Math.max(0, Math.ceil((state.reviveAt - now) / 1_000));
@@ -520,7 +536,13 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     if (state.party === null && chatSendChannel === 'party') {
       setChatSendChannel('map');
     }
-  }, [state.party, chatFilter, chatSendChannel]);
+    if (state.guild === null && chatFilter === 'guild') {
+      setChatFilter('all');
+    }
+    if (state.guild === null && chatSendChannel === 'guild') {
+      setChatSendChannel('map');
+    }
+  }, [state.party, state.guild, chatFilter, chatSendChannel]);
 
   // A whisper target can go offline or be removed while the panel is open;
   // the composer must not keep pointing at a player who cannot receive.
@@ -550,9 +572,19 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
     }
   }, [friendsOpen, refreshFriends]);
 
+  useEffect(() => {
+    if (guildOpen) {
+      refreshGuild();
+    }
+  }, [guildOpen, refreshGuild]);
+
   const friendIds = useMemo(
     () => new Set(state.friends?.friends.map((friend) => friend.playerId) ?? []),
     [state.friends],
+  );
+  const guildMemberIds = useMemo(
+    () => new Set(state.guild?.members.map((member) => member.playerId) ?? []),
+    [state.guild],
   );
   const onlineFriendIds = useMemo(
     () =>
@@ -718,6 +750,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                     setShopOpen(false);
                     setQuestOpen(false);
                     setFriendsOpen(false);
+                    setGuildOpen(false);
                   }
                 }}
               >
@@ -761,6 +794,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                     setShopOpen(false);
                     setQuestOpen(false);
                     setBagOpen(false);
+                    setGuildOpen(false);
                   }
                 }}
               >
@@ -768,6 +802,29 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 {state.friends !== null && state.friends.incoming.length > 0 ? (
                   <em className="friend-badge" data-testid="friend-badge">
                     {state.friends.incoming.length}
+                  </em>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className="bag-toggle"
+                data-testid="guild-toggle"
+                aria-expanded={guildOpen}
+                onClick={() => {
+                  const next = !guildOpen;
+                  setGuildOpen(next);
+                  if (next) {
+                    setShopOpen(false);
+                    setQuestOpen(false);
+                    setBagOpen(false);
+                    setFriendsOpen(false);
+                  }
+                }}
+              >
+                行会
+                {state.guildInvite !== null ? (
+                  <em className="friend-badge" data-testid="guild-badge">
+                    邀
                   </em>
                 ) : null}
               </button>
@@ -785,6 +842,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                       setBagOpen(false);
                       setQuestOpen(false);
                       setFriendsOpen(false);
+                      setGuildOpen(false);
                     }
                   }}
                 >
@@ -943,6 +1001,41 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                   data-testid="party-invite-decline"
                   onClick={() => {
                     declinePartyInvite();
+                  }}
+                >
+                  拒绝
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {state.guildInvite !== null ? (
+            <section
+              className="party-invite guild-invite"
+              data-testid="guild-invite"
+              aria-live="polite"
+            >
+              <p>
+                <strong>{state.guildInvite.fromDisplayName}</strong> 邀请你加入行会「
+                {state.guildInvite.guildName}」
+              </p>
+              <div className="party-invite-actions">
+                <button
+                  type="button"
+                  className="party-accept"
+                  data-testid="guild-invite-accept"
+                  onClick={() => {
+                    acceptGuildInvite();
+                  }}
+                >
+                  接受
+                </button>
+                <button
+                  type="button"
+                  className="party-decline"
+                  data-testid="guild-invite-decline"
+                  onClick={() => {
+                    declineGuildInvite();
                   }}
                 >
                   拒绝
@@ -1203,6 +1296,19 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                             加好友
                           </button>
                         )
+                      ) : null}
+                      {player.connected && isGuildLeader && !guildMemberIds.has(player.playerId) ? (
+                        <button
+                          type="button"
+                          className="player-guild"
+                          data-testid="player-guild-invite"
+                          data-player-id={player.playerId}
+                          onClick={() => {
+                            inviteToGuild(player.playerId);
+                          }}
+                        >
+                          邀请入会
+                        </button>
                       ) : null}
                     </span>
                   ) : null}
@@ -1495,6 +1601,7 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 ['all', '全部'],
                 ['map', '附近'],
                 ['party', '队伍'],
+                ['guild', '行会'],
                 ['whisper', '私聊'],
               ] as const
             ).map(([key, label]) => (
@@ -1505,9 +1612,16 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
                 aria-selected={chatFilter === key}
                 className={chatFilter === key ? 'active' : ''}
                 data-testid={`chat-filter-${key}`}
-                disabled={key === 'party' && state.party === null}
+                disabled={
+                  (key === 'party' && state.party === null) ||
+                  (key === 'guild' && state.guild === null)
+                }
                 title={
-                  key === 'party' && state.party === null ? '加入队伍后可查看队伍消息' : undefined
+                  key === 'party' && state.party === null
+                    ? '加入队伍后可查看队伍消息'
+                    : key === 'guild' && state.guild === null
+                      ? '加入行会后可查看行会消息'
+                      : undefined
                 }
                 onClick={() => {
                   chatPinnedRef.current = true;
@@ -1528,9 +1642,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
           <span>
             {chatFilter === 'party'
               ? `${state.party?.members.length ?? 0} 人`
-              : chatFilter === 'whisper'
-                ? (whisperTarget?.displayName ?? '未选择对象')
-                : mapName}
+              : chatFilter === 'guild'
+                ? (state.guild?.name ?? '未加入行会')
+                : chatFilter === 'whisper'
+                  ? (whisperTarget?.displayName ?? '未选择对象')
+                  : mapName}
           </span>
           <button
             type="button"
@@ -1566,13 +1682,15 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             <li className="empty">
               {chatFilter === 'party'
                 ? '队伍消息只有队伍成员能看到'
-                : chatFilter === 'map'
-                  ? '同地图的玩家都能看到这里的消息'
-                  : chatFilter === 'whisper'
-                    ? whisperTarget === null
-                      ? '在好友列表点击「私聊」开始对话'
-                      : `正在与 ${whisperTarget.displayName} 私聊，只有你们两人能看到`
-                    : '附近、队伍与私聊消息会一起显示在这里'}
+                : chatFilter === 'guild'
+                  ? '行会消息只有行会成员能看到'
+                  : chatFilter === 'map'
+                    ? '同地图的玩家都能看到这里的消息'
+                    : chatFilter === 'whisper'
+                      ? whisperTarget === null
+                        ? '在好友列表点击「私聊」开始对话'
+                        : `正在与 ${whisperTarget.displayName} 私聊，只有你们两人能看到`
+                      : '附近、队伍、行会与私聊消息会一起显示在这里'}
             </li>
           ) : null}
           {visibleMessages.map((message) => (
@@ -1583,6 +1701,9 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               data-channel={message.channel}
             >
               {message.channel === 'party' ? <span className="chat-channel-tag">队伍</span> : null}
+              {message.channel === 'guild' ? (
+                <span className="chat-channel-tag guild">行会</span>
+              ) : null}
               {message.channel === 'whisper' ? (
                 <span className="chat-channel-tag whisper">
                   {message.playerId === state.selfId
@@ -1626,6 +1747,8 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
               const next = event.currentTarget.value;
               if (next === 'party') {
                 setChatSendChannel('party');
+              } else if (next === 'guild') {
+                setChatSendChannel('guild');
               } else if (next === 'whisper' && whisperTarget !== null) {
                 setChatSendChannel('whisper');
               } else {
@@ -1636,6 +1759,9 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             <option value="map">附近</option>
             <option value="party" disabled={state.party === null}>
               队伍
+            </option>
+            <option value="guild" disabled={state.guild === null}>
+              行会
             </option>
             <option value="whisper" disabled={whisperTarget === null}>
               {whisperTarget === null ? '私聊（未选择）' : `私聊·${whisperTarget.displayName}`}
@@ -1659,9 +1785,11 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             placeholder={
               chatSendChannel === 'party'
                 ? '发送到队伍…'
-                : chatSendChannel === 'whisper'
-                  ? `发送给 ${whisperTarget?.displayName ?? '好友'}…`
-                  : '说点什么…'
+                : chatSendChannel === 'guild'
+                  ? '发送到行会…'
+                  : chatSendChannel === 'whisper'
+                    ? `发送给 ${whisperTarget?.displayName ?? '好友'}…`
+                    : '说点什么…'
             }
             maxLength={CHAT_MESSAGE_MAX_LENGTH}
             value={chatDraft}
@@ -2107,6 +2235,173 @@ export function GameScreen({ character, onExit }: GameScreenProps) {
             接取后点「前往击杀」或「前往探索」自动寻路（击杀目标会自动战斗）；
             完成后点「回去交付」返回并自动交付。
           </p>
+        </aside>
+      ) : null}
+
+      {guildOpen ? (
+        <aside className="hud friend-panel guild-panel" data-testid="guild-panel" aria-label="行会">
+          <div className="panel-heading">
+            <h2>行会</h2>
+            <span data-testid="guild-name">{state.guild?.name ?? '未加入'}</span>
+            <button
+              type="button"
+              className="panel-close"
+              data-testid="guild-close"
+              onClick={() => {
+                setGuildOpen(false);
+              }}
+            >
+              关闭
+            </button>
+          </div>
+          {state.guild === null ? (
+            <>
+              <section className="guild-create">
+                <h3>创建行会</h3>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const name = guildDraft.trim();
+                    if (name.length < 2) {
+                      return;
+                    }
+                    if (createGuild(name)) {
+                      setGuildDraft('');
+                    }
+                  }}
+                >
+                  <input
+                    type="text"
+                    data-testid="guild-name-input"
+                    aria-label="行会名称"
+                    placeholder="2–12 个字"
+                    maxLength={12}
+                    value={guildDraft}
+                    onChange={(event) => {
+                      setGuildDraft(event.target.value);
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    data-testid="guild-create"
+                    disabled={guildDraft.trim().length < 2}
+                  >
+                    创建
+                  </button>
+                </form>
+                <p className="shop-hint">角色达到 5 级可以创建行会。会长可以邀请在线玩家。</p>
+              </section>
+              {state.guildInvite !== null ? (
+                <section className="friend-section" data-testid="guild-panel-invite">
+                  <h3>行会邀请</h3>
+                  <p>
+                    {state.guildInvite.fromDisplayName} 邀请你加入「{state.guildInvite.guildName}」
+                  </p>
+                  <span className="friend-actions">
+                    <button
+                      type="button"
+                      data-testid="guild-panel-invite-accept"
+                      onClick={() => {
+                        acceptGuildInvite();
+                      }}
+                    >
+                      接受
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="guild-panel-invite-decline"
+                      onClick={() => {
+                        declineGuildInvite();
+                      }}
+                    >
+                      拒绝
+                    </button>
+                  </span>
+                </section>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div
+                className="guild-summary"
+                data-testid="guild-summary"
+                data-guild-id={state.guild.guildId}
+                data-leader-id={state.guild.leaderId}
+              >
+                <span data-testid="guild-size">
+                  {state.guild.members.length}/{state.guild.memberLimit} 人
+                </span>
+                <span data-testid="guild-leader">
+                  会长 {state.guild.members.find((member) => member.leader)?.displayName ?? '未知'}
+                </span>
+                <span className="friend-actions">
+                  <button
+                    type="button"
+                    data-testid="guild-leave"
+                    onClick={() => {
+                      leaveGuild();
+                    }}
+                  >
+                    离会
+                  </button>
+                  {isGuildLeader ? (
+                    <button
+                      type="button"
+                      className="party-kick"
+                      data-testid="guild-disband"
+                      onClick={() => {
+                        disbandGuild();
+                      }}
+                    >
+                      解散
+                    </button>
+                  ) : null}
+                </span>
+              </div>
+              <ul className="friend-list guild-member-list" data-testid="guild-members">
+                {state.guild.members.map((member) => (
+                  <li
+                    key={member.playerId}
+                    data-testid="guild-member"
+                    data-player-id={member.playerId}
+                    data-name={member.displayName}
+                    data-online={member.online ? 'true' : 'false'}
+                    data-leader={member.leader ? 'true' : 'false'}
+                  >
+                    <span
+                      className={`friend-dot${member.online ? ' online' : ''}`}
+                      aria-hidden="true"
+                    />
+                    <span className="friend-name">
+                      {member.displayName}
+                      {member.leader ? <em>会长</em> : null}
+                      {member.playerId === state.selfId ? <em>你</em> : null}
+                    </span>
+                    <span className="friend-meta">Lv.{member.level}</span>
+                    <span className={`party-member-state ${member.alive ? '' : 'offline'}`}>
+                      {!member.online ? '离线' : member.alive ? '在线' : '倒下'}
+                    </span>
+                    {isGuildLeader && member.playerId !== state.selfId ? (
+                      <button
+                        type="button"
+                        className="party-kick"
+                        data-testid="guild-kick"
+                        data-player-id={member.playerId}
+                        onClick={() => {
+                          kickGuildMember(member.playerId);
+                        }}
+                      >
+                        踢出
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <p className="shop-hint">
+                只有会长可以邀请和踢人；会长离会时，行会交给最早加入的成员。行会频道只有成员能看到。
+              </p>
+            </>
+          )}
         </aside>
       ) : null}
 

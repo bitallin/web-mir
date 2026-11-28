@@ -31,6 +31,8 @@ export {
 export type { ContentActivation, ContentDraft, ContentRelease } from './content';
 export { FRIENDSHIP_STATUS_IDS, friendships } from './friendships';
 export type { Friendship, FriendshipStatusId, NewFriendship } from './friendships';
+export { GUILD_ROLE_IDS, guildMembers, guilds } from './guilds';
+export type { Guild, GuildMember, GuildRoleId, NewGuild, NewGuildMember } from './guilds';
 export { gameTickets } from './gameTickets';
 export type { GameTicket } from './gameTickets';
 export {

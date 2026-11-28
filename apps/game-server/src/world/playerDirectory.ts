@@ -2,6 +2,8 @@ import type {
   CharacterClass,
   ChatMessage,
   FriendPresence,
+  GuildInviteView,
+  GuildPresence,
   PartyInviteView,
 } from '@web-legend/contracts';
 
@@ -36,7 +38,11 @@ export type PlayerDelivery =
   | { kind: 'chat'; message: ChatMessage }
   | { kind: 'party.invite'; invite: PartyInviteView }
   | { kind: 'party.refresh' }
-  | { kind: 'friend.event'; event: FriendServerEvent };
+  | { kind: 'friend.event'; event: FriendServerEvent }
+  | { kind: 'guild.invite'; invite: GuildInviteView }
+  | { kind: 'guild.refresh' }
+  | { kind: 'guild.presence'; presence: GuildPresence }
+  | { kind: 'notice'; notice: { kind: 'info' | 'warning' | 'error'; message: string } };
 
 export type PlayerRoomPort = {
   deliver: (playerId: string, delivery: PlayerDelivery) => void;

@@ -2,6 +2,8 @@ import type {
   EquipmentSlot,
   InventorySnapshot,
   FriendSnapshot,
+  GuildInviteView,
+  GuildView,
   PartyInviteView,
   PartyView,
   QuestNavigationPurpose,
@@ -91,6 +93,15 @@ declare global {
       removeFriend: (playerId: string) => boolean;
       refreshFriends: () => boolean;
       friendState: () => FriendSnapshot | null;
+      guildState: () => GuildView | null;
+      guildInviteState: () => GuildInviteView | null;
+      createGuild: (name: string) => boolean;
+      inviteToGuild: (playerId: string) => boolean;
+      acceptGuildInvite: () => boolean;
+      declineGuildInvite: () => boolean;
+      leaveGuild: () => boolean;
+      kickGuildMember: (playerId: string) => boolean;
+      disbandGuild: () => boolean;
       lootDrops: () => LootView[];
       lootScreenPoint: (dropId: string) => { x: number; y: number } | null;
       lootIconFrame: (dropId: string) => number | null;

@@ -1,6 +1,16 @@
 export { AssetError, SocialError } from './errors';
 export { AssetService } from './assetService';
 export { FriendsService } from './friendsService';
+export { GuildService } from './guildService';
+export type {
+  GuildDisbandOutcome,
+  GuildInviteFacts,
+  GuildKickOutcome,
+  GuildLeaveOutcome,
+  GuildMemberRecord,
+  GuildRecord,
+  GuildServiceOptions,
+} from './guildService';
 export type {
   FriendAcceptOutcome,
   FriendProfile,

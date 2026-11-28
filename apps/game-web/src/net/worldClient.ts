@@ -15,6 +15,10 @@ import {
   friendPresenceSchema,
   friendRefreshSchema,
   friendSnapshotSchema,
+  guildInviteViewSchema,
+  guildPresenceSchema,
+  guildRefreshSchema,
+  guildSnapshotSchema,
   inventorySnapshotSchema,
   levelUpSchema,
   lootClaimedSchema,
@@ -42,6 +46,10 @@ import {
   type FriendPresence,
   type FriendRefresh,
   type FriendSnapshot,
+  type GuildInviteView,
+  type GuildPresence,
+  type GuildRefresh,
+  type GuildSnapshot,
   type InventorySnapshot,
   type LevelUp,
   type LootClaimed,
@@ -151,6 +159,10 @@ export type WorldClientCallbacks = {
   onFriendSnapshot: (snapshot: FriendSnapshot) => void;
   onFriendPresence: (presence: FriendPresence) => void;
   onFriendRefresh: (refresh: FriendRefresh) => void;
+  onGuildSnapshot: (snapshot: GuildSnapshot) => void;
+  onGuildInvite: (invite: GuildInviteView) => void;
+  onGuildPresence: (presence: GuildPresence) => void;
+  onGuildRefresh: (refresh: GuildRefresh) => void;
   onAssetResult: (result: AssetResult) => void;
   onProgress: (progress: CharacterProgress) => void;
   onLevelUp: (levelUp: LevelUp) => void;
@@ -551,6 +563,38 @@ export class WorldClient {
     return this.sendSocialCommand(CLIENT_MESSAGES.friendList, {});
   }
 
+  sendGuildCreate(name: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildCreate, { name });
+  }
+
+  sendGuildInvite(targetPlayerId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildInvite, { targetPlayerId });
+  }
+
+  sendGuildAccept(inviteId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildAccept, { inviteId });
+  }
+
+  sendGuildDecline(inviteId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildDecline, { inviteId });
+  }
+
+  sendGuildLeave(): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildLeave, {});
+  }
+
+  sendGuildKick(targetPlayerId: string): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildKick, { targetPlayerId });
+  }
+
+  sendGuildDisband(): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildDisband, {});
+  }
+
+  sendGuildList(): boolean {
+    return this.sendSocialCommand(CLIENT_MESSAGES.guildList, {});
+  }
+
   private sendSocialCommand(kind: string, fields: Record<string, string>): boolean {
     const room = this.room;
     if (room === null || this.stopped || this.transferring) {
@@ -856,6 +900,42 @@ export class WorldClient {
         const parsed = friendRefreshSchema.safeParse(payload);
         if (parsed.success) {
           this.options.callbacks.onFriendRefresh(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.guildSnapshot, (payload: unknown) => {
+        const parsed = guildSnapshotSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onGuildSnapshot(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.guildInvite, (payload: unknown) => {
+        const parsed = guildInviteViewSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onGuildInvite(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.guildPresence, (payload: unknown) => {
+        const parsed = guildPresenceSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onGuildPresence(parsed.data);
+        }
+      }),
+    );
+
+    this.unsubscribers.push(
+      room.onMessage(SERVER_MESSAGES.guildRefresh, (payload: unknown) => {
+        const parsed = guildRefreshSchema.safeParse(payload);
+        if (parsed.success) {
+          this.options.callbacks.onGuildRefresh(parsed.data);
         }
       }),
     );

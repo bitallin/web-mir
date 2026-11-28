@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 
-import type { Database } from '../client';
+import type { Database, DbExecutor } from '../client';
 import {
   characters,
   characterSessions,
@@ -118,7 +118,7 @@ export async function findCharacterForAccount(
 }
 
 export async function findCharacterById(
-  db: Database,
+  db: DbExecutor,
   characterId: string,
 ): Promise<Character | undefined> {
   const [character] = await db

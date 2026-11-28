@@ -6,6 +6,9 @@ import type {
   ChatMessage,
   FriendPresence,
   FriendSnapshot,
+  GuildInviteView,
+  GuildPresence,
+  GuildView,
   CombatEvent,
   CombatProfile,
   CombatTargetChanged,
@@ -103,6 +106,10 @@ export type SessionState = {
   partyInvite: PartyInviteView | null;
   /** Server-owned friend list with merged online presence (ADR-045). */
   friends: FriendSnapshot | null;
+  /** Server-owned guild roster with merged online presence (ADR-048). */
+  guild: GuildView | null;
+  /** An unanswered guild invitation addressed to the local player. */
+  guildInvite: GuildInviteView | null;
   levelUpNotice: LevelUp | null;
   /** Transient toasts; each removes itself after a few seconds (TD-CLI-02). */
   notices: SessionNotice[];
@@ -175,6 +182,8 @@ function initialState(character: CharacterView): SessionState {
     party: null,
     partyInvite: null,
     friends: null,
+    guild: null,
+    guildInvite: null,
     levelUpNotice: null,
     notices: [],
     autoAttack: null,
@@ -380,7 +389,10 @@ class WorldSession {
   private party: PartyView | null = null;
   private partyInvite: PartyInviteView | null = null;
   private friends: FriendSnapshot | null = null;
+  private guild: GuildView | null = null;
+  private guildInvite: GuildInviteView | null = null;
   private partyInviteTimer: number | null = null;
+  private guildInviteTimer: number | null = null;
   private levelBannerTimer: number | null = null;
   private systemMessageSequence = 0;
   private noticeSequence = 0;
@@ -789,6 +801,31 @@ class WorldSession {
           // The server can only tell us that something changed; the snapshot
           // carries the merged presence and request state.
           this.client?.sendFriendList();
+        },
+        onGuildSnapshot: (snapshot) => {
+          this.guild = snapshot.guild;
+          if (snapshot.guild !== null) {
+            this.clearGuildInvite();
+          }
+          this.updateState((previous) => ({ ...previous, guild: snapshot.guild }));
+        },
+        onGuildInvite: (invite) => {
+          this.guildInvite = invite;
+          if (this.guildInviteTimer !== null) {
+            window.clearTimeout(this.guildInviteTimer);
+          }
+          const remaining = Math.max(0, invite.expiresAt - Date.now());
+          this.guildInviteTimer = window.setTimeout(() => {
+            this.guildInviteTimer = null;
+            this.clearGuildInvite();
+          }, remaining);
+          this.updateState((previous) => ({ ...previous, guildInvite: invite }));
+        },
+        onGuildPresence: (presence) => {
+          this.applyGuildPresence(presence);
+        },
+        onGuildRefresh: () => {
+          this.client?.sendGuildList();
         },
         onAssetResult: (result) => {
           this.inventory = result.snapshot;
@@ -1335,6 +1372,106 @@ class WorldSession {
     this.updateState((previous) => ({ ...previous, partyInvite: null }));
   }
 
+  createGuild(name: string): boolean {
+    return this.sendGuildIntent(this.client?.sendGuildCreate(name) ?? false);
+  }
+
+  /** Leader-only; the server re-checks leadership, realm, capacity and target. */
+  inviteToGuild(targetPlayerId: string): boolean {
+    return this.sendGuildIntent(this.client?.sendGuildInvite(targetPlayerId) ?? false);
+  }
+
+  acceptGuildInvite(): boolean {
+    const invite = this.guildInvite;
+    if (invite === null) {
+      return false;
+    }
+    const sent = this.client?.sendGuildAccept(invite.inviteId) ?? false;
+    if (sent) {
+      this.clearGuildInvite();
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  declineGuildInvite(): boolean {
+    const invite = this.guildInvite;
+    if (invite === null) {
+      return false;
+    }
+    const sent = this.client?.sendGuildDecline(invite.inviteId) ?? false;
+    if (sent) {
+      this.clearGuildInvite();
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  leaveGuild(): boolean {
+    if (this.guild === null) {
+      return false;
+    }
+    return this.sendGuildIntent(this.client?.sendGuildLeave() ?? false);
+  }
+
+  kickGuildMember(targetPlayerId: string): boolean {
+    if (this.guild === null) {
+      return false;
+    }
+    return this.sendGuildIntent(this.client?.sendGuildKick(targetPlayerId) ?? false);
+  }
+
+  disbandGuild(): boolean {
+    if (this.guild === null) {
+      return false;
+    }
+    return this.sendGuildIntent(this.client?.sendGuildDisband() ?? false);
+  }
+
+  refreshGuild(): boolean {
+    return this.client?.sendGuildList() ?? false;
+  }
+
+  private sendGuildIntent(sent: boolean): boolean {
+    if (sent) {
+      this.commandCount += 1;
+      this.updateState((previous) => ({ ...previous, commandCount: this.commandCount }));
+    }
+    return sent;
+  }
+
+  private applyGuildPresence(presence: GuildPresence): void {
+    const current = this.guild;
+    if (current === null) {
+      return;
+    }
+    const members = current.members.map((member) =>
+      member.playerId === presence.playerId
+        ? {
+            ...member,
+            online: presence.online,
+            ...(presence.level === undefined ? {} : { level: presence.level }),
+            ...(presence.classId === undefined ? {} : { classId: presence.classId }),
+            ...(presence.alive === undefined ? {} : { alive: presence.alive }),
+          }
+        : member,
+    );
+    const next = { ...current, members };
+    this.guild = next;
+    this.updateState((previous) => ({ ...previous, guild: next }));
+  }
+
+  private clearGuildInvite(): void {
+    if (this.guildInviteTimer !== null) {
+      window.clearTimeout(this.guildInviteTimer);
+      this.guildInviteTimer = null;
+    }
+    this.guildInvite = null;
+    this.updateState((previous) => ({ ...previous, guildInvite: null }));
+  }
+
   shopBuy(merchantId: string, templateId: string, quantity: number): boolean {
     const sent = this.client?.sendShopBuy(merchantId, templateId, quantity) ?? false;
     if (sent) {
@@ -1414,6 +1551,10 @@ class WorldSession {
     if (this.partyInviteTimer !== null) {
       window.clearTimeout(this.partyInviteTimer);
       this.partyInviteTimer = null;
+    }
+    if (this.guildInviteTimer !== null) {
+      window.clearTimeout(this.guildInviteTimer);
+      this.guildInviteTimer = null;
     }
     const client = this.client;
     this.client = null;
@@ -1664,6 +1805,15 @@ class WorldSession {
       removeFriend: (playerId) => this.removeFriend(playerId),
       refreshFriends: () => this.refreshFriends(),
       friendState: () => this.friends,
+      guildState: () => this.guild,
+      guildInviteState: () => this.guildInvite,
+      createGuild: (name) => this.createGuild(name),
+      inviteToGuild: (playerId) => this.inviteToGuild(playerId),
+      acceptGuildInvite: () => this.acceptGuildInvite(),
+      declineGuildInvite: () => this.declineGuildInvite(),
+      leaveGuild: () => this.leaveGuild(),
+      kickGuildMember: (playerId) => this.kickGuildMember(playerId),
+      disbandGuild: () => this.disbandGuild(),
       partyState: () => this.party,
       partyInviteState: () => this.partyInvite,
       lootDrops: () => this.latestLoot,
@@ -1714,6 +1864,14 @@ export type WorldSessionControls = {
   declineFriendRequest: (requestId: string) => boolean;
   removeFriend: (friendPlayerId: string) => boolean;
   refreshFriends: () => boolean;
+  createGuild: (name: string) => boolean;
+  inviteToGuild: (targetPlayerId: string) => boolean;
+  acceptGuildInvite: () => boolean;
+  declineGuildInvite: () => boolean;
+  leaveGuild: () => boolean;
+  kickGuildMember: (targetPlayerId: string) => boolean;
+  disbandGuild: () => boolean;
+  refreshGuild: () => boolean;
   toggleSfx: () => void;
 };
 
@@ -1855,6 +2013,26 @@ export function useWorldSession(
     [],
   );
   const refreshFriends = useCallback(() => sessionRef.current?.refreshFriends() ?? false, []);
+  const createGuild = useCallback(
+    (name: string) => sessionRef.current?.createGuild(name) ?? false,
+    [],
+  );
+  const inviteToGuild = useCallback(
+    (targetPlayerId: string) => sessionRef.current?.inviteToGuild(targetPlayerId) ?? false,
+    [],
+  );
+  const acceptGuildInvite = useCallback(() => sessionRef.current?.acceptGuildInvite() ?? false, []);
+  const declineGuildInvite = useCallback(
+    () => sessionRef.current?.declineGuildInvite() ?? false,
+    [],
+  );
+  const leaveGuild = useCallback(() => sessionRef.current?.leaveGuild() ?? false, []);
+  const kickGuildMember = useCallback(
+    (targetPlayerId: string) => sessionRef.current?.kickGuildMember(targetPlayerId) ?? false,
+    [],
+  );
+  const disbandGuild = useCallback(() => sessionRef.current?.disbandGuild() ?? false, []);
+  const refreshGuild = useCallback(() => sessionRef.current?.refreshGuild() ?? false, []);
   const toggleSfx = useCallback(() => {
     sessionRef.current?.toggleSfx();
   }, []);
@@ -1890,6 +2068,14 @@ export function useWorldSession(
     declineFriendRequest,
     removeFriend,
     refreshFriends,
+    createGuild,
+    inviteToGuild,
+    acceptGuildInvite,
+    declineGuildInvite,
+    leaveGuild,
+    kickGuildMember,
+    disbandGuild,
+    refreshGuild,
     toggleSfx,
   };
 }

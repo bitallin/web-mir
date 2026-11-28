@@ -39,6 +39,16 @@ import {
   friendRemoveCommandSchema,
   friendRequestCommandSchema,
   friendSnapshotSchema,
+  guildAcceptCommandSchema,
+  guildCreateCommandSchema,
+  guildDeclineCommandSchema,
+  guildDisbandCommandSchema,
+  guildInviteCommandSchema,
+  guildKickCommandSchema,
+  guildLeaveCommandSchema,
+  guildListCommandSchema,
+  guildPresenceSchema,
+  guildSnapshotSchema,
   sessionKickedSchema,
   inventoryEquipSchema,
   inventorySnapshotSchema,
@@ -92,6 +102,9 @@ import {
   type Facing,
   type FriendPresence,
   type FriendSnapshot,
+  type GuildMemberView,
+  type GuildPresence,
+  type GuildView,
   type InventorySnapshot,
   type LevelUp,
   type MapMonsterSpawn,
@@ -126,6 +139,7 @@ import {
   AssetError,
   AssetService,
   FriendsService,
+  GuildService,
   SocialError,
   type DeathPenaltyInput,
   type DeathPenaltyOutcome,
@@ -187,6 +201,7 @@ import type { MapInstance } from '../world/mapRegistry';
 import { createTokenBucket } from '../world/rateLimiter';
 import { PartyService } from '../world/partyService';
 import { type PartyManagementRejection, type PartyState } from '../world/partyRegistry';
+import { GuildInviteService } from '../world/guildInvites';
 import {
   PlayerDirectory,
   type FriendServerEvent,
@@ -221,6 +236,8 @@ export type WorldMapRoomOptions = {
   adminHub?: AdminCommandHub;
   /** Process-wide party table shared by every map room (ADR-036). */
   partyService?: PartyService;
+  /** Process-wide guild invitations shared by every map room (ADR-048). */
+  guildInviteService?: GuildInviteService;
   /** Process-wide presence and cross-room router (ADR-046, TD-SRV-14). */
   playerDirectory?: PlayerDirectory;
   /** Realm this process serves; characters from other realms are rejected. */
@@ -414,6 +431,8 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
   private views!: StateViewPublisher;
   private parties!: PartyService;
   private friends!: FriendsService;
+  private guilds!: GuildService;
+  private guildInvites!: GuildInviteService;
   private directory!: PlayerDirectory;
   /** Current content snapshot's party rule; defaults keep the feature usable. */
   private partyRule: { maxMembers: number; assistSharePermille: number; assistRangeTiles: number } =
@@ -467,6 +486,9 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       options.partyService ??
       new PartyService({ directory: this.directory, maxMembers: this.partyRule.maxMembers });
     this.friends = new FriendsService(options.database);
+    this.guilds = new GuildService(options.database);
+    this.guildInvites =
+      options.guildInviteService ?? new GuildInviteService({ directory: this.directory });
     this.directory.registerRoom(this.roomId, {
       deliver: (playerId, delivery) => {
         this.deliverToPlayer(playerId, delivery);
@@ -658,6 +680,30 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     this.onMessage<unknown>(CLIENT_MESSAGES.friendList, (client, message) => {
       this.handleFriendList(client, message);
     });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildCreate, (client, message) => {
+      this.handleGuildCreate(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildInvite, (client, message) => {
+      this.handleGuildInvite(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildAccept, (client, message) => {
+      this.handleGuildInviteReply(client, message, 'accept');
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildDecline, (client, message) => {
+      this.handleGuildInviteReply(client, message, 'decline');
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildLeave, (client, message) => {
+      this.handleGuildLeave(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildKick, (client, message) => {
+      this.handleGuildKick(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildDisband, (client, message) => {
+      this.handleGuildDisband(client, message);
+    });
+    this.onMessage<unknown>(CLIENT_MESSAGES.guildList, (client, message) => {
+      this.handleGuildList(client, message);
+    });
 
     this.clock.setInterval(() => {
       void this.refreshLeases();
@@ -670,6 +716,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
     }, LOOT_DB_PURGE_INTERVAL_MS);
     this.clock.setInterval(() => {
       this.parties.expireInvites();
+      this.guildInvites.expireInvites();
       this.refreshPartyPresence();
     }, PARTY_INVITE_SWEEP_INTERVAL_MS);
     this.clock.setInterval(() => {
@@ -843,6 +890,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       questRecords: new Map(questRecords.map((record) => [record.questId, record])),
       recentParty: new Map(),
       recentFriends: new Map(),
+      recentGuild: new Map(),
       hp: combatPlayer.hp,
       mp: combatPlayer.mp,
       terminated: null,
@@ -872,6 +920,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         'failed to notify friends of presence',
       );
     });
+    void this.notifyGuildPresence(auth.characterId, true).catch((error: unknown) => {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, playerId: auth.characterId },
+        'failed to notify guildmates of presence',
+      );
+    });
 
     const affected = this.interest.add(auth.characterId, spawn.tile);
     this.views.refresh(affected);
@@ -887,11 +941,16 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.sendQuestSnapshot(session.client, session);
         this.sendPartySnapshot(session.client, session);
         void this.sendFriendSnapshot(session.client, session);
+        void this.sendGuildSnapshot(session.client, session);
         // An invitation sent while this character was between maps is still
         // open; deliver it once the new room has registered its listeners.
         const pendingInvite = this.parties.pendingInviteFor(auth.characterId);
         if (pendingInvite !== undefined) {
           this.parties.notifyInvite(pendingInvite);
+        }
+        const pendingGuildInvite = this.guildInvites.pendingInviteFor(auth.characterId);
+        if (pendingGuildInvite !== undefined) {
+          this.guildInvites.notifyInvite(pendingGuildInvite);
         }
         this.broadcastSystemNotice(
           'info',
@@ -970,6 +1029,7 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         this.sendProfile(current.client, current.playerId);
         this.sendAssetSnapshot(current.client, current);
         void this.sendFriendSnapshot(current.client, current);
+        void this.sendGuildSnapshot(current.client, current);
       }
     }, 50);
 
@@ -2313,6 +2373,19 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
 
+    if (channel === 'guild') {
+      void this.deliverGuildChat(client, session.playerId, displayName, filtered.text).catch(
+        (error: unknown) => {
+          this.options.logger.error(
+            { err: error, roomId: this.roomId, playerId: session.playerId },
+            'guild chat delivery failed',
+          );
+          this.sendRejection(client, {}, 'SERVICE_UNAVAILABLE');
+        },
+      );
+      return;
+    }
+
     let partyMemberIds: readonly string[] | null = null;
     if (channel === 'party') {
       const party = this.parties.partyOf(session.playerId);
@@ -2395,6 +2468,40 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       return;
     }
     client.send(SERVER_MESSAGES.chatMessage, message);
+    this.metrics.recordChatMessage();
+  }
+
+  /**
+   * Guild chat follows membership across maps (ADR-048). Membership is
+   * persistent, so the recipient list comes from PostgreSQL; chat is off the
+   * fixed tick and the member limit keeps the query bounded.
+   */
+  private async deliverGuildChat(
+    client: Client,
+    senderId: string,
+    senderName: string,
+    text: string,
+  ): Promise<void> {
+    const recipients = await this.guilds.chatRecipients(senderId);
+    if (recipients === null) {
+      this.sendRejection(client, {}, 'GUILD_NOT_IN_GUILD');
+      return;
+    }
+    const message = chatMessageSchema.parse({
+      messageId: randomUUID(),
+      playerId: senderId,
+      displayName: senderName,
+      message: text.slice(0, CHAT_MESSAGE_MAX_LENGTH),
+      channel: 'guild',
+      serverTime: Date.now(),
+    } satisfies ChatMessage);
+    client.send(SERVER_MESSAGES.chatMessage, message);
+    for (const recipientId of recipients) {
+      if (recipientId === senderId) {
+        continue;
+      }
+      this.directory.deliver(recipientId, { kind: 'chat', message });
+    }
     this.metrics.recordChatMessage();
   }
 
@@ -4746,6 +4853,21 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       case 'friend.event':
         this.sendFriendEvent(playerId, delivery.event);
         break;
+      case 'guild.invite':
+        session.client.send(SERVER_MESSAGES.guildInvite, delivery.invite);
+        break;
+      case 'guild.refresh':
+        void this.sendGuildSnapshot(session.client, session);
+        break;
+      case 'guild.presence':
+        session.client.send(
+          SERVER_MESSAGES.guildPresence,
+          guildPresenceSchema.parse({ ...delivery.presence, serverTime: Date.now() }),
+        );
+        break;
+      case 'notice':
+        this.sendSystemNotice(session.client, delivery.notice.kind, delivery.notice.message);
+        break;
     }
   }
 
@@ -4790,6 +4912,334 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
         kind: 'friend.event',
         event: { type: 'presence', presence },
       });
+    }
+  }
+
+  private handleGuildCreate(client: Client, raw: unknown): void {
+    const parsed = guildCreateCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.applyGuildCreate(opened, parsed.data.name).catch((error: unknown) => {
+      this.failGuildCommand(opened, error);
+    });
+  }
+
+  private handleGuildInvite(client: Client, raw: unknown): void {
+    const parsed = guildInviteCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.applyGuildInvite(opened, parsed.data.targetPlayerId).catch((error: unknown) => {
+      this.failGuildCommand(opened, error);
+    });
+  }
+
+  private handleGuildInviteReply(client: Client, raw: unknown, mode: 'accept' | 'decline'): void {
+    const parsed =
+      mode === 'accept'
+        ? guildAcceptCommandSchema.safeParse(raw)
+        : guildDeclineCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    if (mode === 'decline') {
+      try {
+        this.applyGuildDecline(opened, parsed.data.inviteId);
+      } catch (error) {
+        this.failGuildCommand(opened, error);
+      }
+      return;
+    }
+    void this.applyGuildAccept(opened, parsed.data.inviteId).catch((error: unknown) => {
+      this.failGuildCommand(opened, error);
+    });
+  }
+
+  private handleGuildLeave(client: Client, raw: unknown): void {
+    const parsed = guildLeaveCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.applyGuildLeave(opened).catch((error: unknown) => {
+      this.failGuildCommand(opened, error);
+    });
+  }
+
+  private handleGuildKick(client: Client, raw: unknown): void {
+    const parsed = guildKickCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.applyGuildKick(opened, parsed.data.targetPlayerId).catch((error: unknown) => {
+      this.failGuildCommand(opened, error);
+    });
+  }
+
+  private handleGuildDisband(client: Client, raw: unknown): void {
+    const parsed = guildDisbandCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.applyGuildDisband(opened).catch((error: unknown) => {
+      this.failGuildCommand(opened, error);
+    });
+  }
+
+  private handleGuildList(client: Client, raw: unknown): void {
+    const parsed = guildListCommandSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.sendRejection(client, extractCommandMeta(raw), 'INVALID_PAYLOAD');
+      return;
+    }
+    const opened = this.openGuildCommand(client, parsed.data);
+    if (opened === null) {
+      return;
+    }
+    void this.sendGuildSnapshot(opened.session.client, opened.session).then(() => {
+      this.completeGuildCommand();
+    });
+  }
+
+  private async applyGuildCreate(opened: OpenSocialCommand, name: string): Promise<void> {
+    const record = await this.guilds.create(opened.session.playerId, name);
+    this.sendSystemNotice(opened.session.client, 'info', `行会「${record.name}」已创建`);
+    await this.sendGuildSnapshot(opened.session.client, opened.session);
+    this.completeGuildCommand();
+  }
+
+  private async applyGuildInvite(opened: OpenSocialCommand, targetPlayerId: string): Promise<void> {
+    const facts = await this.guilds.inviteFacts(opened.session.playerId, targetPlayerId);
+    const presence = this.directory.presenceOf(targetPlayerId);
+    if (presence === undefined || !presence.connected) {
+      throw new SocialError('GUILD_TARGET_UNAVAILABLE');
+    }
+    const invite = this.guildInvites.createInvite({
+      guildId: facts.guildId,
+      guildName: facts.guildName,
+      fromPlayerId: opened.session.playerId,
+      toPlayerId: targetPlayerId,
+    });
+    this.guildInvites.notifyInvite(invite);
+    this.sendSystemNotice(opened.session.client, 'info', `已邀请 ${facts.targetName} 加入行会`);
+    this.completeGuildCommand();
+  }
+
+  private async applyGuildAccept(opened: OpenSocialCommand, inviteId: string): Promise<void> {
+    const invite = this.guildInvites.consumeInvite(inviteId, opened.session.playerId);
+    if (invite === null) {
+      throw new SocialError('GUILD_INVITE_EXPIRED');
+    }
+    const record = await this.guilds.join(invite.guildId, opened.session.playerId);
+    this.sendSystemNotice(opened.session.client, 'info', `你已加入行会「${record.name}」`);
+    this.notifyGuildRefresh(record.members.map((member) => member.playerId));
+    this.completeGuildCommand();
+  }
+
+  private applyGuildDecline(opened: OpenSocialCommand, inviteId: string): void {
+    if (!this.guildInvites.declineInvite(inviteId, opened.session.playerId)) {
+      throw new SocialError('GUILD_INVITE_EXPIRED');
+    }
+    this.sendSystemNotice(opened.session.client, 'info', '已拒绝行会邀请');
+    this.completeGuildCommand();
+  }
+
+  private async applyGuildLeave(opened: OpenSocialCommand): Promise<void> {
+    const membership = await this.guilds.membership(opened.session.playerId);
+    const outcome = await this.guilds.leave(opened.session.playerId);
+    this.notifyGuildRefresh(outcome.memberIds);
+    if (outcome.disbanded) {
+      this.sendSystemNotice(opened.session.client, 'info', '你离开了行会，行会已解散');
+    } else {
+      this.sendSystemNotice(opened.session.client, 'info', '你离开了行会');
+      if (outcome.newLeaderId !== null) {
+        this.notifyPlayerNotice(
+          outcome.newLeaderId,
+          'info',
+          `你已成为行会「${membership?.guild.name ?? '行会'}」的会长`,
+        );
+      }
+    }
+    this.completeGuildCommand();
+  }
+
+  private async applyGuildKick(opened: OpenSocialCommand, targetPlayerId: string): Promise<void> {
+    const targetName = this.directory.presenceOf(targetPlayerId)?.displayName ?? '成员';
+    const outcome = await this.guilds.kick(opened.session.playerId, targetPlayerId);
+    this.notifyGuildRefresh(outcome.memberIds);
+    this.notifyPlayerNotice(outcome.kickedId, 'warning', '你已被会长移出行会');
+    for (const memberId of outcome.memberIds) {
+      if (memberId !== outcome.kickedId && memberId !== opened.session.playerId) {
+        this.notifyPlayerNotice(memberId, 'info', `${targetName} 已被会长移出行会`);
+      }
+    }
+    this.sendSystemNotice(opened.session.client, 'info', `${targetName} 已被移出行会`);
+    this.completeGuildCommand();
+  }
+
+  private async applyGuildDisband(opened: OpenSocialCommand): Promise<void> {
+    const membership = await this.guilds.membership(opened.session.playerId);
+    const name = membership?.guild.name ?? '行会';
+    const outcome = await this.guilds.disband(opened.session.playerId);
+    this.notifyGuildRefresh(outcome.memberIds);
+    for (const memberId of outcome.memberIds) {
+      this.notifyPlayerNotice(memberId, 'info', `行会「${name}」已被会长解散`);
+    }
+    this.sendSystemNotice(opened.session.client, 'info', `行会「${name}」已解散`);
+    this.completeGuildCommand();
+  }
+
+  /** Guild commands share the friend gate but answer after their DB work commits. */
+  private openGuildCommand(
+    client: Client,
+    command: { commandId: string; clientSequence: number; protocolVersion: number },
+  ): OpenSocialCommand | null {
+    const meta = { commandId: command.commandId, clientSequence: command.clientSequence };
+    const session = this.registry.get(client.sessionId);
+    if (session === undefined) {
+      this.sendRejection(client, meta, 'INVALID_SESSION');
+      return null;
+    }
+    const gate = this.guard.check(session, command, session.recentGuild.has(command.commandId));
+    if (gate.kind === 'reject') {
+      this.sendRejection(client, meta, gate.code);
+      return null;
+    }
+    if (gate.kind === 'duplicate') {
+      void this.sendGuildSnapshot(client, session);
+      return null;
+    }
+    session.lastSequence = command.clientSequence;
+    this.guard.remember(session.recentGuild, command.commandId, true);
+    return { session, commandId: command.commandId, clientSequence: command.clientSequence };
+  }
+
+  private failGuildCommand(opened: OpenSocialCommand, error: unknown): void {
+    opened.session.recentGuild.delete(opened.commandId);
+    const meta = { commandId: opened.commandId, clientSequence: opened.clientSequence };
+    if (error instanceof SocialError) {
+      this.sendRejection(opened.session.client, meta, error.code, { message: error.message });
+      return;
+    }
+    this.options.logger.error(
+      { err: error, roomId: this.roomId, commandId: opened.commandId },
+      'guild command failed',
+    );
+    this.sendRejection(opened.session.client, meta, 'SERVICE_UNAVAILABLE');
+  }
+
+  private completeGuildCommand(): void {
+    this.metrics.recordAcceptedCommand();
+  }
+
+  /** Best-effort: a send or validation failure never rolls back a committed change. */
+  private async sendGuildSnapshot(client: Client, session: SessionRecord): Promise<void> {
+    try {
+      const record = await this.guilds.view(session.playerId);
+      if (record === null) {
+        client.send(
+          SERVER_MESSAGES.guildSnapshot,
+          guildSnapshotSchema.parse({ guild: null, serverTime: Date.now() }),
+        );
+        return;
+      }
+      const members: GuildMemberView[] = record.members.map((member) => {
+        const presence = this.directory.presenceOf(member.playerId);
+        return {
+          ...member,
+          classId: presence?.classId ?? member.classId,
+          level: presence?.level ?? member.level,
+          online: presence?.connected ?? false,
+          alive: presence?.alive ?? true,
+        };
+      });
+      const guild: GuildView = {
+        guildId: record.guildId,
+        name: record.name,
+        leaderId: record.leaderId,
+        memberLimit: record.memberLimit,
+        members,
+      };
+      const parsed = guildSnapshotSchema.safeParse({ guild, serverTime: Date.now() });
+      if (!parsed.success) {
+        this.options.logger.error(
+          { roomId: this.roomId, issues: parsed.error.issues.length },
+          'guild snapshot failed validation',
+        );
+        return;
+      }
+      client.send(SERVER_MESSAGES.guildSnapshot, parsed.data);
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, roomId: this.roomId, playerId: session.playerId },
+        'guild snapshot failed',
+      );
+    }
+  }
+
+  private notifyGuildRefresh(playerIds: readonly string[]): void {
+    this.directory.deliverMany(playerIds, { kind: 'guild.refresh' });
+  }
+
+  private notifyPlayerNotice(
+    playerId: string,
+    kind: 'info' | 'warning' | 'error',
+    message: string,
+  ): void {
+    this.directory.deliver(playerId, { kind: 'notice', notice: { kind, message } });
+  }
+
+  /**
+   * Notifies online guildmates when a character enters or leaves the world. A
+   * map transfer keeps the player online and deliberately sends nothing; the
+   * destination room refreshes presence.
+   */
+  private async notifyGuildPresence(characterId: string, online: boolean): Promise<void> {
+    const guildmateIds = await this.guilds.guildmateIds(characterId);
+    if (guildmateIds.length === 0) {
+      return;
+    }
+    const player = this.combat.getPlayer(characterId);
+    const presence: GuildPresence = {
+      playerId: characterId,
+      online,
+      ...(online && player !== undefined
+        ? { level: player.level, classId: player.classId, alive: player.alive }
+        : {}),
+      serverTime: Date.now(),
+    };
+    for (const guildmateId of guildmateIds) {
+      this.directory.deliver(guildmateId, { kind: 'guild.presence', presence });
     }
   }
 
@@ -5118,6 +5568,12 @@ export class WorldMapRoom extends Room<{ state: WorldStateInstance }> {
       // for players who never joined a party.
       this.parties.leave(session.playerId);
       this.directory.removePlayer(session.playerId);
+      void this.notifyGuildPresence(session.playerId, false).catch((error: unknown) => {
+        this.options.logger.error(
+          { err: error, roomId: this.roomId, playerId: session.playerId },
+          'failed to notify guildmates of departure',
+        );
+      });
       if (formerParty !== undefined) {
         for (const memberId of formerParty.memberIds) {
           if (memberId === session.playerId) {

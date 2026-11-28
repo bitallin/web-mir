@@ -85,6 +85,13 @@
       "when": 1795848834691,
       "tag": "0011_flawless_amazoness",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795866818640,
+      "tag": "0012_smart_starbolt",
+      "breakpoints": true
     }
   ]
 }

@@ -98,6 +98,23 @@ export {
 } from './friendships';
 export type { CanonicalPair, CharacterProfile } from './friendships';
 
+export {
+  countGuildMembers,
+  deleteGuildById,
+  deleteGuildMember,
+  findGuildById,
+  findGuildByNormalizedName,
+  findGuildMembership,
+  findOldestGuildMemberId,
+  insertGuild,
+  insertGuildMember,
+  listGuildMemberIds,
+  listGuildMembers,
+  lockGuildById,
+  updateGuildMemberRole,
+} from './guilds';
+export type { CharacterGuild, GuildMemberProfile, InsertGuildInput } from './guilds';
+
 export { findRealmByCode, findRealmById, listActiveRealms } from './realms';
 
 export {
