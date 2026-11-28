@@ -272,6 +272,10 @@ async function main(): Promise<void> {
       room.onMessage('inventory.snapshot', () => undefined);
       room.onMessage('system.notice', () => undefined);
       room.onMessage('shop.catalog', () => undefined);
+      // Friend state is pushed on join and on changes (ADR-045).
+      room.onMessage('friend.snapshot', () => undefined);
+      room.onMessage('friend.presence', () => undefined);
+      room.onMessage('friend.refresh', () => undefined);
     }
 
     const startedAt = Date.now();

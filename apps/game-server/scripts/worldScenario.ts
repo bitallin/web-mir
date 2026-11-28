@@ -431,6 +431,9 @@ async function main(): Promise<void> {
       'quest.update',
       'party.snapshot',
       'party.invite',
+      'friend.snapshot',
+      'friend.presence',
+      'friend.refresh',
     ]) {
       room.onMessage(type, () => undefined);
     }
